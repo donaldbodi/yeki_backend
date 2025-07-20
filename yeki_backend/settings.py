@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    'rest_framework',
     'yeki'
 ]
 
@@ -70,6 +71,8 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "yeki_backend.wsgi.application"
+
+AUTH_USER_MODEL = 'yeki.CustomUser'
 
 
 # Database
