@@ -1,3 +1,5 @@
 from django.contrib import admin
 
-# Register your models here.
+from yeki_backend.yeki.models import *
+
+admin.site.register(CustomUser)

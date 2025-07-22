@@ -1,4 +1,5 @@
 {% load static %}
+<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
@@ -6,172 +7,171 @@
   <title>Yéki – Appli E‑Learning</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"/>
-  <link rel="stylesheet" href="{% static 'css/style.css' %}">
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet"/>
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      scroll-behavior: smooth;
+    }
+    .yeki-navbar {
+      background-color: #03224c;
+      padding: 1rem 0;
+    }
+    .btn-orange {
+      background-color: #ff5722;
+      color: white;
+      border: none;
+    }
+    .btn-orange:hover {
+      background-color: #e14a18;
+      color: white;
+    }
+    .btn-white {
+      background-color: white;
+      color: #03224c;
+    }
+    .btn-white:hover {
+      background-color: #e2e2e2;
+    }
+    .floating {
+      animation: float 3s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    .shadow-rounded {
+      background: white;
+      border-radius: 1rem;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+      padding: 1.5rem;
+    }
+    .nav-btns a {
+      margin-left: 15px;
+    }
+    .text-orange {
+      color: #ff5722;
+    }
+    .bg-teal {
+      background-color: #007c91;
+    }
+    .text-teal {
+      color: #007c91;
+    }
+  </style>
 </head>
-<body data-bs-spy="scroll" data-bs-target="#navbar" data-bs-offset="70">
 
-  <!-- NAVBAR FIXED -->
-  <header>
-  <nav class="navbar navbar-expand-lg navbar-light yeki-navbar fixed-top">
+<body data-bs-spy="scroll" data-bs-target="#navbar" data-bs-offset="70">
+<!-- NAVBAR -->
+<header>
+  <nav class="navbar navbar-expand-lg navbar-dark yeki-navbar fixed-top">
     <div class="container">
       <a class="navbar-brand d-flex align-items-center fw-bold text-white" href="#">
-        <img src="yeki_logo4.png" alt="Yéki Logo" height="40" class="me-2" />
+        <img src="{% static 'img/yeki_logo4.png' %}" alt="Yéki Logo" height="40" class="me-2" />
+        Yéki
       </a>
       <button class="navbar-toggler text-white" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-        <ul class="navbar-nav gap-4">
+        <ul class="navbar-nav gap-4 me-3">
           <li class="nav-item"><a class="nav-link active text-white" href="#hero">Accueil</a></li>
           <li class="nav-item"><a class="nav-link text-white" href="#features">Fonctionnalités</a></li>
           <li class="nav-item"><a class="nav-link text-white" href="#download">Télécharger</a></li>
           <li class="nav-item"><a class="nav-link text-white" href="#subscribe">S’abonner</a></li>
         </ul>
+        <div class="nav-btns d-flex">
+          <a href="{% url 'login' %}" class="btn btn-outline-light">Se connecter</a>
+          <a href="{% url 'register' %}" class="btn btn-orange">S’inscrire</a>
+        </div>
       </div>
     </div>
   </nav>
 </header>
 
-
-
-  <!-- HERO AVEC IMAGE -->
-<section id="hero" class="hero-section d-flex align-items-center text-white">
-  <div class="container">
-    <div class="row align-items-center">
-      
-      <!-- TEXTE GAUCHE -->
-      <div class="col-lg-6 text-center text-lg-start animate-up">
-        <h1 class="display-4 fw-bold mb-3">
-          Apprends, Progresse et <br><span class="text-orange">Réussis avec Yéki</span>
-        </h1>
-        <p class="lead mb-4">La meilleure application pour préparer tes concours, examens et devoirs.</p>
-        <div class="d-flex justify-content-center justify-content-lg-start gap-3">
-          <a href="#download" class="btn btn-lg btn-orange shadow">📥 Télécharger maintenant</a>
-          <a href="#features" class="btn btn-outline-light btn-lg">Découvrir</a>
-        </div>
-      </div>
-
-      <!-- IMAGE DROITE -->
-      <div class="col-lg-6 text-center animate-up delay-1">
-        <img src="yeki_hero.png" class="img-fluid floating" alt="Illustration Yéki">
-      </div>
-    </div>
+<!-- HERO SECTION -->
+<section id="hero" class="vh-100 d-flex align-items-center bg-light pt-5">
+  <div class="container text-center mt-5 pt-5">
+    <h1 class="display-4 fw-bold text-teal">Apprends Autrement avec <span class="text-orange">Yéki</span></h1>
+    <p class="lead mb-4">Une plateforme moderne pour progresser, évaluer et poser des questions en un clic.</p>
+    <a href="#download" class="btn btn-orange btn-lg">Commencer</a>
+    <img src="{% static 'img/yeki_hero.svg' %}" alt="Yéki Hero" class="img-fluid mt-4 floating" width="500"/>
   </div>
 </section>
 
-
-  <!-- FONCTIONNALITÉS -->
-  <section id="features" class="py-5">
-    <div class="container text-center">
-      <h2 class="fw-bold mb-5">Fonctionnalités clés</h2>
-      <div class="row g-4">
-        <div class="col-md-4 animate-up">
-          <div class="card feature-card h-100 p-4 shadow-sm">
-            <i class="fa fa-user-check fa-3x text-teal mb-3"></i>
-            <h5 class="fw-bold">Suivi personnalisé</h5>
-            <p>Un parcours adapté à tes forces, défis et objectifs pédagogiques.</p>
-          </div>
-        </div>
-        <div class="col-md-4 animate-up delay-1">
-          <div class="card feature-card h-100 p-4 shadow-sm">
-            <i class="fa fa-mobile-screen-button fa-3x text-teal mb-3"></i>
-            <h5 class="fw-bold">Accessible partout</h5>
-            <p>Accède à tes cours à tout moment, sur tous tes appareils.</p>
-          </div>
-        </div>
-        <div class="col-md-4 animate-up delay-2">
-          <div class="card feature-card h-100 p-4 shadow-sm">
-            <i class="fa fa-robot fa-3x text-teal mb-3"></i>
-            <h5 class="fw-bold">Intelligence & automatisation</h5>
-            <p>Corrections instantanées, analyses intelligentes, et recommandations.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CAPTURES D'ÉCRAN -->
-  <section id="screens" class="bg-light py-5">
-    <div class="container text-center">
-      <h2 class="fw-bold mb-5">Aperçu de l'app</h2>
-      <div class="row justify-content-center g-4">
-        <div class="col-lg-3 col-md-4 animate-fade"><img src="assets/app1.png" class="img-fluid rounded shadow" alt="App screenshot"/></div>
-        <div class="col-lg-3 col-md-4 animate-fade delay-1"><img src="assets/app2.png" class="img-fluid rounded shadow" alt="App screenshot"/></div>
-        <div class="col-lg-3 col-md-4 animate-fade delay-2"><img src="assets/app3.png" class="img-fluid rounded shadow" alt="App screenshot"/></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- DOWNLOAD SECTION -->
-  <section id="download" class="py-5 text-center bg-teal text-white">
-    <div class="container">
-      <h2 class="fw-bold mb-4">Télécharge Yéki dès maintenant</h2>
-      <p class="mb-4">Disponible sur Google Play et App Store</p>
-      <div class="d-flex justify-content-center gap-3">
-        <a href="#" class="btn btn-white btn-lg download-btn"><i class="fa fa-google-play fa-lg me-2"></i>Google Play</a>
-        <a href="#" class="btn btn-white btn-lg download-btn"><i class="fa fa-apple fa-lg me-2"></i>App Store</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- TÉMOIGNAGES -->
-  <section id="avis" class="py-5">
-    <div class="container text-center">
-      <h2 class="fw-bold mb-4">Ce qu'ils disent</h2>
-      <div class="row gy-4">
-        <div class="col-md-4 animate-fade"><blockquote class="blockquote p-4 shadow-rounded"><p>“Yéki m’a sauvé pour mon concours !”</p><footer>👩‍🎓 Aïssatou</footer></blockquote></div>
-        <div class="col-md-4 animate-fade delay-1"><blockquote class="blockquote p-4 shadow-rounded"><p>“Interface fluide, suivi top.”</p><footer>📚 Jean</footer></blockquote></div>
-        <div class="col-md-4 animate-fade delay-2"><blockquote class="blockquote p-4 shadow-rounded"><p>“Des résultats visibles en 2 semaines.”</p><footer>👨‍🏫 Mme. Yam</footer></blockquote></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CONTACT -->
-  <section id="contact" class="py-5 bg-orange text-white text-center">
-    <div class="container">
-      <h2 class="fw-bold mb-3">Contactez-nous</h2>
-      <p>Besoin d'aide ? Une question ?</p>
-      <a href="mailto:contact@yeki.app" class="btn btn-white btn-lg"><i class="fa fa-envelope me-2"></i>contact@yeki.app</a>
-    </div>
-  </section>
-
-  <section id="subscribe" class="py-5 bg-light">
+<!-- FEATURES SECTION -->
+<section id="features" class="py-5 bg-white">
   <div class="container">
-    <div class="row justify-content-center text-center">
-      <div class="col-lg-8">
-        <h2 class="fw-bold text-teal mb-3">📬 Restez informé !</h2>
-        <p class="mb-4">Recevez nos mises à jour, ressources et actualités exclusives directement dans votre boîte mail.</p>
-        <form id="subscriptionForm" class="d-flex flex-column flex-md-row gap-3 justify-content-center">
-          <input type="email" class="form-control form-control-lg" placeholder="Votre adresse email" required>
-          <button type="submit" class="btn btn-orange btn-lg">S’abonner</button>
-        </form>
-        <div id="subscribeSuccess" class="mt-3 text-success fw-bold d-none">
-          ✅ Merci de vous être abonné !
+    <h2 class="text-center fw-bold mb-5 text-teal">Fonctionnalités de Yéki</h2>
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="shadow-rounded text-center h-100">
+          <i class="fas fa-check-circle fa-3x text-orange mb-3"></i>
+          <h5>Soumettre des Devoirs</h5>
+          <p>Chaque élève peut répondre à des exercices corrigés automatiquement ou manuellement.</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="shadow-rounded text-center h-100">
+          <i class="fas fa-comments fa-3x text-orange mb-3"></i>
+          <h5>Poser des Questions</h5>
+          <p>Les élèves peuvent poser des questions (texte ou audio) après correction d’un devoir.</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="shadow-rounded text-center h-100">
+          <i class="fas fa-chart-line fa-3x text-orange mb-3"></i>
+          <h5>Suivi de Progression</h5>
+          <p>Des statistiques précises pour les enseignants, élèves, parents et administrateurs.</p>
         </div>
       </div>
     </div>
   </div>
 </section>
 
+<!-- DOWNLOAD SECTION -->
+<section id="download" class="py-5 bg-light">
+  <div class="container text-center">
+    <h2 class="fw-bold text-teal mb-4">Téléchargez l'application</h2>
+    <p>Disponible sur Android très bientôt</p>
+    <a href="#" class="btn btn-orange btn-lg mt-2 disabled">Play Store</a>
+  </div>
+</section>
 
-  <!-- FOOTER -->
-  <footer class="text-center py-4 text-muted bg-white">
-    <small>&copy; 2025 Yéki. Tous droits réservés.</small>
-  </footer>
+<!-- SUBSCRIPTION SECTION -->
+<section id="subscribe" class="py-5 bg-white">
+  <div class="container text-center">
+    <h2 class="fw-bold text-teal mb-4">Recevez les nouveautés de Yéki</h2>
+    <form id="subscriptionForm" class="row justify-content-center">
+      <div class="col-md-6">
+        <input type="email" class="form-control mb-3" placeholder="Votre adresse email" required>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-orange">S’abonner</button>
+      </div>
+    </form>
+    <div id="subscribeSuccess" class="alert alert-success mt-3 d-none" role="alert">
+      Merci pour votre abonnement !
+    </div>
+  </div>
+</section>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="script.js"></script>
-  <script>
-  $('#subscriptionForm').on('submit', function (e) {
+<!-- FOOTER -->
+<footer class="text-center bg-dark text-white py-4">
+  <p class="mb-0">© 2025 Yéki. Tous droits réservés.</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  const form = document.getElementById('subscriptionForm');
+  const success = document.getElementById('subscribeSuccess');
+  form.addEventListener('submit', function (e) {
     e.preventDefault();
-    // Simuler l'envoi
-    $('#subscribeSuccess').removeClass('d-none');
-    $(this).trigger("reset");
-    setTimeout(() => $('#subscribeSuccess').addClass('d-none'), 5000);
+    success.classList.remove('d-none');
+    form.reset();
+    setTimeout(() => success.classList.add('d-none'), 5000);
   });
 </script>
-
 </body>
 </html>
