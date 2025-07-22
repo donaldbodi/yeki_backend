@@ -4,20 +4,34 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
+
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, validators=[validate_password])
+    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     class Meta:
         model = CustomUser
-        fields = ('id', 'username', 'email', 'password', 'role')
+        fields = [
+            'username', 'email', 'password', 'name',
+            'user_type', 'cursus', 'sub_cursus', 'niveau', 'filiere', 'licence'
+        ]
 
     def create(self, validated_data):
-        user = CustomUser.objects.create_user(
+        user = CustomUser.objects.create(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password'],
-            role=validated_data.get('role', 'apprenant')
+            name=validated_data['name'],
+            user_type=validated_data['user_type'],
+            cursus=validated_data.get('cursus'),
+            sub_cursus=validated_data.get('sub_cursus'),
+            niveau=validated_data.get('niveau'),
+            filiere=validated_data.get('filiere'),
+            licence=validated_data.get('licence'),
         )
+        user.set_password(validated_data['password'])
+        if user.user_type == 'apprenant':
+            user.is_active = True
+        user.save()
         return user
+
 
 
 class LoginSerializer(serializers.Serializer):

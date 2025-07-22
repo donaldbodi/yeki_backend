@@ -3,15 +3,29 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+
 class CustomUser(AbstractUser):
-    ROLE_CHOICES = (
+    USER_TYPES = (
         ('apprenant', 'Apprenant'),
         ('enseignant', 'Enseignant'),
         ('enseignant_principal', 'Enseignant Principal'),
+        ('enseignant_admin', 'Enseignant Administrateur'),
         ('admin', 'Administrateur'),
     )
-    role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='apprenant')
+    user_type = models.CharField(max_length=20, choices=USER_TYPES, default='apprenant')
+    name = models.CharField(max_length=100)
+    
+    # Apprenant fields
+    cursus = models.CharField(max_length=100, null=True, blank=True)
+    sub_cursus = models.CharField(max_length=100, null=True, blank=True)
+    niveau = models.CharField(max_length=100, null=True, blank=True)
+    filiere = models.CharField(max_length=100, null=True, blank=True)
+    licence = models.CharField(max_length=100, null=True, blank=True)
 
+    # Retirer l’identifiant (comme demandé)
+    is_active = models.BooleanField(default=False)
+    
     def __str__(self):
-        return f"{self.username} ({self.role})"
+        return f"{self.username} ({self.user_type})"
+
 
