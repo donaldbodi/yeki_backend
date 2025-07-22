@@ -17,10 +17,10 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
+from yeki.views import landing
 
 urlpatterns = [
-    path('', include('landing.urls')), 
+    path('', landing, name='landing'),
     path('admin/', admin.site.urls),
     path('api/', include('yeki.urls')),  # <-- ici
 ]
-

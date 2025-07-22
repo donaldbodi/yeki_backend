@@ -10,6 +10,9 @@ from rest_framework.authtoken.models import Token
 
 from .serializers import RegisterSerializer, LoginSerializer
 
+def landing(request):
+    return render(request, 'landing-page.html')
+
 class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
