@@ -71,11 +71,15 @@ blockquote:hover { background: #f9f9f9; }
 }
 
 .yeki-navbar {
-  background: rgba(0, 128, 128, 0.9); /* Teal transparent */
+  background: white; /* Teal transparent */
   backdrop-filter: blur(10px);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   transition: all 0.3s ease-in-out;
 }
+
+.yeki-navbar .nav-link, .yeki-navbar .navbar-toggler{
+  color: #404040;
+} 
 
 .navbar-brand {
   font-size: 22px;
