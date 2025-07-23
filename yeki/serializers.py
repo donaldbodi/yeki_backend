@@ -28,11 +28,11 @@ class RegisterSerializer(serializers.ModelSerializer):
             email=validated_data['email'],
             name=validated_data['name'],
             user_type=validated_data['user_type'],
-            cursus=validated_data.get('cursus'),
-            sub_cursus=validated_data.get('sub_cursus'),
-            niveau=validated_data.get('niveau'),
-            filiere=validated_data.get('filiere'),
-            licence=validated_data.get('licence'),
+            cursus=validated_data['cursus'],
+            sub_cursus=validated_data['sub_cursus'],
+            niveau=validated_data['niveau'],
+            filiere=validated_data['filiere'],
+            licence=validated_data['licence'],
         )
         user.set_password(validated_data['password'])
         if user.user_type == 'apprenant':
