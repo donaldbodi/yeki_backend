@@ -14,6 +14,14 @@ class RegisterSerializer(serializers.ModelSerializer):
             'user_type', 'cursus', 'sub_cursus', 'niveau', 'filiere', 'licence'
         ]
 
+        extra_kwargs = {
+            'email': {'required': True},
+            'username': {'required': True},
+            'name': {'required': True},
+            'user_type': {'required': True},
+            'password': {'required': True},
+        }
+
     def create(self, validated_data):
         user = CustomUser.objects.create(
             username=validated_data['username'],
