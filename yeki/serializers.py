@@ -59,7 +59,10 @@ class LoginSerializer(serializers.Serializer):
                 user = authenticate(username=user_obj.username, password=password)
             except User.DoesNotExist:
                 pass
-
+        elif not user:
+            raise serializers.ValidationError("Identifiants incorrects.")
+        elif not user.is_active:
+            raise serializers.ValidationError("Le compte n'est pas activé. Contactez le service client")
         if user is None:
             raise serializers.ValidationError("Identifiants invalides.")
         data['user'] = user
