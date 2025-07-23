@@ -28,6 +28,10 @@ DEBUG = False
 
 ALLOWED_HOSTS = ['yekiapp.pythonanywhere.com']
 
+CORS_ALLOWED_ORIGINS = [
+    "https://yekiapp.pythonanywhere.com",
+]
+
 
 # Application definition
 
@@ -40,6 +44,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     'rest_framework',
     'rest_framework.authtoken',
+    'corsheaders',
     'yeki'
 ]
 
@@ -51,6 +56,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    'corsheaders.middleware.CorsMiddleware',
 ]
 
 REST_FRAMEWORK = {
