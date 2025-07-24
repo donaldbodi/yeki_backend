@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CustomUser
+from .models import CustomUser, Parcours
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
@@ -67,3 +67,15 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("Identifiants invalides.")
         data['user'] = user
         return data
+
+class EnseignantSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ['id', 'name', 'user_type', 'email']
+
+class ParcoursSerializer(serializers.ModelSerializer):
+    admin = EnseignantSerializer()
+    
+    class Meta:
+        model = Parcours
+        fields = ['id', 'nom', 'admin', 'cours', 'apprenants', 'moyenne']

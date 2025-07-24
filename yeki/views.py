@@ -1,5 +1,4 @@
 from django.shortcuts import render
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -9,10 +8,13 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 
 from .serializers import RegisterSerializer, LoginSerializer
+from rest_framework.decorators import api_view
+from .models import Parcours, CustomUser
+from .serializers import ParcoursSerializer, EnseignantSerializer
+from django.db.models import Sum, Avg
 
 def landing(request):
     return render(request, 'landing-page.html')
-
 
 class RegisterView(APIView):
     def post(self, request):
@@ -25,7 +27,6 @@ class RegisterView(APIView):
                 'user': serializer.data,
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 
 class LoginView(APIView):
@@ -45,3 +46,40 @@ class LoginView(APIView):
             }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+@api_view(['GET'])
+def liste_parcours(request):
+    parcours = Parcours.objects.select_related('admin').all()
+    serializer = ParcoursSerializer(parcours, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+def liste_enseignants(request):
+    enseignants = CustomUser.objects.filter(user_type__in=['enseignant', 'enseignant_principal', 'enseignant_admin'])
+    serializer = EnseignantSerializer(enseignants, many=True)
+    return Response(serializer.data)
+
+@api_view(['PATCH'])
+def changer_admin(request, parcours_id):
+    try:
+        parcours = Parcours.objects.get(id=parcours_id)
+        id_enseignant = request.data.get("enseignant_id")
+        nouvel_admin = CustomUser.objects.get(id=id_enseignant)
+        if nouvel_admin.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin']:
+            return Response({"error": "Cet utilisateur n'est pas un enseignant valide."}, status=400)
+        parcours.admin = nouvel_admin
+        parcours.save()
+        return Response({"success": True})
+    except Exception as e:
+        return Response({"error": str(e)}, status=400)
+
+@api_view(['GET'])
+def statistiques_globales(request):
+    total_apprenants = Parcours.objects.aggregate(Sum('apprenants'))['apprenants__sum'] or 0
+    total_cours = Parcours.objects.aggregate(Sum('cours'))['cours__sum'] or 0
+    moyenne_globale = Parcours.objects.aggregate(Avg('moyenne'))['moyenne__avg'] or 0.0
+
+    return Response({
+        "total_apprenants": total_apprenants,
+        "total_cours": total_cours,
+        "moyenne_globale": round(moyenne_globale, 2)
+    })

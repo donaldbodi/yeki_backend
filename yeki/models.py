@@ -29,3 +29,22 @@ class CustomUser(AbstractUser):
         return f"{self.username} ({self.user_type})"
 
 
+class Parcours(models.Model):
+    nom = models.CharField(max_length=100)
+    admin = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={
+            'user_type__in': ['enseignant', 'enseignant_principal', 'enseignant_admin']
+        },
+        related_name='parcours_admin'
+    )
+    cours = models.IntegerField(default=0)
+    apprenants = models.IntegerField(default=0)
+    moyenne = models.FloatField(default=0.0)
+
+    def __str__(self):
+        return self.nom
+
