@@ -15,8 +15,12 @@ from rest_framework.permissions import IsAuthenticated
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_enseignant_dashboard_data(request):
-    costum = CustomUser.objects.get(user=request.user)
+    try:
+        costum = CustomUser.objects.get(id=request.user.id)
+    except CustomUser.DoesNotExist:
+        return Response({'error': 'Utilisateur introuvable'}, status=404)
 
     if costum.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']:
         return Response({'error': 'Utilisateur non autorisé'}, status=403)
