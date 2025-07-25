@@ -6,12 +6,32 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.authtoken.models import Token
-
-from .serializers import RegisterSerializer, LoginSerializer
-from rest_framework.decorators import api_view
+from .serializers import RegisterSerializer, LoginSerializer, ParcoursSerializer, UserSerializer
+from rest_framework.decorators import api_view, permission_classes
 from .models import Parcours, CustomUser
 from .serializers import ParcoursSerializer, EnseignantSerializer
 from django.db.models import Sum, Avg
+from rest_framework.permissions import IsAuthenticated
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_enseignant_dashboard_data(request):
+    user = request.user
+
+    if user.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']:
+        return Response({'error': 'Utilisateur non autorisé'}, status=403)
+
+    parcours = Parcours.objects.filter(admin=user)
+    serialized_parcours = ParcoursSerializer(parcours, many=True).data
+
+    role = user.user_type
+
+    return Response({
+        'role': role,
+        'nom': user.name,
+        'parcours': serialized_parcours,
+    })
 
 def landing(request):
     return render(request, 'landing-page.html')

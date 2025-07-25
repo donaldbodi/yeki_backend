@@ -6,6 +6,19 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+from rest_framework import serializers
+from .models import Parcours, CustomUser
+
+class ParcoursSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Parcours
+        fields = ['id', 'nom', 'cours', 'apprenants', 'moyenne']
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ['id', 'username', 'name', 'user_type']
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
