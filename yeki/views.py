@@ -16,13 +16,12 @@ from rest_framework.permissions import IsAuthenticated
 
 @api_view(['GET'])
 def get_enseignant_dashboard_data(request):
-    user = request.user
-    costum = CustomUser.objects.get(id=user.id)
+    costum = CustomUser.objects.get(user=request.user)
 
     if costum.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']:
         return Response({'error': 'Utilisateur non autorisé'}, status=403)
 
-    parcours = Parcours.objects.filter(admin=user)
+    parcours = Parcours.objects.filter(admin=costum)
     serialized_parcours = ParcoursSerializer(parcours, many=True).data
 
     role = costum.user_type
