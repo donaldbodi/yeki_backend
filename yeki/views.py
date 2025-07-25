@@ -54,7 +54,7 @@ def liste_parcours(request):
 
 @api_view(['GET'])
 def liste_enseignants(request):
-    enseignants = CustomUser.objects.filter(user_type__in=['enseignant', 'enseignant_principal', 'enseignant_admin'])
+    enseignants = CustomUser.objects.filter(user_type__in=['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin'])
     serializer = EnseignantSerializer(enseignants, many=True)
     return Response(serializer.data)
 
@@ -64,7 +64,7 @@ def changer_admin(request, parcours_id):
         parcours = Parcours.objects.get(id=parcours_id)
         id_enseignant = request.data.get("enseignant_id")
         nouvel_admin = CustomUser.objects.get(id=id_enseignant)
-        if nouvel_admin.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin']:
+        if nouvel_admin.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']:
             return Response({"error": "Cet utilisateur n'est pas un enseignant valide."}, status=400)
         parcours.admin = nouvel_admin
         parcours.save()

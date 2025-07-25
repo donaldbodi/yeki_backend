@@ -37,7 +37,7 @@ class Parcours(models.Model):
         null=True,
         blank=True,
         limit_choices_to={
-            'user_type__in': ['enseignant', 'enseignant_principal', 'enseignant_admin']
+            'user_type__in': ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']
         },
         related_name='parcours_admin'
     )
