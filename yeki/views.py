@@ -41,6 +41,7 @@ def landing(request):
     return render(request, 'landing-page.html')
 
 class RegisterView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
@@ -54,6 +55,7 @@ class RegisterView(APIView):
 
 
 class LoginView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():

@@ -69,6 +69,7 @@ MIDDLEWARE = [
         'rest_framework.permissions.IsAuthenticated',
     ],
 }'''
+#bien reflechir
 
 
 
