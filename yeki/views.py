@@ -12,10 +12,11 @@ from .models import Parcours, CustomUser
 from .serializers import ParcoursSerializer, EnseignantSerializer
 from django.db.models import Sum, Avg
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 
 
 @api_view(['GET'])
-
+@permission_classes([IsAuthenticated])
 def get_enseignant_dashboard_data(request):
     try:
         costum = CustomUser.objects.get(id=request.user.id)
@@ -40,6 +41,7 @@ def landing(request):
     return render(request, 'landing-page.html')
 
 class RegisterView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
@@ -53,6 +55,7 @@ class RegisterView(APIView):
 
 
 class LoginView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
