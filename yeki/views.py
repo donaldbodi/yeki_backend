@@ -19,7 +19,7 @@ def get_enseignant_dashboard_data(request):
     try:
         costum = CustomUser.objects.get(id=request.user.id)
     except CustomUser.DoesNotExist:
-        return Response({'error': 'Utilisateur introuvable'}, status=404)
+        return Response({'error': f'Utilisateur introuvable. costum:{costum}, user:{request.user}, id:{request.user.id}'}, status=404)
 
     if costum.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']:
         return Response({'error': 'Utilisateur non autorisé'}, status=403)
