@@ -15,6 +15,7 @@ from rest_framework.permissions import IsAuthenticated
 
 
 @api_view(['GET'])
+
 def get_enseignant_dashboard_data(request):
     try:
         costum = CustomUser.objects.get(id=request.user.id)
