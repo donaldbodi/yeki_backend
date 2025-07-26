@@ -81,14 +81,12 @@ def liste_parcours(request):
 
 @api_view(['GET'])
 def liste_enseignants(request):
-    permission_classes = [AllowAny]
     enseignants = CustomUser.objects.filter(user_type__in=['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin'])
     serializer = EnseignantSerializer(enseignants, many=True)
     return Response(serializer.data)
 
 @api_view(['PATCH'])
 def changer_admin(request, parcours_id):
-    permission_classes = [AllowAny]
     try:
         parcours = Parcours.objects.get(id=parcours_id)
         id_enseignant = request.data.get("enseignant_id")
@@ -103,7 +101,6 @@ def changer_admin(request, parcours_id):
 
 @api_view(['GET'])
 def statistiques_globales(request):
-    permission_classes = [AllowAny]
     total_apprenants = Parcours.objects.aggregate(Sum('apprenants'))['apprenants__sum'] or 0
     total_cours = Parcours.objects.aggregate(Sum('cours'))['cours__sum'] or 0
     moyenne_globale = Parcours.objects.aggregate(Avg('moyenne'))['moyenne__avg'] or 0.0
