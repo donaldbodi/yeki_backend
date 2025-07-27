@@ -74,7 +74,6 @@ class LoginView(APIView):
 
 @api_view(['GET'])
 def liste_parcours(request):
-    permission_classes = [AllowAny]
     parcours = Parcours.objects.select_related('admin').all()
     serializer = ParcoursSerializer(parcours, many=True)
     return Response(serializer.data)
