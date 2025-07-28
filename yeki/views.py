@@ -27,7 +27,7 @@ def get_enseignant_dashboard_data(request):
         return Response({'error': 'Utilisateur non autorisé'}, status=403)
 
     parcours = Parcours.objects.get(admin=costum)
-    serialized_parcours = ParcoursSerializer(parcours, many=True)
+    serialized_parcours = ParcoursSerializer(parcours, many=True).data
 
     role = costum.user_type
 
