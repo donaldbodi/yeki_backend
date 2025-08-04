@@ -1,107 +1,48 @@
-:root {
-  --teal: #357ab7;
-  --orange: #FF8C00;
-  --light-teal: #E0F7F7;
-}
-
 body {
-  font-family: 'Poppins', sans-serif;
-  scroll-behavior: smooth;
-}
-.navbar .text-teal { color: var(--teal) !important; }
-.hero-section { height: 100vh; background: linear-gradient(45deg, var(--teal), #005566); }
-.btn-teal { background: var(--teal); color: white; transition: transform .2s; }
-.btn-teal:hover { transform: translateY(-2px); }
-.btn-white { background: white; color: var(--teal); border: none; transition: transform .2s; }
-.btn-white:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,0,0,.1); }
-.scroll-down-btn { font-size: 2rem; color: white; background: rgba(255,255,255,0.2); padding: 0.5rem; border-radius: 50%; transition: background .3s; }
-.scroll-down-btn:hover { background: rgba(255,255,255,0.4); transform: scale(1.1); }
-.feature-card { border-top: 4px solid var(--teal); transition: transform .3s; }
-.feature-card:hover { transform: translateY(-8px); box-shadow: 0 8px 20px rgba(0,0,0,.1); }
-.bg-teal { background: var(--teal) !important; }
-.bg-orange { background: var(--orange) !important; }
-blockquote { background: #fff; border-left: 5px solid var(--orange); border-radius: 8px; padding: 1rem; transition: background .3s; }
-blockquote:hover { background: #f9f9f9; }
-.shadow-rounded { box-shadow: 0 4px 12px rgba(0,0,0,.05); border-radius: 12px; }
-.animate-up { opacity: 0; transform: translateY(50px); transition: all .8s ease-in-out; }
-.animate-fade { opacity: 0; transition: opacity 1s ease; }
-.animate-up.visible, .animate-fade.visible { opacity: 1; transform: translateY(0); }
-.delay-1 { transition-delay: .2s; }
-.delay-2 { transition-delay: .4s; }
-.hero-section {
-  background: linear-gradient(135deg, #008080, #005f5f);
-  min-height: 100vh;
-  padding: 80px 0;
-  overflow: hidden;
-}
-.text-orange {
-  color: #FF8C00;
-}
-.btn-orange {
-  background: #FF8C00;
-  color: white;
-  border: none;
-}
-.btn-orange:hover {
-  background: #e07600;
-  transform: translateY(-2px);
-}
-.floating {
-  animation: float 3s ease-in-out infinite;
-  max-height: 500px;
-}
-@keyframes float {
-  0% { transform: translateY(0); }
-  50% { transform: translateY(-12px); }
-  100% { transform: translateY(0); }
-}
-#subscribe {
-  background: #fdfdfd;
-}
-.btn-orange {
-  background-color: #FF8C00;
-  color: white;
-  border: none;
-}
-.btn-orange:hover {
-  background-color: #e36b00;
-}
-.text-teal {
-  color: #008080;
-}
-
-.yeki-navbar {
-  background: white; /* Teal transparent */
-  backdrop-filter: blur(10px);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-  transition: all 0.3s ease-in-out;
-}
-
-.yeki-navbar .nav-link, .yeki-navbar .navbar-toggler{
-  color: #404040;
-} 
-
-.navbar-brand {
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.navbar-toggler {
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.navbar-toggler-icon {
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='%23ffffff' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255,255,255,0.7%29' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
-}
-
-.navbar-nav .nav-link {
-  font-weight: 500;
-  font-size: 15px;
-  transition: 0.3s;
-}
-
-.navbar-nav .nav-link:hover,
-.navbar-nav .nav-link.active {
-  color: #FF8C00 !important; /* Orange Yéki */
-}
-
+      font-family: 'Poppins', sans-serif;
+    }
+    .navbar {
+      background: linear-gradient(90deg, #0a7e8c, #008080);
+    }
+    .navbar .nav-link {
+      color: white !important;
+      font-weight: 500;
+    }
+    .navbar .btn-download {
+      background: #ffff31;
+      color: #0a7e8c;
+      font-weight: bold;
+      border-radius: 25px;
+      padding: 8px 20px;
+    }
+    header {
+      background: linear-gradient(135deg, #0a7e8c, #008080);
+      color: white;
+      padding: 80px 0;
+    }
+    .hero-img {
+      animation: float 3s ease-in-out infinite;
+      max-width: 100%;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    .section-title {
+      font-weight: bold;
+      color: #0a7e8c;
+      margin-bottom: 30px;
+    }
+    .feature-icon {
+      font-size: 2.5rem;
+      color: #e40078;
+      margin-bottom: 15px;
+    }
+    .faq-section .accordion-button {
+      font-weight: 500;
+    }
+    footer {
+      background: #0a7e8c;
+      color: white;
+      padding: 30px 0;
+    }
