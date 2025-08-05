@@ -30,6 +30,13 @@ body {
   transform: translateY(-2px);
 }
 
+.logo-img {
+  height: 40px; /* Taille maximale du logo */
+  width: auto;  /* Garde les proportions */
+  display: block;
+}
+
+
 /* Hero Section */
 header {
   background: linear-gradient(135deg, #3498db, #2c3e50);
