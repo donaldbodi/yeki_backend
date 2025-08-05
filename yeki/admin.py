@@ -4,4 +4,5 @@ from .models import *
 
 admin.site.register(CustomUser)
 admin.site.register(Parcours)
+admin.site.register(AppVersion)
 

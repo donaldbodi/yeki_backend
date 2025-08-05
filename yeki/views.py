@@ -13,6 +13,18 @@ from .serializers import ParcoursSerializer, EnseignantSerializer
 from django.db.models import Sum, Avg
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import AllowAny
+from django.http import JsonResponse
+from .models import AppVersion
+
+
+def latest_version(request):
+    latest = AppVersion.objects.latest("created_at")
+    return JsonResponse({
+        "version_code": latest.version_code,
+        "version_name": latest.version_name,
+        "apk_url": latest.apk_url,
+        "changelog": latest.changelog
+    })
 
 
 @api_view(['GET'])

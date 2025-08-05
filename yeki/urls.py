@@ -3,6 +3,7 @@ from .views import RegisterView, LoginView
 from . import views
 
 urlpatterns = [
+    path("latest-version/", views.latest_version, name="latest_version"),
     path('enseignant/dashboard/', views.get_enseignant_dashboard_data, name='enseignant-dashboard-data'),
     path('parcours/', views.liste_parcours),
     path('enseignants/', views.liste_enseignants),

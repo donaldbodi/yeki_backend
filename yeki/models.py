@@ -3,6 +3,18 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+class AppVersion(models.Model):
+    version_code = models.IntegerField()  # Exemple: 3
+    version_name = models.CharField(max_length=20)  # Exemple: "1.0.3"
+    apk_url = models.URLField()  # Lien direct Google Drive ou autre
+    changelog = models.TextField(blank=True)  # Liste des nouveautés
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Version {self.version_name}"
+
+
 
 class CustomUser(AbstractUser):
     USER_TYPES = (
