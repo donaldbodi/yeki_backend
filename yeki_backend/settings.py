@@ -30,7 +30,7 @@ ALLOWED_HOSTS = ['yekiapp.pythonanywhere.com']
 
 CORS_ALLOWED_ORIGINS = [
     "https://yekiapp.pythonanywhere.com",
-    "53619" #lien de production'"53619"
+    "63185" #lien de production'"53619"
     "*"
 ]
 
