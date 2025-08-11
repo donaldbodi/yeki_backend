@@ -15,7 +15,6 @@ class AppVersion(models.Model):
         return f"Version {self.version_name}"
 
 
-
 class CustomUser(AbstractUser):
     USER_TYPES = (
         ('apprenant', 'Apprenant'),
