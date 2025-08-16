@@ -4,7 +4,7 @@ from . import views
 
 urlpatterns = [
     path("latest-version/", views.latest_version, name="latest_version"),
-    path('enseignant/dashboard/', views.get_enseignant_dashboard_data, name='enseignant-dashboard-data'),
+    path('enseignant/dashboard/', views.get_dashboard_data, name='enseignant-dashboard-data'),
     path('parcours/', views.liste_parcours),
     path('enseignants/', views.liste_enseignants),
     path('parcours/<int:parcours_id>/changer-admin/', views.changer_admin),
