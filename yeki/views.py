@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, generics
 from rest_framework.authtoken.models import Token
 from .serializers import (
     RegisterSerializer, 
@@ -18,6 +18,56 @@ from django.db.models import Sum, Avg
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.http import JsonResponse
 from django.core.exceptions import PermissionDenied
+
+# 1️⃣ Liste et création des parcours (Admin général uniquement)
+class ParcoursListCreateView(generics.ListCreateAPIView):
+    queryset = Parcours.objects.all()
+    serializer_class = ParcoursSerializer
+
+    def perform_create(self, serializer):
+        # seul un admin général doit pouvoir créer un parcours
+        user = self.request.user
+        if user.user_type != "admin":
+            raise PermissionError("Seul un administrateur général peut créer un parcours.")
+        serializer.save()
+
+
+# 2️⃣ Assigner ou changer un enseignant_admin à un parcours
+class AssignAdminView(APIView):
+    def put(self, request, pk):
+        try:
+            parcours = Parcours.objects.get(pk=pk)
+            admin_id = request.data.get("admin_id")
+            admin_user = CustomUser.objects.get(pk=admin_id, user_type="enseignant_admin")
+            parcours.admin = admin_user
+            parcours.save()
+            return Response({"message": "Enseignant admin assigné avec succès."}, status=status.HTTP_200_OK)
+        except Parcours.DoesNotExist:
+            return Response({"error": "Parcours introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        except CustomUser.DoesNotExist:
+            return Response({"error": "Enseignant_admin introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+
+# 3️⃣ Statistiques d’un enseignant_admin
+class EnseignantAdminStatsView(APIView):
+    def get(self, request, pk):
+        try:
+            enseignant_admin = CustomUser.objects.get(pk=pk, user_type="enseignant_admin")
+            
+            # récupère les parcours gérés par cet enseignant_admin
+            departements = Departement.objects.filter(admin=enseignant_admin).count()
+            cours = Cours.objects.filter(departement__admin=enseignant_admin).count()
+            lecons = Lecon.objects.filter(cours__departement__admin=enseignant_admin).count()
+
+            stats = {
+                "departements": departements,
+                "cours": cours,
+                "lecons": lecons
+            }
+            return Response(stats, status=status.HTTP_200_OK)
+
+        except CustomUser.DoesNotExist:
+            return Response({"error": "Enseignant_admin introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
 
 # ✅ Fonction utilitaire pour vérifier les rôles

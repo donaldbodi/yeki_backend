@@ -145,3 +145,4 @@ class ParcoursSerializer(serializers.ModelSerializer):
     class Meta:
         model = Parcours
         fields = ['id', 'nom', 'admin', 'departements']
+
