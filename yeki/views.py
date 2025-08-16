@@ -2,21 +2,31 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
 from rest_framework.authtoken.models import Token
-from .serializers import RegisterSerializer, LoginSerializer, ParcoursSerializer, UserSerializer
+from .serializers import (
+    RegisterSerializer, 
+    LoginSerializer, 
+    ParcoursSerializer, 
+    EnseignantSerializer,
+    DepartementSerializer,
+    CoursSerializer,
+    LeconSerializer
+)
 from rest_framework.decorators import api_view, permission_classes
-from .models import Parcours, CustomUser
-from .serializers import ParcoursSerializer, EnseignantSerializer
+from .models import Parcours, CustomUser, AppVersion, Departement, Cours, Lecon
 from django.db.models import Sum, Avg
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.http import JsonResponse
-from .models import AppVersion
+from django.core.exceptions import PermissionDenied
 
 
+# ✅ Fonction utilitaire pour vérifier les rôles
+def check_role(user, allowed_roles):
+    if user.user_type not in allowed_roles:
+        raise PermissionDenied("Vous n’avez pas les permissions nécessaires.")
+
+
+# ✅ API : version la plus récente
 def latest_version(request):
     latest = AppVersion.objects.latest("created_at")
     return JsonResponse({
@@ -27,31 +37,52 @@ def latest_version(request):
     })
 
 
+# ✅ Dashboard selon rôle
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def get_enseignant_dashboard_data(request):
-    try:
-        costum = CustomUser.objects.get(id=request.user.id)
-    except CustomUser.DoesNotExist:
-        return Response({'error': 'Utilisateur introuvable.'}, status=404)
+def get_dashboard_data(request):
+    user = request.user
+    role = user.user_type
 
-    if costum.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']:
-        return Response({'error': 'Utilisateur non autorisé'}, status=403)
+    data = {"role": role, "nom": user.name}
 
-    parcours = Parcours.objects.filter(admin=costum)
-    serialized_parcours = ParcoursSerializer(parcours, many=True).data
+    if role == "admin":
+        # admin voit tous les parcours
+        parcours = Parcours.objects.select_related("admin").all()
+        data["parcours"] = ParcoursSerializer(parcours, many=True).data
 
-    role = costum.user_type
+    elif role == "enseignant_admin":
+        # enseignant admin voit uniquement ses parcours
+        parcours = Parcours.objects.filter(admin=user)
+        data["parcours"] = ParcoursSerializer(parcours, many=True).data
 
-    return Response({
-        'role': role,
-        'nom': costum.name,
-        'parcours': serialized_parcours,
-    })
+    elif role == "enseignant_cadre":
+        # ✅ utilise le serializer
+        departements = Departement.objects.filter(enseignant_cadre=user)
+        data["departements"] = DepartementSerializer(departements, many=True).data
 
+    elif role == "enseignant_principal":
+        # ✅ utilise le serializer
+        cours = Cours.objects.filter(enseignant_principal=user)
+        data["cours"] = CoursSerializer(cours, many=True).data
+
+    elif role == "enseignant":
+        # enseignant secondaire : les cours où il a été ajouté (ManyToMany cours_secondaires)
+        cours = user.cours_secondaires.all()
+        data["cours"] = CoursSerializer(cours, many=True).data
+
+    else:
+        return Response({'error': 'Rôle non géré ici.'}, status=403)
+
+    return Response(data)
+
+
+# ✅ Landing page
 def landing(request):
     return render(request, 'landing-page.html')
 
+
+# ✅ Inscription
 class RegisterView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
@@ -66,6 +97,7 @@ class RegisterView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+# ✅ Connexion
 class LoginView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
@@ -84,32 +116,48 @@ class LoginView(APIView):
             }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+# ✅ Liste des parcours
 @api_view(['GET'])
 def liste_parcours(request):
     parcours = Parcours.objects.select_related('admin').all()
     serializer = ParcoursSerializer(parcours, many=True)
     return Response(serializer.data)
 
+
+# ✅ Liste des enseignants
 @api_view(['GET'])
 def liste_enseignants(request):
-    enseignants = CustomUser.objects.filter(user_type__in=['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin'])
+    enseignants = CustomUser.objects.filter(
+        user_type__in=['enseignant', 'enseignant_principal', 'enseignant_admin', 'enseignant_cadre', 'admin']
+    )
     serializer = EnseignantSerializer(enseignants, many=True)
     return Response(serializer.data)
 
+
+# ✅ Changer l’admin d’un parcours (uniquement par l’admin général)
 @api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
 def changer_admin(request, parcours_id):
+    user = request.user
+    check_role(user, ["admin"])  # sécurité : seul un admin peut faire ça
+
     try:
         parcours = Parcours.objects.get(id=parcours_id)
         id_enseignant = request.data.get("enseignant_id")
         nouvel_admin = CustomUser.objects.get(id=id_enseignant)
-        if nouvel_admin.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_admin', 'admin']:
-            return Response({"error": "Cet utilisateur n'est pas un enseignant valide."}, status=400)
+
+        if nouvel_admin.user_type != "enseignant_admin":
+            return Response({"error": "Le nouvel utilisateur doit être un enseignant_admin."}, status=400)
+
         parcours.admin = nouvel_admin
         parcours.save()
         return Response({"success": True})
     except Exception as e:
         return Response({"error": str(e)}, status=400)
 
+
+# ✅ Statistiques globales
 @api_view(['GET'])
 def statistiques_globales(request):
     total_apprenants = Parcours.objects.aggregate(Sum('apprenants'))['apprenants__sum'] or 0

@@ -1,32 +1,30 @@
 from rest_framework import serializers
-from .models import CustomUser, Parcours
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
-from django.contrib.auth import authenticate
-from django.contrib.auth import get_user_model
+from .models import CustomUser, Parcours, Departement, Cours, Lecon
 
 User = get_user_model()
 
-from rest_framework import serializers
-from .models import Parcours, CustomUser
-
-class ParcoursSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Parcours
-        fields = ['id', 'nom', 'cours', 'apprenants', 'moyenne']
-
+# =======================
+# USER SERIALIZER
+# =======================
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ['id', 'username', 'name', 'user_type']
+        fields = ['id', 'username', 'name', 'email', 'user_type']
 
 
+# =======================
+# REGISTER SERIALIZER
+# =======================
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
+
     class Meta:
         model = CustomUser
         fields = [
-            'username', 'email', 'password', 'name',
-            'user_type', 'cursus', 'sub_cursus', 'niveau', 'filiere', 'licence'
+            'username', 'email', 'password', 'name', 'user_type',
+            'cursus', 'sub_cursus', 'niveau', 'filiere', 'licence'
         ]
 
         extra_kwargs = {
@@ -43,20 +41,25 @@ class RegisterSerializer(serializers.ModelSerializer):
             email=validated_data['email'],
             name=validated_data['name'],
             user_type=validated_data['user_type'],
-            cursus=validated_data['cursus'],
-            sub_cursus=validated_data['sub_cursus'],
-            niveau=validated_data['niveau'],
-            filiere=validated_data['filiere'],
-            licence=validated_data['licence'],
+            cursus=validated_data.get('cursus'),
+            sub_cursus=validated_data.get('sub_cursus'),
+            niveau=validated_data.get('niveau'),
+            filiere=validated_data.get('filiere'),
+            licence=validated_data.get('licence'),
         )
         user.set_password(validated_data['password'])
+
+        # Auto-activation si apprenant
         if user.user_type == 'apprenant':
             user.is_active = True
+
         user.save()
         return user
 
 
-
+# =======================
+# LOGIN SERIALIZER
+# =======================
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField()
     password = serializers.CharField(write_only=True)
@@ -64,31 +67,81 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, data):
         identifier = data.get('identifier')
         password = data.get('password')
+
+        # Auth via username
         user = authenticate(username=identifier, password=password)
 
+        # Auth via email
         if user is None:
             try:
                 user_obj = User.objects.get(email=identifier)
                 user = authenticate(username=user_obj.username, password=password)
             except User.DoesNotExist:
                 pass
-        elif not user:
+
+        if not user:
             raise serializers.ValidationError("Identifiants incorrects.")
-        elif not user.is_active:
-            raise serializers.ValidationError("Le compte n'est pas activé. Contactez le service client")
-        if user is None:
-            raise serializers.ValidationError("Identifiants invalides.")
+        if not user.is_active:
+            raise serializers.ValidationError("Le compte n'est pas activé. Contactez l’administration.")
+
         data['user'] = user
         return data
 
+
+# =======================
+# ENSEIGNANT SERIALIZER
+# =======================
 class EnseignantSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = ['id', 'name', 'user_type', 'email']
 
+
+# =======================
+# LEÇON SERIALIZER
+# =======================
+class LeconSerializer(serializers.ModelSerializer):
+    enseignant_principal = EnseignantSerializer(read_only=True)
+
+    class Meta:
+        model = Lecon
+        fields = ['id', 'titre', 'contenu', 'enseignant_principal', 'cours']
+
+
+# =======================
+# COURS SERIALIZER
+# =======================
+class CoursSerializer(serializers.ModelSerializer):
+    enseignant_cadre = EnseignantSerializer(read_only=True)
+    principal = EnseignantSerializer(read_only=True)
+    enseignants = EnseignantSerializer(many=True, read_only=True)
+    lecons = LeconSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Cours
+        fields = ['id', 'nom', 'enseignant_cadre', 'principal', 'enseignants', 'departement', 'lecons']
+
+
+# =======================
+# DEPARTEMENT SERIALIZER
+# =======================
+class DepartementSerializer(serializers.ModelSerializer):
+    enseignant_admin = EnseignantSerializer(read_only=True)
+    cadre = EnseignantSerializer(read_only=True)
+    cours = CoursSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Departement
+        fields = ['id', 'nom', 'enseignant_admin', 'cadre', 'parcours', 'cours']
+
+
+# =======================
+# PARCOURS SERIALIZER
+# =======================
 class ParcoursSerializer(serializers.ModelSerializer):
-    admin = EnseignantSerializer()
-    
+    admin = EnseignantSerializer(read_only=True)
+    departements = DepartementSerializer(many=True, read_only=True)
+
     class Meta:
         model = Parcours
-        fields = ['id', 'nom', 'admin', 'cours', 'apprenants', 'moyenne']
+        fields = ['id', 'nom', 'admin', 'departements']
