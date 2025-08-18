@@ -25,7 +25,7 @@ from django.db import transaction
 # --- LISTE DES ENSEIGNANTS CADRES ---
 # GET /api/enseignants_cadres/
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def liste_enseignants_cadres(request):
     qs = CustomUser.objects.filter(user_type="enseignant_cadre").order_by("name")
     data = EnseignantCadreLightSerializer(qs, many=True).data
@@ -36,7 +36,7 @@ def liste_enseignants_cadres(request):
 # --- LISTE DES DEPARTEMENTS D'UN PARCOURS ---
 # GET /api/parcours/<parcours_id>/departements/
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def departements_par_parcours(request, parcours_id):
     """
     Renvoie la liste des départements du parcours demandé.
