@@ -127,7 +127,7 @@ class CoursSerializer(serializers.ModelSerializer):
 # =======================
 
 class EnseignantCadreLightSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(source="name")  # assure-toi que CustomUser a bien .name
+    name = serializers.CharField()  # assure-toi que CustomUser a bien .name
     class Meta:
         model = CustomUser
         fields = ["id", "name"]
