@@ -125,14 +125,25 @@ class CoursSerializer(serializers.ModelSerializer):
 # =======================
 # DEPARTEMENT SERIALIZER
 # =======================
+
+class EnseignantCadreLightSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="name")  # assure-toi que CustomUser a bien .name
+    class Meta:
+        model = CustomUser
+        fields = ["id", "name"]
+
 class DepartementSerializer(serializers.ModelSerializer):
-    enseignant_admin = EnseignantSerializer(read_only=True)
-    cadre = EnseignantSerializer(read_only=True)
-    cours = CoursSerializer(many=True, read_only=True)
+    enseignant_cadre_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Departement
-        fields = ['id', 'nom', 'enseignant_admin', 'cadre', 'parcours', 'cours']
+        fields = ["id", "nom", "parcours", "enseignant_cadre", "enseignant_cadre_name"]
+
+    def get_enseignant_cadre_name(self, obj):
+        if obj.enseignant_cadre:
+            # utilise .name si dispo, sinon fallback username
+            return getattr(obj.enseignant_cadre, "name", obj.enseignant_cadre.username)
+        return None
 
 
 # =======================

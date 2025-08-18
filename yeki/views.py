@@ -10,6 +10,7 @@ from .serializers import (
     EnseignantSerializer,
     DepartementSerializer,
     CoursSerializer,
+    EnseignantCadreLightSerializer,
     LeconSerializer
 )
 from rest_framework.decorators import api_view, permission_classes
@@ -18,6 +19,132 @@ from django.db.models import Sum, Avg
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.http import JsonResponse
 from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+
+# --- LISTE DES ENSEIGNANTS CADRES ---
+# GET /api/enseignants_cadres/
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def liste_enseignants_cadres(request):
+    qs = CustomUser.objects.filter(user_type="enseignant_cadre").order_by("name")
+    data = EnseignantCadreLightSerializer(qs, many=True).data
+    # Flutter attend {id, name}
+    return Response(data, status=200)
+
+
+# --- LISTE DES DEPARTEMENTS D'UN PARCOURS ---
+# GET /api/parcours/<parcours_id>/departements/
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def departements_par_parcours(request, parcours_id):
+    """
+    Renvoie la liste des départements du parcours demandé.
+    Accessible à tout utilisateur connecté (tu peux restreindre si besoin).
+    """
+    parcours = get_object_or_404(Parcours, pk=parcours_id)
+    deps = Departement.objects.filter(parcours=parcours).select_related("enseignant_cadre")
+    data = DepartementSerializer(deps, many=True).data
+    return Response(data, status=200)
+
+
+# --- CREATION D'UN DEPARTEMENT ---
+# POST /api/departements/
+class DepartementCreateView(generics.CreateAPIView):
+    """
+    Crée un département.
+    Autorisé: admin global OU enseignant_admin du parcours indiqué.
+    Payload attendu par Flutter:
+    {
+        "nom": "...",
+        "parcours": <id>,
+        "enseignant_cadre": <id|null>
+    }
+    """
+    serializer_class = DepartementSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_target_parcours(self):
+        # utilisé par IsAdminOrParcoursAdmin
+        parcours_id = self.request.data.get("parcours")
+        if not parcours_id:
+            return None
+        return Parcours.objects.filter(pk=parcours_id).first()
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        nom = request.data.get("nom", "").strip()
+        parcours_id = request.data.get("parcours")
+        cadre_id = request.data.get("enseignant_cadre", None)
+
+        if not nom:
+            return Response({"detail": "Le champ 'nom' est requis."}, status=400)
+
+        parcours = get_object_or_404(Parcours, pk=parcours_id)
+
+        enseignant_cadre = None
+        if cadre_id:
+            enseignant_cadre = get_object_or_404(CustomUser, pk=cadre_id)
+            if enseignant_cadre.user_type != "enseignant_cadre":
+                return Response(
+                    {"detail": "L'utilisateur choisi n'est pas un enseignant_cadre."},
+                    status=400,
+                )
+
+        dep = Departement.objects.create(
+            nom=nom, parcours=parcours, enseignant_cadre=enseignant_cadre
+        )
+        data = DepartementSerializer(dep).data
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+# --- MISE A JOUR PARTIELLE D'UN DEPARTEMENT ---
+# PATCH /api/departements/<id>/
+class DepartementUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
+    """
+    Permet de patcher un département (principalement 'enseignant_cadre' ou 'nom').
+    Autorisé: admin global OU enseignant_admin du parcours du département.
+    """
+    queryset = Departement.objects.select_related("parcours", "enseignant_cadre")
+    serializer_class = DepartementSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "patch"]
+
+    def get_target_parcours(self):
+        # utilisé par IsAdminOrParcoursAdmin
+        dep = self.get_object()
+        return dep.parcours
+
+    @transaction.atomic
+    def partial_update(self, request, *args, **kwargs):
+        dep = self.get_object()
+        payload = request.data
+
+        # Changement d'enseignant_cadre
+        if "enseignant_cadre" in payload:
+            cadre_id = payload.get("enseignant_cadre")
+            if cadre_id in [None, "", "null"]:
+                dep.enseignant_cadre = None
+            else:
+                cadre = get_object_or_404(CustomUser, pk=cadre_id)
+                if cadre.user_type != "enseignant_cadre":
+                    return Response(
+                        {"detail": "L'utilisateur choisi n'est pas un enseignant_cadre."},
+                        status=400,
+                    )
+                dep.enseignant_cadre = cadre
+
+        # Changement du nom (optionnel)
+        if "nom" in payload:
+            nom = (payload.get("nom") or "").strip()
+            if not nom:
+                return Response({"detail": "Le nom ne peut pas être vide."}, status=400)
+            dep.nom = nom
+
+        dep.save()
+        return Response(DepartementSerializer(dep).data, status=200)
+
+
 
 # 1️⃣ Liste et création des parcours (Admin général uniquement)
 class ParcoursListCreateView(generics.ListCreateAPIView):
@@ -183,28 +310,6 @@ def liste_enseignants(request):
     )
     serializer = EnseignantSerializer(enseignants, many=True)
     return Response(serializer.data)
-
-
-# ✅ Changer l’admin d’un parcours (uniquement par l’admin général)
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def changer_admin(request, parcours_id):
-    user = request.user
-    check_role(user, ["admin"])  # sécurité : seul un admin peut faire ça
-
-    try:
-        parcours = Parcours.objects.get(id=parcours_id)
-        id_enseignant = request.data.get("enseignant_id")
-        nouvel_admin = CustomUser.objects.get(id=id_enseignant)
-
-        if nouvel_admin.user_type != "enseignant_admin":
-            return Response({"error": "Le nouvel utilisateur doit être un enseignant_admin."}, status=400)
-
-        parcours.admin = nouvel_admin
-        parcours.save()
-        return Response({"success": True})
-    except Exception as e:
-        return Response({"error": str(e)}, status=400)
 
 
 # ✅ Statistiques globales
