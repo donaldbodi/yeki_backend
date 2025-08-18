@@ -3,10 +3,10 @@ from .views import DepartementCreateView, DepartementUpdateView, RegisterView, L
 from . import views
 
 urlpatterns = [
-    path("api/enseignants_cadres/", liste_enseignants_cadres, name="enseignants-cadres"),
-    path("api/parcours/<int:parcours_id>/departements/", departements_par_parcours, name="departements-par-parcours"),
-    path("api/departements/", DepartementCreateView.as_view(), name="departement-create"),
-    path("api/departements/<int:pk>/", DepartementUpdateView.as_view(), name="departement-update"),
+    path("enseignants_cadres/", liste_enseignants_cadres, name="enseignants-cadres"),
+    path("parcours/<int:parcours_id>/departements/", departements_par_parcours, name="departements-par-parcours"),
+    path("departements/", DepartementCreateView.as_view(), name="departement-create"),
+    path("departements/<int:pk>/", DepartementUpdateView.as_view(), name="departement-update"),
     path('parcours/<int:pk>/assign-admin/', views.AssignAdminView.as_view(), name="assign-admin"),
     path('stats/enseignant-admin/<int:pk>/', views.EnseignantAdminStatsView.as_view(), name="enseignant-admin-stats"),
     path("latest-version/", views.latest_version, name="latest_version"),
