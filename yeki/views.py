@@ -62,7 +62,7 @@ class DepartementCreateView(generics.CreateAPIView):
     }
     """
     serializer_class = DepartementSerializer
-    permission_classes = [IsAuthenticated]
+    #permission_classes = [IsAuthenticated]
 
     def get_target_parcours(self):
         # utilisé par IsAdminOrParcoursAdmin
