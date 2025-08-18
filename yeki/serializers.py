@@ -137,7 +137,7 @@ class DepartementSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Departement
-        fields = ["id", "nom", "parcours", "enseignant_cadre", "enseignant_cadre_name"]
+        fields = ["id", "nom", "parcours", "cadre", "parcours_id"]
 
     def get_enseignant_cadre_name(self, obj):
         if obj.enseignant_cadre:
