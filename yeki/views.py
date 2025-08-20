@@ -81,7 +81,7 @@ class DepartementCreateView(generics.CreateAPIView):
             return Response({"detail": "Le champ 'nom' est requis."}, status=400)
 
         parcours = get_object_or_404(Parcours, pk=parcours_id)
-
+ 
         enseignant_cadre = None
         if cadre_id:
             enseignant_cadre = get_object_or_404(CustomUser, pk=cadre_id)
