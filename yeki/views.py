@@ -235,7 +235,7 @@ def get_dashboard_data(request):
 
     elif role == "enseignant_cadre":
         # ✅ utilise le serializer
-        departements = Departement.objects.filter(enseignant_cadre=user)
+        departements = Departement.objects.filter(cadre=user)
         data["departements"] = DepartementSerializer(departements, many=True).data
 
     elif role == "enseignant_principal":
