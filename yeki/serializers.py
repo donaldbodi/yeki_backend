@@ -139,7 +139,7 @@ class DepartementSerializer(serializers.ModelSerializer):
         model = Departement
         fields = ["id", "nom", "parcours", "cadre", "parcours_id"]
 
-    def get_enseignant_cadre_name(self, obj):
+    def get_cadre(self, obj):
         if obj.cadre:
             # utilise .name si dispo, sinon fallback username
             return getattr(obj.cadre, "name", obj.cadre.username)
