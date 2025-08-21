@@ -43,7 +43,7 @@ def departements_par_parcours(request, parcours_id):
     Accessible à tout utilisateur connecté (tu peux restreindre si besoin).
     """
     parcours = get_object_or_404(Parcours, pk=parcours_id)
-    deps = Departement.objects.filter(parcours=parcours).select_related("enseignant_cadre")
+    deps = Departement.objects.filter(parcours=parcours).select_related("cadre")
     data = DepartementSerializer(deps, many=True).data
     return Response(data, status=200)
 
