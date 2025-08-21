@@ -133,7 +133,7 @@ class EnseignantCadreLightSerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 class DepartementSerializer(serializers.ModelSerializer):
-    cadre_name = serializers.SerializerMethodField()
+    cadre = serializers.SerializerMethodField()
 
     class Meta:
         model = Departement
