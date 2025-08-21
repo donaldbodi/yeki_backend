@@ -82,17 +82,17 @@ class DepartementCreateView(generics.CreateAPIView):
 
         parcours = get_object_or_404(Parcours, pk=parcours_id)
  
-        enseignant_cadre = None
+        cadre = None
         if cadre_id:
-            enseignant_cadre = get_object_or_404(CustomUser, pk=cadre_id)
-            if enseignant_cadre.user_type != "enseignant_cadre":
+            cadre = get_object_or_404(CustomUser, pk=cadre_id)
+            if cadre.user_type != "enseignant_cadre":
                 return Response(
                     {"detail": "L'utilisateur choisi n'est pas un enseignant_cadre."},
                     status=400,
                 )
 
         dep = Departement.objects.create(
-            nom=nom, parcours=parcours, enseignant_cadre=enseignant_cadre
+            nom=nom, parcours=parcours, cadre=cadre
         )
         data = DepartementSerializer(dep).data
         return Response(data, status=status.HTTP_201_CREATED)
@@ -124,7 +124,7 @@ class DepartementUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
         if "enseignant_cadre" in payload:
             cadre_id = payload.get("enseignant_cadre")
             if cadre_id in [None, "", "null"]:
-                dep.enseignant_cadre = None
+                dep.cadre = None
             else:
                 cadre = get_object_or_404(CustomUser, pk=cadre_id)
                 if cadre.user_type != "enseignant_cadre":
@@ -132,7 +132,7 @@ class DepartementUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
                         {"detail": "L'utilisateur choisi n'est pas un enseignant_cadre."},
                         status=400,
                     )
-                dep.enseignant_cadre = cadre
+                dep.cadre = cadre
 
         # Changement du nom (optionnel)
         if "nom" in payload:
