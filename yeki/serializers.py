@@ -142,7 +142,7 @@ class DepartementSerializer(serializers.ModelSerializer):
     def get_cadre(self, obj):
         if obj.cadre:
             # utilise .name si dispo, sinon fallback username
-            return getattr(obj.cadre, obj.name, obj.cadre.username)
+            return getattr(obj.cadre, obj.nom, obj.cadre.username)
         return None
 
 
