@@ -133,16 +133,16 @@ class EnseignantCadreLightSerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 class DepartementSerializer(serializers.ModelSerializer):
-    enseignant_cadre_name = serializers.SerializerMethodField()
+    cadre_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Departement
         fields = ["id", "nom", "parcours", "cadre", "parcours_id"]
 
     def get_enseignant_cadre_name(self, obj):
-        if obj.enseignant_cadre:
+        if obj.cadre:
             # utilise .name si dispo, sinon fallback username
-            return getattr(obj.enseignant_cadre, "name", obj.enseignant_cadre.username)
+            return getattr(obj.cadre, "name", obj.cadre.username)
         return None
 
 
