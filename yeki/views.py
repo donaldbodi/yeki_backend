@@ -105,9 +105,9 @@ class DepartementUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
     Permet de patcher un département (principalement 'enseignant_cadre' ou 'nom').
     Autorisé: admin global OU enseignant_admin du parcours du département.
     """
-    queryset = Departement.objects.select_related("parcours", "enseignant_cadre")
+    queryset = Departement.objects.select_related("parcours", "cadre")
     serializer_class = DepartementSerializer
-    permission_classes = [IsAuthenticated]
+    #permission_classes = [IsAuthenticated]
     http_method_names = ["get", "patch"]
 
     def get_target_parcours(self):
