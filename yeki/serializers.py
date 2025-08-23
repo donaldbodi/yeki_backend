@@ -119,6 +119,26 @@ class CoursSerializer(serializers.ModelSerializer):
         model = Cours
         fields = ['id', 'titre', 'niveau', 'enseignant_principal', 'enseignants', 'departement', 'lecons']
 
+class CoursCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cours
+        fields = ['titre', 'niveau', 'departement', 'enseignant_principal']
+
+    def create(self, validated_data):
+        user = self.context['request'].user
+        departement = validated_data['departement']
+        titre = validated_data['titre']
+        niveau = validated_data['niveau']
+        enseignant_principal = validated_data.get('enseignant_principal', None)
+
+        return Cours.create_cours(
+            user=user,
+            departement=departement,
+            titre=titre,
+            niveau=niveau,
+            enseignant_principal=enseignant_principal
+        )
+
 
 # =======================
 # DEPARTEMENT SERIALIZER

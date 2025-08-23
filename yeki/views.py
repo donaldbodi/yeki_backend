@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.authtoken.models import Token
 from .serializers import (
+    CoursCreateSerializer,
     RegisterSerializer, 
     LoginSerializer, 
     ParcoursSerializer, 
@@ -21,6 +22,135 @@ from django.http import JsonResponse
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+
+
+class RemoveEnseignantSecondaireView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+        user = request.user
+
+        # Seul l’enseignant_principal du cours peut retirer des enseignants
+        if cours.enseignant_principal != user:
+            raise PermissionDenied("Seul l'enseignant principal peut retirer des enseignants secondaires.")
+
+        enseignant_id = request.data.get('enseignant_id')
+        if not enseignant_id:
+            return Response({"detail": "L'id de l'enseignant est requis."}, status=400)
+
+        enseignant = get_object_or_404(CustomUser, pk=enseignant_id)
+        if enseignant.user_type != 'enseignant':
+            return Response({"detail": "L'utilisateur choisi n'est pas un enseignant secondaire."}, status=400)
+
+        cours.enseignants.remove(enseignant)
+        cours.save()
+
+        return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
+
+class AddEnseignantSecondaireView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+        user = request.user
+
+        # Seul l’enseignant_principal du cours peut ajouter des enseignants
+        if cours.enseignant_principal != user:
+            raise PermissionDenied("Seul l'enseignant principal peut ajouter des enseignants secondaires.")
+
+        enseignant_id = request.data.get('enseignant_id')
+        if not enseignant_id:
+            return Response({"detail": "L'id de l'enseignant est requis."}, status=400)
+
+        enseignant = get_object_or_404(CustomUser, pk=enseignant_id)
+        if enseignant.user_type != 'enseignant':
+            return Response({"detail": "L'utilisateur choisi n'est pas un enseignant secondaire."}, status=400)
+
+        cours.enseignants.add(enseignant)
+        cours.save()
+
+        return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
+
+class CoursUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
+    queryset = Cours.objects.select_related('departement', 'enseignant_principal')
+    serializer_class = CoursSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ['get', 'patch']
+
+    @transaction.atomic
+    def patch(self, request, *args, **kwargs):
+        cours = self.get_object()
+        payload = request.data
+
+        # Vérification rôle
+        check_role(request.user, ['enseignant_cadre', 'enseignant_principal'])
+
+        # Modification du titre
+        if 'titre' in payload:
+            titre = (payload.get('titre') or "").strip()
+            if not titre:
+                return Response({"detail": "Le titre ne peut pas être vide."}, status=400)
+            cours.titre = titre
+
+        # Modification du niveau
+        if 'niveau' in payload:
+            niveau = (payload.get('niveau') or "").strip()
+            if not niveau:
+                return Response({"detail": "Le niveau ne peut pas être vide."}, status=400)
+            cours.niveau = niveau
+
+        # Changement de l'enseignant principal
+        if 'enseignant_principal' in payload:
+            principal_id = payload.get('enseignant_principal')
+            if principal_id in [None, "", "null"]:
+                cours.enseignant_principal = None
+            else:
+                principal = get_object_or_404(CustomUser, pk=principal_id)
+                if principal.user_type != 'enseignant_principal':
+                    return Response({"detail": "L'utilisateur choisi n'est pas un enseignant_principal."}, status=400)
+                cours.enseignant_principal = principal
+
+        # Changement du département
+        if 'departement' in payload:
+            dep_id = payload.get('departement')
+            departement = get_object_or_404(Departement, pk=dep_id)
+            cours.departement = departement
+
+        cours.save()
+        return Response(CoursSerializer(cours).data, status=200)
+
+class CoursCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = CoursCreateSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            cours = serializer.save()
+            return Response(CoursSerializer(cours).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+#@permission_classes([IsAuthenticated])
+def liste_cours(request):
+    user = request.user
+    if user.user_type in ['admin', 'enseignant_admin']:
+        qs = Cours.objects.all()
+    elif user.user_type == 'enseignant_cadre':
+        qs = Cours.objects.filter(departement__cadre=user)
+    elif user.user_type == 'enseignant_principal':
+        qs = Cours.objects.filter(enseignant_principal=user)
+    elif user.user_type == 'enseignant':
+        qs = user.cours_secondaires.all()
+    else:
+        return Response({'error': 'Rôle non géré'}, status=403)
+
+    serializer = CoursSerializer(qs, many=True)
+    return Response(serializer.data)
 
 # --- LISTE DES ENSEIGNANTS CADRES ---
 # GET /api/enseignants_cadres/

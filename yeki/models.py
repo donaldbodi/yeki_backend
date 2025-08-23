@@ -93,7 +93,7 @@ class Departement(models.Model):
 # --- NIVEAU 3 ---
 class Cours(models.Model):
     titre = models.CharField(max_length=200)
-    niveau = models.CharField(max_length=200)
+    niveau = models.CharField(max_length=200)   # <= déjà présent
     departement = models.ForeignKey(Departement, on_delete=models.CASCADE, related_name="cours")
     enseignant_principal = models.ForeignKey(
         CustomUser,
@@ -111,16 +111,17 @@ class Cours(models.Model):
     )
 
     def __str__(self):
-        return f"{self.titre} ({self.departement.nom})"
+        return f"{self.titre} ({self.niveau} - {self.departement.nom})"  # <= affichage amélioré
 
     # ✅ Seul un enseignant_cadre peut créer un cours
     @staticmethod
-    def create_cours(user, departement, titre, enseignant_principal):
+    def create_cours(user, departement, titre, niveau, enseignant_principal=None):
         if user.user_type != "enseignant_cadre":
             raise PermissionDenied("Seul un enseignant_cadre peut créer un cours.")
         return Cours.objects.create(
             departement=departement,
             titre=titre,
+            niveau=niveau,  # <= ajouté
             enseignant_principal=enseignant_principal
         )
 
@@ -131,7 +132,6 @@ class Cours(models.Model):
         if enseignant.user_type != "enseignant":
             raise PermissionDenied("Seuls les enseignants secondaires peuvent être ajoutés.")
         self.enseignants.add(enseignant)
-
 
 
 # --- NIVEAU 4 ---
