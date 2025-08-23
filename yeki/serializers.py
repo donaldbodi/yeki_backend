@@ -96,54 +96,44 @@ class EnseignantSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = ['id', 'name', 'user_type', 'email']
 
-
 # =======================
 # LEÇON SERIALIZER
 # =======================
 class LeconSerializer(serializers.ModelSerializer):
-    enseignant_principal = EnseignantSerializer(read_only=True)
+    created_by = EnseignantSerializer(read_only=True)
 
     class Meta:
         model = Lecon
-        fields = ['id', 'titre', 'contenu', 'enseignant_principal', 'cours']
+        fields = ['id', 'titre', 'contenu', 'created_by', 'cours', 'created_at']
 
 
 # =======================
 # COURS SERIALIZER
 # =======================
 class CoursSerializer(serializers.ModelSerializer):
-    enseignant_cadre = EnseignantSerializer(read_only=True)
-    principal = EnseignantSerializer(read_only=True)
+    enseignant_principal = EnseignantSerializer(read_only=True)
     enseignants = EnseignantSerializer(many=True, read_only=True)
     lecons = LeconSerializer(many=True, read_only=True)
 
     class Meta:
         model = Cours
-        fields = ['id', 'nom', 'enseignant_cadre', 'principal', 'enseignants', 'departement', 'lecons']
+        fields = ['id', 'titre', 'niveau', 'enseignant_principal', 'enseignants', 'departement', 'lecons']
 
 
 # =======================
 # DEPARTEMENT SERIALIZER
 # =======================
-
 class EnseignantCadreLightSerializer(serializers.ModelSerializer):
-    name = serializers.CharField()  # assure-toi que CustomUser a bien .name
     class Meta:
         model = CustomUser
         fields = ["id", "name"]
 
 class DepartementSerializer(serializers.ModelSerializer):
-    cadre = serializers.SerializerMethodField()
+    cadre = EnseignantCadreLightSerializer(read_only=True)
 
     class Meta:
         model = Departement
-        fields = ["id", "nom", "parcours", "cadre", "parcours_id"]
-
-    def get_cadre(self, obj):
-        if obj.cadre:
-            # utilise .name si dispo, sinon fallback username
-            return getattr(obj.cadre, obj.nom, obj.cadre.username)
-        return None
+        fields = ["id", "nom", "parcours", "cadre"]
 
 
 # =======================

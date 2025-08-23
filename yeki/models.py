@@ -93,6 +93,7 @@ class Departement(models.Model):
 # --- NIVEAU 3 ---
 class Cours(models.Model):
     titre = models.CharField(max_length=200)
+    niveau = models.CharField(max_length=200)
     departement = models.ForeignKey(Departement, on_delete=models.CASCADE, related_name="cours")
     enseignant_principal = models.ForeignKey(
         CustomUser,
