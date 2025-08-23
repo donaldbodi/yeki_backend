@@ -18,10 +18,6 @@ from .views import (
     statistiques_globales,
     AddEnseignantSecondaireView,
     RemoveEnseignantSecondaireView,
-    CoursListCreateView,
-    CoursDetailView,
-    LeconCreateView,
-    LeconDetailView,
 )
 from . import views
 
