@@ -150,10 +150,11 @@ class EnseignantCadreLightSerializer(serializers.ModelSerializer):
 
 class DepartementSerializer(serializers.ModelSerializer):
     cadre = EnseignantCadreLightSerializer(read_only=True)
+    cours = CoursSerializer(many=True, read_only=True)
 
     class Meta:
         model = Departement
-        fields = ["id", "nom", "parcours", "cadre"]
+        fields = ["id", "nom", "parcours", "cadre" , "cours"]
 
 
 # =======================
