@@ -95,6 +95,10 @@ class Cours(models.Model):
     titre = models.CharField(max_length=200)
     niveau = models.CharField(max_length=200)   # <= déjà présent
     departement = models.ForeignKey(Departement, on_delete=models.CASCADE, related_name="cours")
+    matiere = models.CharField(max_length=255, blank='true')
+    concours = models.CharField(max_length=255, blank='true')
+    description = models.TextField(blank=True, null=True)
+    nb_apprenants = models.PositiveIntegerField(default=0)
     enseignant_principal = models.ForeignKey(
         CustomUser,
         on_delete=models.SET_NULL,
@@ -132,6 +136,16 @@ class Cours(models.Model):
         if enseignant.user_type != "enseignant":
             raise PermissionDenied("Seuls les enseignants secondaires peuvent être ajoutés.")
         self.enseignants.add(enseignant)
+    
+    def nb_lecons(self):
+        return self.lecons.count()
+
+    def nb_enseignants(self):
+        nb = 1 if self.enseignant_principal else 0
+        return nb + self.enseignants.count()
+
+    def __str__(self):
+        return self.nom
 
 
 # --- NIVEAU 4 ---
