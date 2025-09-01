@@ -145,7 +145,7 @@ class Cours(models.Model):
         return nb + self.enseignants.count()
 
     def __str__(self):
-        return self.nom
+        return self.titre
 
 
 # --- NIVEAU 4 ---
