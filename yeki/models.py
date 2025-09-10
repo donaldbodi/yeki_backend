@@ -151,7 +151,9 @@ class Cours(models.Model):
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
-    contenu = models.TextField()
+    contenu = models.FileField(upload_to='/document')
+    video = models.FileField(upload_to='/video')
+    description = models.TextField()
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")
     created_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
