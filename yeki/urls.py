@@ -1,4 +1,7 @@
 from django.urls import path
+from django.conf import settings
+from django.conf.urls.static import static
+
 from .views import (
     CoursCreateView,
     DepartementCreateView,
@@ -62,4 +65,4 @@ urlpatterns = [
     # --- LEÇONS ---
     #path('lecons/create/', LeconCreateView.as_view(), name='lecon-create'),
     #path('lecons/<int:pk>/', LeconDetailView.as_view(), name='lecon-detail'),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

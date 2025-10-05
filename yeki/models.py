@@ -136,7 +136,7 @@ class Cours(models.Model):
         if enseignant.user_type != "enseignant":
             raise PermissionDenied("Seuls les enseignants secondaires peuvent être ajoutés.")
         self.enseignants.add(enseignant)
-    
+
     def nb_lecons(self):
         return self.lecons.count()
 
@@ -151,8 +151,8 @@ class Cours(models.Model):
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
-    contenu = models.FileField(upload_to='/document')
-    video = models.FileField(upload_to='/video')
+    contenu = models.FileField(upload_to='document', blank=True, null=True)
+    video = models.FileField(upload_to='video', blank=True, null=True)
     description = models.TextField()
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")
     created_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
@@ -163,13 +163,13 @@ class Lecon(models.Model):
 
     # ✅ Seul un enseignant_principal peut créer une leçon
     @staticmethod
-    def create_lecon(user, cours, titre, contenu):
+    def create_lecon(user, cours, titre, description):
         if user.user_type != "enseignant_principal":
             raise PermissionDenied("Seul un enseignant_principal peut créer une leçon.")
         return Lecon.objects.create(
             cours=cours,
             titre=titre,
-            contenu=contenu,
+            description=description,
             created_by=user
         )
 

@@ -49,6 +49,7 @@ class RemoveEnseignantSecondaireView(APIView):
 
         return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
 
+
 class AddEnseignantSecondaireView(APIView):
     permission_classes = [IsAuthenticated]
 
