@@ -22,5 +22,6 @@ from yeki.views import landing
 urlpatterns = [
     path('', landing, name='landing'),
     path('admin/', admin.site.urls),
+    path('ckeditor/', include('ckeditor_uploader.urls')),
     path('api/', include('yeki.urls')),  # <-- ici
 ]
