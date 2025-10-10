@@ -46,8 +46,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'yeki',
-    'ckeditor',
-    'ckeditor_uploader',
+    'django_summernote',
 ]
 
 MIDDLEWARE = [
@@ -153,17 +152,3 @@ CKEDITOR_IMAGE_BACKEND = "pillow"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-"""
-CKEDITOR_CONFIGS = {
-    'default': {
-        'toolbar': 'full',
-        'height': 400,
-        'width': '100%',
-        'extraPlugins': ','.join([
-            'codesnippet', 'youtube', 'image2', 'autogrow', 'uploadimage'
-        ]),
-        'removePlugins': 'stylesheetparser',
-        'allowedContent': True,
-    },
-}
-"""

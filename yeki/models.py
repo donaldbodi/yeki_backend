@@ -1,7 +1,7 @@
 from django.db import models
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.models import AbstractUser
-from ckeditor_uploader.fields import RichTextUploadingField
+from django_summernote.fields import SummernoteTextField
 
 
 class AppVersion(models.Model):
@@ -152,7 +152,7 @@ class Cours(models.Model):
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
-    contenu = RichTextUploadingField(blank=True, null=True)
+    contenu = SummernoteTextField()
     video = models.FileField(upload_to='video', blank=True, null=True)
     description = models.TextField()
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")
