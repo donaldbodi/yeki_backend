@@ -65,7 +65,6 @@ class Parcours(models.Model):
         return Parcours.objects.create(nom=nom, admin=admin)
 
 
-
 # --- NIVEAU 2 ---
 class Departement(models.Model):
     nom = models.CharField(max_length=100)
