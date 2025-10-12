@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'yeki',
     'tinymce',
+    'tinymce.widgets',
 ]
 
 MIDDLEWARE = [
