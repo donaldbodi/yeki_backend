@@ -22,6 +22,6 @@ from yeki.views import landing
 urlpatterns = [
     path('', landing, name='landing'),
     path('admin/', admin.site.urls),
-    path('tinymce/', include('tinymce.urls')),
+    path('ckeditor5/', include('django_ckeditor_5.urls')),
     path('api/', include('yeki.urls')),  # <-- ici
 ]

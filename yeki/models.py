@@ -1,7 +1,7 @@
 from django.db import models
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.models import AbstractUser
-from tinymce import HTMLField
+from django_ckeditor_5.fields import CKEditor5Field
 
 
 class AppVersion(models.Model):
@@ -151,7 +151,7 @@ class Cours(models.Model):
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
-    contenu = HTMLField('Content')
+    contenu = CKEditor5Field('Contenu')
     video = models.FileField(upload_to='video', blank=True, null=True)
     description = models.TextField()
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")
