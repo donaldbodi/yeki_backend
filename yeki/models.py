@@ -1,7 +1,7 @@
 from django.db import models
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.models import AbstractUser
-from django_summernote.fields import SummernoteTextField
+from tinymce.models import HTMLField
 
 
 class AppVersion(models.Model):
@@ -152,7 +152,7 @@ class Cours(models.Model):
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
-    contenu = SummernoteTextField()
+    contenu = HTMLField()
     video = models.FileField(upload_to='video', blank=True, null=True)
     description = models.TextField()
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")

@@ -46,7 +46,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'yeki',
-    'django_summernote',
+    'tinymce',
 ]
 
 MIDDLEWARE = [

@@ -22,6 +22,6 @@ from yeki.views import landing
 urlpatterns = [
     path('', landing, name='landing'),
     path('admin/', admin.site.urls),
-    path('summernote/', include('django_summernote.urls')),
+    path('tinymce/', include('tinymce.urls')),
     path('api/', include('yeki.urls')),  # <-- ici
 ]
