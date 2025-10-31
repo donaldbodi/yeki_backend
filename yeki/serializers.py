@@ -104,7 +104,7 @@ class LeconSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lecon
-        fields = ['id', 'titre', 'contenu', 'created_by', 'cours', 'created_at']
+        fields = ['id', 'titre', 'contenu_html', 'created_by', 'cours', 'created_at']
 
 
 # =======================

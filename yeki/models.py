@@ -1,7 +1,9 @@
 from django.db import models
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.models import AbstractUser
-from django_ckeditor_5.fields import CKEditor5Field
+import mammoth
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 
 class AppVersion(models.Model):
@@ -151,9 +153,10 @@ class Cours(models.Model):
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
-    contenu = CKEditor5Field('Contenu')
+    fichier = models.FileField(upload_to='lecons/')
     video = models.FileField(upload_to='video', blank=True, null=True)
     description = models.TextField()
+    contenu_html = models.TextField(blank=True, null=True)
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")
     created_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -172,4 +175,13 @@ class Lecon(models.Model):
             description=description,
             created_by=user
         )
+    
+@receiver(post_save, sender=Lecon)
+def convertir_docx_en_html(sender, instance, **kwargs):
+    if instance.fichier and instance.fichier.name.endswith(".docx"):
+        with open(instance.fichier.path, "rb") as docx_file:
+            result = mammoth.convert_to_html(docx_file)
+            html = result.value  # HTML du contenu
+            instance.contenu_html = html
+            instance.save()
 
