@@ -15,7 +15,7 @@ from .serializers import (
     LeconSerializer
 )
 from rest_framework.decorators import api_view, permission_classes
-from .models import Parcours, CustomUser, AppVersion, Departement, Cours, Lecon
+from .models import Parcours, CustomUser, Departement, Cours, Lecon
 from django.db.models import Sum, Avg
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.http import JsonResponse
@@ -333,16 +333,6 @@ def check_role(user, allowed_roles):
     if user.user_type not in allowed_roles:
         raise PermissionDenied("Vous n’avez pas les permissions nécessaires.")
 
-
-# ✅ API : version la plus récente
-def latest_version(request):
-    latest = AppVersion.objects.latest("created_at")
-    return JsonResponse({
-        "version_code": latest.version_code,
-        "version_name": latest.version_name,
-        "apk_url": latest.apk_url,
-        "changelog": latest.changelog
-    })
 
 
 # ✅ Dashboard selon rôle
