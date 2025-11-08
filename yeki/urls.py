@@ -13,7 +13,6 @@ from .views import (
     ParcoursListCreateView,
     AssignAdminView,
     EnseignantAdminStatsView,
-    latest_version,
     get_dashboard_data,
     landing,
     liste_parcours,
@@ -27,7 +26,7 @@ from . import views
 urlpatterns = [
     # --- LANDING PAGE & VERSION ---
     path("landing/", landing, name="landing"),
-    path("latest-version/", latest_version, name="latest_version"),
+    #path("latest-version/", latest_version, name="latest_version"),
 
     # --- AUTHENTIFICATION ---
     path('auth/register/', RegisterView.as_view(), name='register'),
