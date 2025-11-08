@@ -26,10 +26,10 @@ SECRET_KEY = "django-insecure-q^_-_xu=%8i54x&65v*nm6u$@c9y=avyrhyfnu!zb%)l6msm+8
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ['yekiapp.pythonanywhere.com']
+ALLOWED_HOSTS = ['yekibackend.pythonanywhere.com']
 
 CORS_ALLOWED_ORIGINS = [
-    "https://yekiapp.pythonanywhere.com",
+    "https://yekibackend.pythonanywhere.com",
     "http://localhost:61135",
 ]
 

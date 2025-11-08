@@ -26,7 +26,6 @@ from . import views
 urlpatterns = [
     # --- LANDING PAGE & VERSION ---
     path("landing/", landing, name="landing"),
-    #path("latest-version/", latest_version, name="latest_version"),
 
     # --- AUTHENTIFICATION ---
     path('auth/register/', RegisterView.as_view(), name='register'),
