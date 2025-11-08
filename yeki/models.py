@@ -15,7 +15,7 @@ class CustomUser(AbstractUser):
         ('enseignant', 'Enseignant'),
         ('apprenant', 'Apprenant'),
     )
-    user_type = models.CharField(max_length=20, choices=USER_TYPES, default='apprenant')
+    user_type = models.CharField(max_length=20, choices=USER_TYPES, default='apprenant', blank=True, null=True)
     name = models.CharField(max_length=100)
 
     # Champs optionnels pour apprenant (pas utilisés ici)
