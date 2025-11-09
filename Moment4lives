@@ -1,0 +1,947 @@
+[33mcommit 9a8f7b0bdd7b704d2c06d5a609b706121fd13e23[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Nov 8 09:04:34 2025 -0800
+
+    v-1.6.7
+
+[33mcommit c108acdfbe21d62e4749199a356184b6c8a5da2a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Nov 8 08:57:32 2025 -0800
+
+    v-1.6.6
+
+[33mcommit c04c20dfee66f5430f244335b274b1df5778a1ef[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Nov 7 18:38:34 2025 -0800
+
+    v-1.6.5
+
+[33mcommit 22b6321bf39a9f577e5f7bad00d4ede205880154[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Nov 7 18:35:26 2025 -0800
+
+    v-1.6.4
+
+[33mcommit e818c2f735b9c6247409f32fe2f7ad3d8f391eea[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Nov 7 18:33:36 2025 -0800
+
+    v-1.6.3
+
+[33mcommit 6cfa1edc15431a3221a22b016e63780fc459698e[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Oct 30 18:25:33 2025 -0700
+
+    v-1.6.2
+
+[33mcommit 519af2f08716aa86eb0d7c61a59b58d7f10428ff[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Oct 24 04:21:43 2025 -0700
+
+    v-1.6.1
+
+[33mcommit 03ccc77daf78bcec6d25e637228f01e5be105c61[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Oct 24 03:54:59 2025 -0700
+
+    v-1.6.0
+
+[33mcommit ce988ae361b6f67ac1431ba4304217c0d0268012[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 09:20:40 2025 -0700
+
+    v-1.5.9
+
+[33mcommit e643c41f5bd5410c600702f5a2fa7c7ece4c2e43[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 07:42:05 2025 -0700
+
+    v-1.5.8
+
+[33mcommit c7f0892c372dbb0a3305117681ae848e66d7b701[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 07:41:40 2025 -0700
+
+    v-1.5.7
+
+[33mcommit c2902f2bac65d440bfcd3bf44d4d6f9e888edef6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 07:37:27 2025 -0700
+
+    v-1.5.6
+
+[33mcommit 73cc1c48352e36baf204c3bf2fe8c9dfa75f83b7[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 06:31:17 2025 -0700
+
+    v-1.5.5
+
+[33mcommit 0dc9a82a5c1cb2c27d61d5a022fccad37a025f07[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 06:29:27 2025 -0700
+
+    v-1.5.4
+
+[33mcommit 54a7db4d97be343860b710f7a56baad649fde069[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 05:48:08 2025 -0700
+
+    v-1.5.3
+
+[33mcommit 6059b6ef57bf417f65a2699bda9ffd4dc46b7c38[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 12 04:47:09 2025 -0700
+
+    v-1.5.2
+
+[33mcommit 3fc23cab11f1634d9ea0d890caa6f31079a0b793[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Oct 9 20:26:29 2025 -0700
+
+    v-1.5.1
+
+[33mcommit d665cc3b51b07e28725f44a7fa9ddc8454b60fee[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Oct 9 20:09:22 2025 -0700
+
+    v-1.5.0
+
+[33mcommit a1288d75f651956be5b6f5bf1b1f52a23c211d90[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Oct 9 19:42:04 2025 -0700
+
+    v-1.4.9
+
+[33mcommit 6b06dfcda16a3c6e81dfb355c99e4161ae140bb0[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Oct 9 18:39:34 2025 -0700
+
+    v-1.4.8
+
+[33mcommit 4869c6265b26a62df50bac0cd910247916410b78[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Oct 5 13:16:51 2025 -0700
+
+    v-1.4.7
+
+[33mcommit 3063192b1f01e69a96369df500daf904ced1f75e[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Sep 10 16:54:05 2025 -0700
+
+    v-1.4.6
+
+[33mcommit ce0d32c774ad0f207d9ea728229d20ccd0b877a7[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Sep 8 17:08:36 2025 -0700
+
+    v-1.4.5
+
+[33mcommit 32dee7c714cb5b56cbaac1dbfe47133e47f95938[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Sep 8 16:43:40 2025 -0700
+
+    v-1.4.4
+
+[33mcommit c348e3f77e1aae32496393446f905d2fb95f4472[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Sep 8 16:36:26 2025 -0700
+
+    v-1.4.3
+
+[33mcommit ab92acf0503f2320af30f3721681bb58b8dad1bd[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Sep 7 20:09:14 2025 -0700
+
+    v-1.4.2
+
+[33mcommit 12600e3d351d52df144be944191bda83ce0f33d6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Sep 7 16:22:39 2025 -0700
+
+    v-1.4.1
+
+[33mcommit 2fd0057b9f4c3760258f313acd3d016e9a07c702[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 31 21:22:10 2025 -0700
+
+    v-1.4.0
+
+[33mcommit 0db7c24d72e49837ac1abd3a05edcd06e197463b[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 31 17:49:38 2025 -0700
+
+    v-1.3.9
+
+[33mcommit 1e6dabcfbf02803bfd7c6fd53375a889d9c1f785[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 31 17:40:16 2025 -0700
+
+    v-1.3.8
+
+[33mcommit 1b593b31814acf908044c85efc88e360b3eb5d68[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 31 17:05:13 2025 -0700
+
+    v-1.3.7
+
+[33mcommit a95ea277bbce405d1a3f7a2f0385f453de715875[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 30 09:48:01 2025 -0700
+
+    v-1.3.6
+
+[33mcommit 42df13461d0679bbc9ab1a99216f96b113d3709c[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Aug 26 06:06:03 2025 -0700
+
+    v-1.3.5
+
+[33mcommit 8f48bcdfba1428e418f0f8ef50168d0feacda4d3[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Aug 26 06:01:38 2025 -0700
+
+    v-1.3.4
+
+[33mcommit a6b5f170fcc061997a6974deef892a7667c7d5ef[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Aug 26 04:33:50 2025 -0700
+
+    v-1.3.3
+
+[33mcommit 34eaf7c7a9872b15bd63957aa8e26f45f870d679[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Aug 26 01:46:17 2025 -0700
+
+    v-1.3.2
+
+[33mcommit 1e59c059baea9bee622e191f774065e12537dc47[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 25 02:01:21 2025 -0700
+
+    v-1.3.1
+
+[33mcommit f2128a1d1176014ecef2426710aaeb0134b76c6a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 24 09:42:43 2025 -0700
+
+    v-1.3.0
+
+[33mcommit 4cf0406c081da72dcdcc99e57b52236de4fb5af0[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 24 08:12:54 2025 -0700
+
+    v-1.2.9
+
+[33mcommit 460b1d505ac9cce544d3c2aa4daa9f63dfbe51c5[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 23 12:02:28 2025 -0700
+
+    v-1.2.8
+
+[33mcommit 3640e52083b7e954aba3028f64f2f1d8107d9950[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 23 11:57:16 2025 -0700
+
+    v-1.2.7
+
+[33mcommit 059dfa5d8e726a64a0a07ffdc0b73beeaedbb88f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 23 09:40:15 2025 -0700
+
+    v-1.2.6
+
+[33mcommit 9650f2fedb1779c5519c3b65cf7ff9eee191a1d0[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 23 09:28:47 2025 -0700
+
+    v-1.2.5
+
+[33mcommit f5239b0a476f1517278ea1b3d70dce633ee8c7f0[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 23 09:08:19 2025 -0700
+
+    v-1.2.4
+
+[33mcommit d10e4b7466842ec58ef6521ec51e86c034de9d5b[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Aug 22 11:19:51 2025 -0700
+
+    v-1.2.3
+
+[33mcommit e37da8632adfeb54256101a3ea2c7cc966091ee4[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Aug 22 11:13:22 2025 -0700
+
+    v-1.2.2
+
+[33mcommit 1526a4be1f7e294d9483a54af24c6d01bcda92bd[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Aug 22 05:29:20 2025 -0700
+
+    v-1.2.1
+
+[33mcommit be657d08c755fcb47097979ced097b30e39f4b14[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Aug 22 01:24:03 2025 -0700
+
+    v-1.2.0
+
+[33mcommit 4b0141a99acb0e0ba1b54763c2e1f4309f76c3ff[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 13:52:43 2025 -0700
+
+    v-1.1.9
+
+[33mcommit ecbf6e8064777679d91c26bf53f53aeed89b189c[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 13:40:45 2025 -0700
+
+    v-1.1.8
+
+[33mcommit f4f71c0d24b8309b7048c8f7eefad5aa2197f66e[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 11:37:04 2025 -0700
+
+    v-1.1.7
+
+[33mcommit 1c16243c483e0706fa0e2c2bce3cb34f6a2d2569[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 11:25:49 2025 -0700
+
+    v-1.1.6
+
+[33mcommit d7b9a750b579d86f011faa23e11816535be0fc0f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 10:48:39 2025 -0700
+
+    v-1.1.5
+
+[33mcommit 11a7794995d115eefecf8aae53f4f1b5a4541a2c[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 09:34:18 2025 -0700
+
+    v-1.1.4
+
+[33mcommit 68ae0e725ecf68ceb02a3f8b11a88f43842593a4[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 06:40:39 2025 -0700
+
+    v-1.1.3
+
+[33mcommit c5f83f9f493648a573b9f4ef2fa91e0c50973114[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 06:30:01 2025 -0700
+
+    v-1.1.2
+
+[33mcommit 77a0f9cd4b65d7c2e2d55e35989e1cea10d1642e[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 04:50:50 2025 -0700
+
+    v-1.1.1
+
+[33mcommit 81397c0a153ccf47b7c3cacf4878497d3ae151eb[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 04:37:27 2025 -0700
+
+    v-1.1.0
+
+[33mcommit bf21c5da217d942f3af09a26507353a6d6cd518f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 04:28:59 2025 -0700
+
+    v-1.0.9
+
+[33mcommit c64ab224faa302f2b3322c1c4fee2d4628de9aa9[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 04:15:55 2025 -0700
+
+    v-1.0.8
+
+[33mcommit ee930e5326de8bbefb9e7547452daa560d9b6512[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 21 03:24:32 2025 -0700
+
+    v-1.0.7
+
+[33mcommit 75996b54a6e4ff4092de96c747c5c8d6161cf432[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Aug 19 21:04:19 2025 -0700
+
+    v-1.0.6
+
+[33mcommit 2188af962623a9a16cbd8dd242f2644194b0be53[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Aug 19 19:01:50 2025 -0700
+
+    v-1.0.5
+
+[33mcommit 34b14d8c6870da96da7711d9522a02c726a49a2f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 18 06:23:55 2025 -0700
+
+    v-1.0.4
+
+[33mcommit 45337327dea2e20b0151fb5e20a001645beeb673[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 18 05:54:55 2025 -0700
+
+    v-1.0.3
+
+[33mcommit 79c9fba109a161098ae4562cbf9998b9f999bd4b[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 18 05:46:31 2025 -0700
+
+    v-1.0.2
+
+[33mcommit 3d0f5646ce8afef88c1ac4e0784912a1fdd9f203[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 18 05:40:40 2025 -0700
+
+    v-1.01
+
+[33mcommit fa388f1733b3f8cbf68dab21edd45dbbea31a04a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 18 05:00:21 2025 -0700
+
+    v-1.0.0
+
+[33mcommit bde25c20be93fd8fe8be5d9babddc2f2c710c573[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 18 04:50:42 2025 -0700
+
+    v-9.9
+
+[33mcommit 2ae48908c503e65abf2d92cdd0ac6b2409e6fb03[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 18 02:55:12 2025 -0700
+
+    v-9.8
+
+[33mcommit 707840e40b9e314b776c7d162eefb5ae2f96bb1c[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 16 12:35:25 2025 -0700
+
+    v-9.7
+
+[33mcommit 7cd70ac4b2895f84da813421336cff34c8da090a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 16 10:36:12 2025 -0700
+
+    v-9.6
+
+[33mcommit 8048afe5eb47d26c5e89b46d81e07dedd43e08ef[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 16 10:17:15 2025 -0700
+
+    v-9.5
+
+[33mcommit 713494e44f984c0efb2f46fb00b8f1b78edb4516[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Aug 16 02:44:56 2025 -0700
+
+    v-9.4
+
+[33mcommit bd39e4bf1ae0f9189c60cdc2b5f76fbdfcf6bd3f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Aug 13 19:39:10 2025 -0700
+
+    v-9.3
+
+[33mcommit 65d11d85e09d472c879b0142191ad6b29fc34249[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Aug 12 06:52:00 2025 -0700
+
+    v-9.2
+
+[33mcommit 59b18b07e5babcb97e6f3beb4e81f5b9bfa886bf[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 11 06:32:04 2025 -0700
+
+    v-9.1
+
+[33mcommit 9997f8eca1de322fc4af671f37ca2af82d360738[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 11 06:30:17 2025 -0700
+
+    v-9.0
+
+[33mcommit 55328650976556406b2f0f3c49a8f30765397ba6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 10 19:10:02 2025 -0700
+
+    v-8.9
+
+[33mcommit a86c0653d14871768c4e228aff01c623c2e87f26[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 10 19:06:06 2025 -0700
+
+    v-8.8
+
+[33mcommit d4245eaa15781678ded0a1b330ea22e51d13b086[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 10 18:35:23 2025 -0700
+
+    v-8.7
+
+[33mcommit e522832916f6581d6691738d689e245704cdad1d[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 10 17:55:44 2025 -0700
+
+    v-8.6
+
+[33mcommit ba5a8288abfd8ad794b10794254419761e13da65[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Aug 8 03:02:14 2025 -0700
+
+    v-8.5
+
+[33mcommit ca292edb883ecef213840154f586cfc94cb373ac[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Aug 8 02:00:48 2025 -0700
+
+    v-8.4
+
+[33mcommit eeeef8f10531df279ce78a202b3be6a1f0a08d9f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Aug 8 01:56:44 2025 -0700
+
+    v-8.3
+
+[33mcommit e892ec42d09e8533d049854f00db31765c1a2a47[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 7 07:49:04 2025 -0700
+
+    v-8.2
+
+[33mcommit 2db298ebd2d0812cbd2aa05f5200169bd50ac36f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Aug 7 07:08:00 2025 -0700
+
+    v-8.1
+
+[33mcommit fae6d43e0005f4931faae013a7d516fa137dace2[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Aug 6 19:51:00 2025 -0700
+
+    v-8.0
+
+[33mcommit 6ed228b45a0f31733b95b500c5c4c660cbb51cca[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Aug 6 17:13:30 2025 -0700
+
+    v-7.9
+
+[33mcommit 80002014e0985e82167784fcb8df4436df95c2ef[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 4 20:19:33 2025 -0700
+
+    v-7.8
+
+[33mcommit 5e0364183cbb0304999c1e9ce90dfaccd528293a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 4 20:05:33 2025 -0700
+
+    v-7.7
+
+[33mcommit dab9a3d3634e79e6d537107f17c79c834e7f2546[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 4 18:25:38 2025 -0700
+
+    v-7.6
+
+[33mcommit a940b3689ca67996087bbbda507f343213e35185[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Aug 4 09:55:51 2025 -0700
+
+    v-7.5
+
+[33mcommit 306c71b99501ffe262c3a8c4ce96aeed11c702be[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Aug 3 21:58:08 2025 -0700
+
+    v-7.4
+
+[33mcommit 7319a827544be9b64bb10dc5f293d73f671261c7[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 28 13:30:54 2025 -0700
+
+    v-7.3
+
+[33mcommit 3e18e1b14075739ff41a8fb3eacebbe2b06e5914[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 28 12:30:06 2025 -0700
+
+    v-7.2
+
+[33mcommit 848219fb0c942850372b1e15a388993d97eb1e0e[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 28 11:57:20 2025 -0700
+
+    v-7.1
+
+[33mcommit 37923a2b8ab3895a5e2fdb0863c1ad4c68745e96[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 28 04:21:32 2025 -0700
+
+    v-7.0
+
+[33mcommit 64e260cd25647ef3e91d377c32a6ffa75a7dee15[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 28 03:43:10 2025 -0700
+
+    v-6.9
+
+[33mcommit 8d7741f534c2ef6fbefa291ce9893daaf1e6f32a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Jul 27 22:41:02 2025 -0700
+
+    v-6.8
+
+[33mcommit 8c79d9ab188e19082e2d96840432393ff1792315[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sun Jul 27 12:10:45 2025 -0700
+
+    v-6.7
+
+[33mcommit 6d2b71177b97a237292b20a1d05588a4c6d29771[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 09:44:43 2025 -0700
+
+    v-6.6
+
+[33mcommit 802f0a09f0a673b5f8e9a68497350a3ce3cbb529[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 05:26:31 2025 -0700
+
+    v-6.5
+
+[33mcommit d511629e99b470d20b23429fa6f5aec1e2f021bb[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 05:07:41 2025 -0700
+
+    v-6.4
+
+[33mcommit 8fe3d2ebe38b47b2ef087c775a6b7933d8d57c47[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 05:03:19 2025 -0700
+
+    v-6.3
+
+[33mcommit a40a2159d8c61423f24fd2162a3d27bc9b914474[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 04:57:41 2025 -0700
+
+    v-6.2
+
+[33mcommit c8b694fc09957abb428c1bc7367f5a199aed5aa2[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 03:19:20 2025 -0700
+
+    v-6.1
+
+[33mcommit a2bef025d581d798e20a0eee1beba274f3d21f86[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 03:04:29 2025 -0700
+
+    v-6.0
+
+[33mcommit 767b3b63e083db08de3a2aff4ec22ed83f61a5cb[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 02:29:05 2025 -0700
+
+    v-5.9
+
+[33mcommit dfa2efc1843d4b141f1e1f6015f5a0705755ba41[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 26 01:54:21 2025 -0700
+
+    v-5.8
+
+[33mcommit bd2005133cacdb11a7bbfab6a17f071b4fa5419f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 19:29:39 2025 -0700
+
+    v-5.7
+
+[33mcommit 6da6bb9eb2f46f38ed3695a1469dfd132130bdbb[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 19:13:19 2025 -0700
+
+    v-5.6
+
+[33mcommit 440ef1ca0306519bb9efcfa95a60d3854359f6c4[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 18:29:21 2025 -0700
+
+    v-5.5
+
+[33mcommit 05103944575ea8627c2b35baf0c24ce8e7b33584[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 18:23:11 2025 -0700
+
+    v-5.4
+
+[33mcommit 1b13c5656abc5087cc74d21cb1e5dcfc69d43981[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 12:51:52 2025 -0700
+
+    v-5.3
+
+[33mcommit a493721eccdc0ff812517792953aa9cb52f3c4c1[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 11:54:39 2025 -0700
+
+    v-5.2
+
+[33mcommit 49cda0c1509a582031c57bdf78b8a70a3ec3cfe4[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 11:07:56 2025 -0700
+
+    v-5.1
+
+[33mcommit 3b22d7db34660cf17913c5606d1e24a178428ea6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 10:49:13 2025 -0700
+
+    v-5.0
+
+[33mcommit 8cf7c9f22f11ad34479d3675b4836d97c58c2418[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 10:42:41 2025 -0700
+
+    v-4.9
+
+[33mcommit 4eb309b9410d19d079056bd56087b4360cd8e717[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 09:52:17 2025 -0700
+
+    v-4.8
+
+[33mcommit bc49271d17ceb22f114547976a96b85124f0dbbe[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 08:52:48 2025 -0700
+
+    v-4.7
+
+[33mcommit 88ef1e9b1cc45486eede830e03b2d3afcdf9cd17[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 08:49:56 2025 -0700
+
+    v-4.6
+
+[33mcommit 9b9e969d78fc696a441bc2b0f9f827ee16c06e3a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 07:33:44 2025 -0700
+
+    v-4.5
+
+[33mcommit 1185c7651cd4cf8b5d39d64ca728de9fae8dd115[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 05:03:30 2025 -0700
+
+    v-4.4
+
+[33mcommit 68ff1774c6942456c48ce0d7d7b20b2003a7759b[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 02:52:12 2025 -0700
+
+    v-4.3
+
+[33mcommit ca57de7471589f30b121b9af68bd53a04a4f89b5[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Fri Jul 25 02:45:50 2025 -0700
+
+    v-4.2
+
+[33mcommit 7f445cd0a549a4c4accccc09582b3d0c7f0b77ff[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Jul 24 14:58:30 2025 -0700
+
+    v-4.1
+
+[33mcommit 536ac11ab7bdb6e1995f93c2eda53593808ed1e3[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Jul 24 14:48:34 2025 -0700
+
+    v-4.0
+
+[33mcommit e9e5ca0275bff5278620a3851817d67f97b86fe6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Thu Jul 24 10:23:07 2025 -0700
+
+    v-3.9
+
+[33mcommit 6a869c0e99485ab92a96179c388dbd69b16707d8[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Jul 23 15:14:47 2025 -0700
+
+    v-3.8
+
+[33mcommit f64583fadaff33476ae118dd9af594e75327834c[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Jul 23 11:18:44 2025 -0700
+
+    v-3.7
+
+[33mcommit fa6cf180095858e3abc87ea232bca5ef54c0b0e0[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Jul 23 11:02:22 2025 -0700
+
+    v-3.6
+
+[33mcommit 8abb570ac78c7b4e6de6509a0f4ab3678fce815a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Jul 23 10:20:42 2025 -0700
+
+    v-3.5
+
+[33mcommit 22e632811fccbd26eb0e3b25aae13e23c7f8cd37[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Jul 23 10:06:50 2025 -0700
+
+    v-3.4
+
+[33mcommit 6f660e4101bc7973566c10f40f45ad3bb098ed4e[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Wed Jul 23 08:00:59 2025 -0700
+
+    v-3.3
+
+[33mcommit 26aa55e5bcf857dd27e7f8f1c6537937a94199b9[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 21:53:33 2025 -0700
+
+    v-3.2
+
+[33mcommit 79594da673efee09a0d4b294778aade3346b1202[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 18:10:38 2025 -0700
+
+    v-3.1
+
+[33mcommit fccd6a210a72f1e3db8ca90e8f4f838253f877e6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 17:51:59 2025 -0700
+
+    v-3.0
+
+[33mcommit 07b0cbb24903716a3108e7356e1995ffbaa6eb73[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 17:10:30 2025 -0700
+
+    v-2.9
+
+[33mcommit f39bcdcc2bc6cc80fa312f79c43a585d97812636[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 17:00:28 2025 -0700
+
+    v-2.8
+
+[33mcommit e99c9f07df4b22cf4aad8b782bb6def2529171b2[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 16:17:26 2025 -0700
+
+    v-2.7
+
+[33mcommit 460032001c1fa584ed71e32bca77b4c177a6667c[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 07:03:02 2025 -0700
+
+    v-2.6
+
+[33mcommit 4bee9471a0796407ce2a140a3fbf81d14aeb4196[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Tue Jul 22 05:13:53 2025 -0700
+
+    v-2.5
+
+[33mcommit 5f36213e5c5774e12881bf74557fd67317cfdf0f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 21:31:34 2025 -0700
+
+    v-2.4
+
+[33mcommit 1348c3a4430c93570c8a53e9bea569a133495b3e[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 21:12:48 2025 -0700
+
+    v-2.3
+
+[33mcommit 69ad73cb04d8439f1b0726f4f8b369b3a0b4d76a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 20:31:55 2025 -0700
+
+    v-2.2
+
+[33mcommit 5ab8ba6e9370dd00b7aa27a5b3f9c0bac6023227[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 20:24:17 2025 -0700
+
+    v-2.1
+
+[33mcommit 73ad7d388f70a204723d5c6d77b28e08c7cef001[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 20:22:31 2025 -0700
+
+    v-2.0
+
+[33mcommit e168a50985024201bde0e31ae676ce6d4a46023f[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 20:20:26 2025 -0700
+
+    v-1.9
+
+[33mcommit 4a53b5197797de1509c620b2646e474e436a0b6a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 20:08:13 2025 -0700
+
+    v-1.8
+
+[33mcommit 8a4e5ee11de41850ac7c36be22d734d6777154a4[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 20:00:26 2025 -0700
+
+    v-1.7
+
+[33mcommit 1a9ac752a9f2f42b98d539db4a40c9d6e93267e6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 19:54:07 2025 -0700
+
+    v-1.6
+
+[33mcommit 706aee2ce4d4afc9399788262e1c54a36797eb27[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 19:12:54 2025 -0700
+
+    v-1.5
+
+[33mcommit 6ec734134afef5737e8753579f9194b445b4945a[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Mon Jul 21 18:17:23 2025 -0700
+
+    v-1.4
+
+[33mcommit 2a7ed6469a1c60fc76d82ce3a4fe24fa9377b272[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 19 21:04:02 2025 -0700
+
+    v-1.3
+
+[33mcommit b184c1166b740ad36dd7644a20df6e90b941e3b6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 19 20:52:44 2025 -0700
+
+    v-1.2
+
+[33mcommit 174f77fe4d406154c3ec51b9732a7449f31c42c6[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 19 19:52:47 2025 -0700
+
+    v-1.0
+
+[33mcommit 9de213df15c42fa66a6f1240b2e953f06e358ca7[m
+Author: bodidonald <mdonabodi99@gmail.com>
+Date:   Sat Jul 19 18:32:23 2025 -0700
+
+    first commit
