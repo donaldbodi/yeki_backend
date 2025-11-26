@@ -1,12 +1,12 @@
 from django.db import models
 from django.core.exceptions import PermissionDenied
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import User
 import mammoth
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 
-class CustomUser(AbstractUser):
+class Profile(models.Model):
     USER_TYPES = (
         ('admin', 'Administrateur'),
         ('enseignant_admin', 'Enseignant Administrateur'),
@@ -16,8 +16,7 @@ class CustomUser(AbstractUser):
         ('apprenant', 'Apprenant'),
     )
     user_type = models.CharField(max_length=20, choices=USER_TYPES, default='apprenant', blank=True, null=True)
-    name = models.CharField(max_length=100)
-
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
     # Champs optionnels pour apprenant (pas utilisés ici)
     cursus = models.CharField(max_length=100, null=True, blank=True)
     sub_cursus = models.CharField(max_length=100, null=True, blank=True)
@@ -27,8 +26,12 @@ class CustomUser(AbstractUser):
 
     is_active = models.BooleanField(default=False)
 
+    phone = models.CharField(max_length=20, blank=True)
+    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
+    bio = models.TextField(blank=True)
+
     def __str__(self):
-        return f"{self.username} ({self.user_type})"
+        return f"{self.user.username} ({self.user_type})"
 
 
 # --- NIVEAU 1 ---
@@ -36,7 +39,7 @@ class CustomUser(AbstractUser):
 class Parcours(models.Model):
     nom = models.CharField(max_length=100)
     admin = models.ForeignKey(
-        CustomUser,
+        Profile,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -60,7 +63,7 @@ class Departement(models.Model):
     nom = models.CharField(max_length=100)
     parcours = models.ForeignKey(Parcours, on_delete=models.CASCADE, related_name="departements")
     cadre = models.ForeignKey(
-        CustomUser,
+        Profile,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -90,7 +93,7 @@ class Cours(models.Model):
     description = models.TextField(blank=True, null=True)
     nb_apprenants = models.PositiveIntegerField(default=0)
     enseignant_principal = models.ForeignKey(
-        CustomUser,
+        Profile,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -98,7 +101,7 @@ class Cours(models.Model):
         related_name='cours_principal'
     )
     enseignants = models.ManyToManyField(
-        CustomUser,
+        Profile,
         blank=True,
         limit_choices_to={'user_type': 'enseignant'},
         related_name='cours_secondaires'
@@ -146,7 +149,7 @@ class Lecon(models.Model):
     description = models.TextField()
     contenu_html = models.TextField(blank=True, null=True)
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")
-    created_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
+    created_by = models.ForeignKey(Profile, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -163,7 +166,7 @@ class Lecon(models.Model):
             description=description,
             created_by=user
         )
-    
+
 @receiver(post_save, sender=Lecon)
 def convertir_docx_en_html(sender, instance, **kwargs):
     if instance.fichier and instance.fichier.name.endswith(".docx"):
