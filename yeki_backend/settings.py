@@ -12,10 +12,6 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 import os
 from pathlib import Path
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-
-from yeki_backend.yeki.models import Profile
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
