@@ -46,7 +46,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
-    'yeki',
+    'yeki.apps.YekiConfig',
 ]
 
 MIDDLEWARE = [
