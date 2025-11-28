@@ -13,7 +13,6 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 import os
 from pathlib import Path
 from django.db.models.signals import post_save
-from django.contrib.auth.models import User
 from django.dispatch import receiver
 
 from yeki_backend.yeki.models import Profile
@@ -136,12 +135,6 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 
 USE_TZ = True
-
-
-@receiver(post_save, sender=User)
-def create_profile(sender, instance, created, **kwargs):
-    if created:
-        Profile.objects.create(user=instance)
 
 
 # Static files (CSS, JavaScript, Images)
