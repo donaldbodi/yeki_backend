@@ -6,4 +6,4 @@ class YekiConfig(AppConfig):
     name = "yeki"
 
     def ready(self):
-        return yeki.signals
+        import yeki.signals
