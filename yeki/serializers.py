@@ -10,33 +10,50 @@ User = get_user_model()
 # =======================
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Profile
+        model = User
         fields = ['id', 'user', 'user_type']
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = Profile
+        fields = [
+            'id', 'user', 'user_type', 'cursus', 'sub_cursus',
+            'niveau', 'filiere', 'licence', 'is_active', 'avatar', 'bio'
+        ]
 
 
 # =======================
 # REGISTER SERIALIZER
 # =======================
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
+class RegisterSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True)
+    email = serializers.EmailField(required=True)
+    name = serializers.CharField(required=True)
+    password = serializers.CharField(write_only=True, required=True)
 
-    class Meta:
-        model = Profile
-        fields = [
-            'username', 'email', 'name', 'password',
-            'user_type', 'cursus', 'sub_cursus', 'niveau', 'filiere', 'licence'
-        ]
-
-        extra_kwargs = {
-            'user_type': {'required': True},
-            'password': {'required': True},
-        }
+    user_type = serializers.CharField(required=True)
+    cursus = serializers.CharField(required=False)
+    sub_cursus = serializers.CharField(required=False)
+    niveau = serializers.CharField(required=False)
+    filiere = serializers.CharField(required=False)
+    licence = serializers.CharField(required=False)
 
     def create(self, validated_data):
-        user = Profile.objects.create(
+
+        # On crée d'abord le User Django
+        user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            name=validated_data['name'],
+            password=validated_data['password'],
+            first_name=validated_data['name'],
+        )
+
+        # Puis le Profile
+        profile = Profile.objects.create(
+            user=user,
             user_type=validated_data['user_type'],
             cursus=validated_data.get('cursus'),
             sub_cursus=validated_data.get('sub_cursus'),
@@ -45,14 +62,13 @@ class RegisterSerializer(serializers.ModelSerializer):
             licence=validated_data.get('licence'),
         )
 
-        user.set_password(validated_data['password'])
+        # Activation auto
+        if profile.user_type == 'apprenant':
+            profile.is_active = True
+            profile.save()
 
-        # Activation auto pour apprenant
-        if user.user_type == 'apprenant':
-            user.is_active = True
+        return profile
 
-        user.save()
-        return user
 
 
 # =======================
@@ -66,22 +82,19 @@ class LoginSerializer(serializers.Serializer):
         identifier = data.get('identifier')
         password = data.get('password')
 
-        # Auth via username
+        # login par username
         user = authenticate(username=identifier, password=password)
 
-        # Auth via email
+        # login par email
         if user is None:
             try:
                 user_obj = User.objects.get(email=identifier)
                 user = authenticate(username=user_obj.username, password=password)
             except User.DoesNotExist:
-                pass
+                raise serializers.ValidationError("Identifiants incorrects.")
 
-        if not user:
-            raise serializers.ValidationError("Identifiants incorrects.")
-
-        if not user.is_active:
-            raise serializers.ValidationError("Le compte n'est pas activé. Contactez l’administration.")
+        if not user.profile.is_active:
+            raise serializers.ValidationError("Compte non activé.")
 
         data['user'] = user
         return data
@@ -91,9 +104,11 @@ class LoginSerializer(serializers.Serializer):
 # ENSEIGNANT SERIALIZER
 # =======================
 class EnseignantSerializer(serializers.ModelSerializer):
+    user = UserSerializer()
+
     class Meta:
         model = Profile
-        fields = ['id', 'name', 'user_type', 'email']
+        fields = ['id', 'user', 'user_type']
 
 
 # =======================
