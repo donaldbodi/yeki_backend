@@ -41,6 +41,14 @@ class RegisterSerializer(serializers.Serializer):
     filiere = serializers.CharField(required=False)
     licence = serializers.CharField(required=False)
 
+    class Meta:
+        model = Profile
+        fields = [
+            'username', 'email', 'name', 'password',
+            'user_type', 'cursus', 'sub_cursus', 'niveau',
+            'filiere', 'licence'
+        ]
+
     def create(self, validated_data):
 
         # On crée d'abord le User Django
@@ -68,7 +76,6 @@ class RegisterSerializer(serializers.Serializer):
             profile.save()
 
         return profile
-
 
 
 # =======================
