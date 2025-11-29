@@ -48,6 +48,14 @@ class RegisterSerializer(serializers.Serializer):
             'filiere', 'licence', 'user'
         ]
 
+        extra_kwargs = {
+            'niveau': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'filiere': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'licence': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'sub_cursus': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'cursus': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
+
     def create(self, validated_data):
 
         # On crée d'abord le User Django
