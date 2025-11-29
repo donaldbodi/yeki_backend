@@ -44,9 +44,8 @@ class RegisterSerializer(serializers.Serializer):
     class Meta:
         model = Profile
         fields = [
-            'username', 'email', 'name', 'password',
             'user_type', 'cursus', 'sub_cursus', 'niveau',
-            'filiere', 'licence'
+            'filiere', 'licence', 'user'
         ]
 
     def create(self, validated_data):
