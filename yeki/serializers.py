@@ -28,48 +28,35 @@ class ProfileSerializer(serializers.ModelSerializer):
 # =======================
 # REGISTER SERIALIZER
 # =======================
+User = get_user_model()
+
 class RegisterSerializer(serializers.Serializer):
-    username = serializers.CharField(required=True)
     email = serializers.EmailField(required=True)
     name = serializers.CharField(required=True)
-    password = serializers.CharField(write_only=True, required=True)
+    username = serializers.CharField(required=True)
+    password = serializers.CharField(write_only=True)
 
     user_type = serializers.CharField(required=True)
-    cursus = serializers.CharField(required=False)
-    sub_cursus = serializers.CharField(required=False)
-    niveau = serializers.CharField(required=False)
-    filiere = serializers.CharField(required=False)
-    licence = serializers.CharField(required=False)
 
-    class Meta:
-        model = Profile
-        fields = [
-            'user_type', 'cursus', 'sub_cursus', 'niveau',
-            'filiere', 'licence', 'user'
-        ]
-
-        extra_kwargs = {
-            'niveau': {'required': False, 'allow_null': True, 'allow_blank': True},
-            'filiere': {'required': False, 'allow_null': True, 'allow_blank': True},
-            'licence': {'required': False, 'allow_null': True, 'allow_blank': True},
-            'sub_cursus': {'required': False, 'allow_null': True, 'allow_blank': True},
-            'cursus': {'required': False, 'allow_null': True, 'allow_blank': True},
-        }
+    cursus = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    sub_cursus = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    niveau = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    filiere = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    licence = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
     def create(self, validated_data):
-
-        # On crée d'abord le User Django
-        user = User.objects.create_user(
+        # Crée l'utilisateur Django
+        user = User.objects.create(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password'],
-            first_name=validated_data['name'],
         )
+        user.set_password(validated_data['password'])
+        user.save()
 
-        # Puis le Profile
+        # Crée le profil relié
         profile = Profile.objects.create(
             user=user,
-            user_type=validated_data['user_type'],
+            user_type=validated_data.get('user_type'),
             cursus=validated_data.get('cursus'),
             sub_cursus=validated_data.get('sub_cursus'),
             niveau=validated_data.get('niveau'),
@@ -77,11 +64,10 @@ class RegisterSerializer(serializers.Serializer):
             licence=validated_data.get('licence'),
         )
 
-        # Activation auto
         if profile.user_type == 'apprenant':
             profile.is_active = True
-            profile.save()
 
+        profile.save()
         return profile
 
 
