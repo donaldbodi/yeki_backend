@@ -64,10 +64,10 @@ class RegisterSerializer(serializers.Serializer):
             licence=validated_data.get('licence'),
         )
 
-        if profile.user_type == 'apprenant':
+        if profile.user_type == 'Apprenant':
             profile.is_active = True
-
-        profile.save()
+            profile.save()
+            
         return profile
 
 
