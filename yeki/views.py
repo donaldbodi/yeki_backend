@@ -470,3 +470,16 @@ def statistiques_globales(request):
         "total_cours": total_cours,
         "moyenne_globale": round(moyenne_globale, 2)
     }, status=status.HTTP_200_OK)
+
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            # Si JWT : invalider le token côté serveur
+            # Si Token : supprimer le token
+            request.user.auth_token.delete()
+        except:
+            pass
+        return Response({"detail": "Déconnecté avec succès"}, status=status.HTTP_200_OK)

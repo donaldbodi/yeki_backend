@@ -6,6 +6,7 @@ from .views import (
     CoursCreateView,
     DepartementCreateView,
     DepartementUpdateView,
+    LogoutView,
     RegisterView,
     LoginView,
     departements_par_parcours,
@@ -26,6 +27,8 @@ from . import views
 urlpatterns = [
     # --- LANDING PAGE & VERSION ---
     path("landing/", landing, name="landing"),
+
+    path('auth/logout/', LogoutView.as_view(), name='logout'),
 
     # --- AUTHENTIFICATION ---
     path('auth/register/', RegisterView.as_view(), name='register'),
