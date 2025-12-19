@@ -50,13 +50,6 @@ class Parcours(models.Model):
     def __str__(self):
         return self.nom
 
-    # ✅ Seulement un admin peut créer un parcours
-    @staticmethod
-    def create_parcours(user, nom, admin):
-        if user.user_type != "admin":
-            raise PermissionDenied("Seul un administrateur général peut créer un parcours.")
-        return Parcours.objects.create(nom=nom, admin=admin)
-
 
 # --- NIVEAU 2 ---
 class Departement(models.Model):
