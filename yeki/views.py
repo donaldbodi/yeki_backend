@@ -342,10 +342,10 @@ class EnseignantAdminStatsView(APIView):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
-    user = request.user
+    user = Profile.objects.get(user=request.user)
     role = getattr(user, "user_type", None)
 
-    data = {"role": role, "nom": getattr(user, "name", getattr(user, "username", ""))}
+    data = {"role": role, "nom": getattr(user.user, "name", getattr(user.user, "username", ""))}
 
     if role == "admin":
         parcours = Parcours.objects.select_related("admin").all()
