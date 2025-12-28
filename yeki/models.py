@@ -48,7 +48,7 @@ class Parcours(models.Model):
     )
 
     def __str__(self):
-        return self.nom
+        return f"{self.nom} ({self.admin})"
 
 
 # --- NIVEAU 2 ---
