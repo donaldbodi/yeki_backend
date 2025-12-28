@@ -17,6 +17,7 @@ from .views import (
     get_dashboard_data,
     landing,
     liste_parcours,
+    parcours_unique,
     liste_enseignants,
     statistiques_globales,
     AddEnseignantSecondaireView,
