@@ -47,6 +47,7 @@ urlpatterns = [
 
     # --- PARCOURS ---
     path('parcours/', liste_parcours, name='liste-parcours'),
+    path('parcours/<int:parcours_id>/', parcours_unique, name='parcours-unique'),
     path('parcours/list-create/', ParcoursListCreateView.as_view(), name='parcours-list-create'),
     path('parcours/<int:pk>/assign-admin/', AssignAdminView.as_view(), name="assign-admin"),
     path('parcours/<int:parcours_id>/departements/', departements_par_parcours, name="departements-par-parcours"),

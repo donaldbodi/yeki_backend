@@ -444,6 +444,13 @@ def liste_parcours(request):
     serializer = ParcoursSerializer(parcours, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def parcours_unique(request, parcours_id):
+    parcours = Parcours.objects.get(id=parcours_id)
+    serializer = ParcoursSerializer(parcours, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
