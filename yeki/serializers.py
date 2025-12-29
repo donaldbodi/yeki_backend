@@ -168,7 +168,7 @@ class CoursCreateSerializer(serializers.ModelSerializer):
 class EnseignantCadreLightSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
-        fields = ["id", "name"]
+        fields = ["id", "user"]
 
 
 class DepartementSerializer(serializers.ModelSerializer):
