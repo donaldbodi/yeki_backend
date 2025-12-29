@@ -184,7 +184,7 @@ def liste_cours(request):
 @api_view(["GET"])
 #@permission_classes([IsAuthenticated])
 def liste_enseignants_cadres(request):
-    qs = User.objects.filter(user_type="enseignant_cadre").order_by("name")
+    qs = Profile.objects.filter(user_type="enseignant_cadre").order_by("name")
     data = EnseignantCadreLightSerializer(qs, many=True).data
     return Response(data, status=status.HTTP_200_OK)
 
