@@ -65,7 +65,7 @@ class Departement(models.Model):
     )
 
     def __str__(self):
-        return f"{self.nom} ({self.parcours.nom})"
+        return f"{self.nom} ({self.parcours.nom}. cadre: {self.cadre})"
 
     # ✅ Seul un enseignant_admin peut créer un département
     @staticmethod
