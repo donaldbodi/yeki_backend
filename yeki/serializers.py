@@ -165,10 +165,11 @@ class CoursCreateSerializer(serializers.ModelSerializer):
 # =======================
 # DEPARTEMENT SERIALIZER
 # =======================
-class EnseignantCadreLightSerializer(serializers.ModelSerializer):
+class EnseignantCadreLightSerializer(serializers.ModelSerializer): # enseignant serializer joue le meme role
+    user = UserSerializer()
     class Meta:
         model = Profile
-        fields = ["id", "user"]
+        fields = ["id", "user", 'user_type']
 
 
 class DepartementSerializer(serializers.ModelSerializer):
