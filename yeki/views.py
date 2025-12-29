@@ -438,7 +438,7 @@ class LoginView(APIView):
 # Listes publiques simples
 # ---------------------------
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def liste_parcours(request):
     parcours = Parcours.objects.select_related('admin').all()
     serializer = ParcoursSerializer(parcours, many=True)
