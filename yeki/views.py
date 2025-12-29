@@ -229,7 +229,7 @@ class DepartementCreateView(generics.CreateAPIView):
 
         cadre = None
         if cadre_id:
-            cadre = get_object_or_404(User, pk=cadre_id)
+            cadre = get_object_or_404(Profile, pk=cadre_id)
             if getattr(cadre, "user_type", None) != "enseignant_cadre":
                 return Response({"detail": "L'utilisateur choisi n'est pas un enseignant_cadre."}, status=status.HTTP_400_BAD_REQUEST)
 
