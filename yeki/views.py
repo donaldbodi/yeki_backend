@@ -193,7 +193,7 @@ def liste_enseignants_cadres(request):
 # Départements par parcours
 # ---------------------------
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def departements_par_parcours(request, parcours_id):
     parcours = get_object_or_404(Parcours, pk=parcours_id)
     deps = Departement.objects.filter(parcours=parcours).select_related("cadre")
