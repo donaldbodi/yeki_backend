@@ -466,7 +466,7 @@ def liste_enseignants(request):
 @api_view(['GET'])
 #@permission_classes([IsAuthenticated])
 def liste_enseignants_principaux(request):
-    qs = Profile.objects.filter(user_type_='enseignant_principal')
+    qs = Profile.objects.filter(user_type='enseignant_principal')
     serializer = EnseignantSerializer(qs, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
