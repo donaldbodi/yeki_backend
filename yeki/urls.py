@@ -22,6 +22,7 @@ from .views import (
     statistiques_globales,
     AddEnseignantSecondaireView,
     RemoveEnseignantSecondaireView,
+    liste_enseignants_principaux
 )
 from . import views
 
@@ -37,6 +38,7 @@ urlpatterns = [
 
     # --- UTILISATEURS ---
     path('enseignants/', liste_enseignants, name='liste-enseignants'),
+    path('enseignants_principaux/', liste_enseignants_principaux, name='liste-enseignants-principaux'),
     path("enseignants_cadres/", liste_enseignants_cadres, name="enseignants-cadres"),
 
     # --- DASHBOARD ---
