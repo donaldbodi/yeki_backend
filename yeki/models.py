@@ -103,17 +103,6 @@ class Cours(models.Model):
     def __str__(self):
         return f"{self.titre} ({self.niveau} - {self.departement.nom})"  # <= affichage amélioré
 
-    # ✅ Seul un enseignant_cadre peut créer un cours
-    @staticmethod
-    def create_cours(user, departement, titre, niveau, enseignant_principal=None):
-        if user.user_type != "enseignant_cadre":
-            raise PermissionDenied("Seul un enseignant_cadre peut créer un cours.")
-        return Cours.objects.create(
-            departement=departement,
-            titre=titre,
-            niveau=niveau,  # <= ajouté
-            enseignant_principal=enseignant_principal
-        )
 
     # ✅ Un enseignant_principal peut ajouter des enseignants
     def add_enseignant(self, user, enseignant):
