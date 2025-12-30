@@ -103,6 +103,23 @@ class Cours(models.Model):
     def __str__(self):
         return f"{self.titre} ({self.niveau} - {self.departement.nom})"  # <= affichage amélioré
 
+    # ✅ Seul un enseignant_cadre peut créer un cours
+    @staticmethod
+    def create_cours(user, departement, titre, niveau, enseignant_principal=None):
+        try:
+            profile = user.profile
+        except Profile.DoesNotExist:
+            raise PermissionDenied("Profil utilisateur introuvable.")
+
+        if profile.user_type != "enseignant_cadre":
+            raise PermissionDenied("Seul un enseignant_cadre peut créer un cours.")
+
+        return Cours.objects.create(
+            departement=departement,
+            titre=titre,
+            niveau=niveau,
+            enseignant_principal=enseignant_principal
+        )
 
     # ✅ Un enseignant_principal peut ajouter des enseignants
     def add_enseignant(self, user, enseignant):
