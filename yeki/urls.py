@@ -2,28 +2,7 @@ from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
 
-from .views import (
-    CoursCreateView,
-    DepartementCreateView,
-    DepartementUpdateView,
-    LogoutView,
-    RegisterView,
-    LoginView,
-    departements_par_parcours,
-    liste_enseignants_cadres,
-    ParcoursListCreateView,
-    AssignAdminView,
-    EnseignantAdminStatsView,
-    get_dashboard_data,
-    landing,
-    liste_parcours,
-    parcours_unique,
-    liste_enseignants,
-    statistiques_globales,
-    AddEnseignantSecondaireView,
-    RemoveEnseignantSecondaireView,
-    liste_enseignants_principaux
-)
+from .views import *
 from . import views
 
 urlpatterns = [
@@ -58,6 +37,9 @@ urlpatterns = [
     # --- DEPARTEMENTS ---
     path("departements/", DepartementCreateView.as_view(), name="departement-create"),
     path("departements/<int:pk>/", DepartementUpdateView.as_view(), name="departement-update"),
+    # urls.py
+    path("departements/<int:departement_id>/niveaux/", DepartementNiveauxAPIView.as_view()
+    ),
 
     # --- COURS ---
     path('cours/create/', CoursCreateView.as_view(), name='cours-create'),

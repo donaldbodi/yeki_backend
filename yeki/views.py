@@ -154,6 +154,16 @@ class CoursUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
         return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
 
 
+class DepartementNiveauxAPIView(APIView):
+    def get(self, request, departement_id):
+        niveaux = (
+            Cours.objects
+            .filter(departement_id=departement_id)
+            .values_list("niveau", flat=True)
+            .distinct()
+        )
+        return Response(niveaux)
+
 # ---------------------------
 # Lister les cours selon le rôle
 # ---------------------------
