@@ -456,7 +456,7 @@ def parcours_unique(request, parcours_id):
 @api_view(['GET'])
 #@permission_classes([IsAuthenticated])
 def liste_enseignants(request):
-    qs = User.objects.filter(user_type__in=[
+    qs = Profile.objects.filter(user_type__in=[
         'enseignant', 'enseignant_principal', 'enseignant_admin', 'enseignant_cadre', 'admin'
     ])
     serializer = EnseignantSerializer(qs, many=True)
