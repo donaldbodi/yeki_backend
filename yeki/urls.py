@@ -16,9 +16,10 @@ urlpatterns = [
     path('auth/login/', LoginView.as_view(), name='login'),
 
     # --- UTILISATEURS ---
-    path('enseignants/', liste_enseignants, name='liste-enseignants'),
+    path('enseignants/', liste_enseignants, name='liste-enseignants'), # ne sert pas
     path('enseignants_principaux/', liste_enseignants_principaux, name='liste-enseignants-principaux'),
     path("enseignants_cadres/", liste_enseignants_cadres, name="enseignants-cadres"),
+    path('enseignants_secondaires/', liste_enseignants_secondaires, name='liste-enseignants-secondaires'),
 
     # --- DASHBOARD ---
     path('enseignant/dashboard/', get_dashboard_data, name='enseignant-dashboard-data'),

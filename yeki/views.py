@@ -198,6 +198,24 @@ def liste_enseignants_cadres(request):
     data = EnseignantCadreLightSerializer(qs, many=True).data
     return Response(data, status=status.HTTP_200_OK)
 
+# ---------------------------
+# Liste des enseignants secondaires
+# ---------------------------
+@api_view(["GET"])
+#@permission_classes([IsAuthenticated])
+def liste_enseignants_secondaires(request):
+    qs = Profile.objects.filter(user_type="enseignant")
+    data = EnseignantSerializer(qs, many=True).data
+    return Response(data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+#@permission_classes([IsAuthenticated])
+def liste_enseignants(request):
+    qs = Profile.objects.filter(user_type__in=[
+        'enseignant', 'enseignant_principal', 'enseignant_admin', 'enseignant_cadre'
+    ])
+    serializer = EnseignantSerializer(qs, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
 # ---------------------------
 # Départements par parcours
@@ -460,16 +478,6 @@ def liste_parcours(request):
 def parcours_unique(request, parcours_id):
     parcours = Parcours.objects.get(id=parcours_id)
     serializer = ParcoursSerializer(parcours)
-    return Response(serializer.data, status=status.HTTP_200_OK)
-
-
-@api_view(['GET'])
-#@permission_classes([IsAuthenticated])
-def liste_enseignants(request):
-    qs = Profile.objects.filter(user_type__in=[
-        'enseignant', 'enseignant_principal', 'enseignant_admin', 'enseignant_cadre'
-    ])
-    serializer = EnseignantSerializer(qs, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
