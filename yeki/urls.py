@@ -37,9 +37,7 @@ urlpatterns = [
     # --- DEPARTEMENTS ---
     path("departements/", DepartementCreateView.as_view(), name="departement-create"),
     path("departements/<int:pk>/", DepartementUpdateView.as_view(), name="departement-update"),
-    # urls.py
-    path("departements/<int:departement_id>/niveaux/", DepartementNiveauxAPIView.as_view()
-    ),
+    path("departements/<int:departement_id>/niveaux/", DepartementNiveauxAPIView.as_view()),
 
     # --- COURS ---
     path('cours/create/', CoursCreateView.as_view(), name='cours-create'),
