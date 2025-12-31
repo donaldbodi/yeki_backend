@@ -46,7 +46,7 @@ def check_role(user, allowed_roles):
 # Ajout / retrait enseignant secondaire
 # ---------------------------
 class AddEnseignantSecondaireView(APIView):
-    permission_classes = [IsAuthenticated]
+    #permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request, cours_id):
