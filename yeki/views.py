@@ -45,29 +45,69 @@ def check_role(user, allowed_roles):
 # ---------------------------
 # Ajout / retrait enseignant secondaire
 # ---------------------------
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+from django.core.exceptions import PermissionDenied
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+
+from .models import Cours, Profile
+from .serializers import CoursSerializer
+
+
 class AddEnseignantSecondaireView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request, cours_id):
+        # 1️⃣ Récupération du cours
         cours = get_object_or_404(Cours, pk=cours_id)
-        if cours.enseignant_principal != request.user:
-            raise PermissionDenied("Action réservée à l’enseignant principal du cours.")
 
-        enseignant_id = request.data.get('enseignant_id')
+        # 2️⃣ Profil du demandeur
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            raise PermissionDenied("Profil utilisateur introuvable.")
+
+        # 3️⃣ Vérification : enseignant principal du cours
+        if cours.enseignant_principal != profile:
+            raise PermissionDenied(
+                "Action réservée à l’enseignant principal de ce cours."
+            )
+
+        # 4️⃣ Récupération de l'enseignant secondaire
+        enseignant_id = request.data.get("enseignant_id")
         if not enseignant_id:
-            return Response({"detail": "L'id de l'enseignant est requis."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "L'id de l'enseignant est requis."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        enseignant = get_object_or_404(User, pk=enseignant_id)
-        if getattr(enseignant, "user_type", None) != 'enseignant':
-            return Response({"detail": "L'utilisateur choisi n'est pas un enseignant secondaire."}, status=status.HTTP_400_BAD_REQUEST)
+        enseignant = get_object_or_404(Profile, pk=enseignant_id)
 
-        if enseignant in cours.enseignants.all():
-            return Response({"detail": "Enseignant déjà présent."}, status=status.HTTP_400_BAD_REQUEST)
+        # 5️⃣ Vérification du rôle
+        if enseignant.user_type != "enseignant":
+            return Response(
+                {"detail": "L'utilisateur choisi n'est pas un enseignant secondaire."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        # 6️⃣ Vérification doublon
+        if cours.enseignants.filter(pk=enseignant.pk).exists():
+            return Response(
+                {"detail": "Enseignant déjà présent dans ce cours."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 7️⃣ Ajout via la logique métier
         cours.enseignants.add(enseignant)
-        cours.save()
-        return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
+
+        return Response(
+            CoursSerializer(cours).data,
+            status=status.HTTP_200_OK
+        )
 
 
 class RemoveEnseignantSecondaireView(APIView):
