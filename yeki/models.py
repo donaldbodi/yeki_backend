@@ -75,7 +75,6 @@ class Departement(models.Model):
         return Departement.objects.create(parcours=parcours, nom=nom, cadre=cadre)
 
 
-
 # --- NIVEAU 3 ---
 class Cours(models.Model):
     titre = models.CharField(max_length=200)
@@ -92,19 +91,21 @@ class Cours(models.Model):
     description_brief = models.CharField(
         max_length=255,
         help_text="Description courte du cours",
-        blank=True
+        blank=True, null=True
     )
 
     color_code = models.CharField(
         max_length=7,
         default="#008080",
-        help_text="Code couleur hexadécimal (#RRGGBB)"
+        help_text="Code couleur hexadécimal (#RRGGBB)",
+        blank=True, null=True
     )
 
     icon_name = models.CharField(
         max_length=50,
         default="school",
-        help_text="Nom de l’icône Flutter (MaterialIcons)"
+        help_text="Nom de l’icône Flutter (MaterialIcons)",
+        blank=True, null=True
     )
 
     nb_devoirs = models.PositiveIntegerField(default=0)
