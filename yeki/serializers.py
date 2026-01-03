@@ -138,29 +138,87 @@ class CoursSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Cours
-        fields = ['id', 'titre', 'niveau', 'enseignant_principal', 'enseignants', 'departement', 'lecons']
+        fields = [
+            'id',
+            'titre',
+            'niveau',
+
+            # UI / Présentation
+            'description_brief',
+            'color_code',
+            'icon_name',
+
+            # Stats
+            'nb_lecons',
+            'nb_devoirs',
+            'nb_apprenants',
+
+            # Relations
+            'departement',
+            'enseignant_principal',
+            'enseignants',
+            'lecons',
+        ]
 
 
 class CoursCreateSerializer(serializers.ModelSerializer):
+
     class Meta:
         model = Cours
-        fields = ['titre', 'niveau', 'departement', 'enseignant_principal']
+        fields = [
+            'titre',
+            'niveau',
+            'departement',
+
+            # UI
+            'description_brief',
+            'color_code',
+            'icon_name',
+
+            # pédagogique
+            'enseignant_principal',
+        ]
+
+    def validate_color_code(self, value):
+        if value and (not value.startswith('#') or len(value) != 7):
+            raise serializers.ValidationError(
+                "Le code couleur doit être au format #RRGGBB"
+            )
+        return value
 
     def create(self, validated_data):
-        user = self.context['request'].user
-        departement = validated_data['departement']
-        titre = validated_data['titre']
-        niveau = validated_data['niveau']
-        enseignant_principal = validated_data.get('enseignant_principal', None)
+        request = self.context['request']
+        user = request.user
 
         return Cours.create_cours(
             user=user,
-            departement=departement,
-            titre=titre,
-            niveau=niveau,
-            enseignant_principal=enseignant_principal
+            departement=validated_data['departement'],
+            titre=validated_data['titre'],
+            niveau=validated_data['niveau'],
+
+            # UI
+            description_brief=validated_data.get('description_brief'),
+            color_code=validated_data.get('color_code'),
+            icon_name=validated_data.get('icon_name'),
+
+            # 👇 ENSEIGNANT PRINCIPAL
+            enseignant_principal=validated_data.get('enseignant_principal', None),
         )
 
+
+class CoursListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cours
+        fields = [
+            'id',
+            'titre',
+            'niveau',
+            'description_brief',
+            'color_code',
+            'icon_name',
+            'nb_lecons',
+            'nb_devoirs',
+        ]
 
 # =======================
 # DEPARTEMENT SERIALIZER

@@ -79,12 +79,44 @@ class Departement(models.Model):
 # --- NIVEAU 3 ---
 class Cours(models.Model):
     titre = models.CharField(max_length=200)
-    niveau = models.CharField(max_length=200)  
-    departement = models.ForeignKey(Departement, on_delete=models.CASCADE, related_name="cours")
-    matiere = models.CharField(max_length=255, blank='true')
-    concours = models.CharField(max_length=255, blank='true')
+    niveau = models.CharField(max_length=200)
+
+    # Relations
+    departement = models.ForeignKey(
+        Departement,
+        on_delete=models.CASCADE,
+        related_name="cours"
+    )
+
+    # --- NOUVEAUX CHAMPS ---
+    description_brief = models.CharField(
+        max_length=255,
+        help_text="Description courte du cours",
+        blank=True
+    )
+
+    color_code = models.CharField(
+        max_length=7,
+        default="#008080",
+        help_text="Code couleur hexadécimal (#RRGGBB)"
+    )
+
+    icon_name = models.CharField(
+        max_length=50,
+        default="school",
+        help_text="Nom de l’icône Flutter (MaterialIcons)"
+    )
+
+    nb_devoirs = models.PositiveIntegerField(default=0)
+    nb_lecons = models.PositiveIntegerField(default=0)
+
+    # --- EXISTANTS ---
+    matiere = models.CharField(max_length=255, blank=True)
+    concours = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True, null=True)
+
     nb_apprenants = models.PositiveIntegerField(default=0)
+
     enseignant_principal = models.ForeignKey(
         Profile,
         on_delete=models.SET_NULL,
@@ -93,6 +125,7 @@ class Cours(models.Model):
         limit_choices_to={'user_type': 'enseignant_principal'},
         related_name='cours_principal'
     )
+
     enseignants = models.ManyToManyField(
         Profile,
         blank=True,
@@ -100,44 +133,10 @@ class Cours(models.Model):
         related_name='cours_secondaires'
     )
 
-    def __str__(self):
-        return f"{self.titre} ({self.niveau} - {self.departement.nom})"  # <= affichage amélioré
-
-    # ✅ Seul un enseignant_cadre peut créer un cours
-    @staticmethod
-    def create_cours(user, departement, titre, niveau, enseignant_principal=None):
-        try:
-            profile = user.profile
-        except Profile.DoesNotExist:
-            raise PermissionDenied("Profil utilisateur introuvable.")
-
-        if profile.user_type != "enseignant_cadre":
-            raise PermissionDenied("Seul un enseignant_cadre peut créer un cours.")
-
-        return Cours.objects.create(
-            departement=departement,
-            titre=titre,
-            niveau=niveau,
-            enseignant_principal=enseignant_principal
-        )
-
-    # ✅ Un enseignant_principal peut ajouter des enseignants
-    def add_enseignant(self, user, enseignant):
-        if user.user_type != "enseignant_principal":
-            raise PermissionDenied("Seul un enseignant_principal peut ajouter des enseignants.")
-        if enseignant.user_type != "enseignant":
-            raise PermissionDenied("Seuls les enseignants secondaires peuvent être ajoutés.")
-        self.enseignants.add(enseignant)
-
-    def nb_lecons(self):
-        return self.lecons.count()
-
-    def nb_enseignants(self):
-        nb = 1 if self.enseignant_principal else 0
-        return nb + self.enseignants.count()
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.titre
+        return f"{self.titre} ({self.niveau})"
 
 
 # --- NIVEAU 4 ---

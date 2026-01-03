@@ -116,14 +116,15 @@ class RemoveEnseignantSecondaireView(APIView):
     @transaction.atomic
     def post(self, request, cours_id):
         cours = get_object_or_404(Cours, pk=cours_id)
-        if cours.enseignant_principal != request.user:
+        profile = request.user.profile
+        if cours.enseignant_principal != profile:
             raise PermissionDenied("Action réservée à l’enseignant principal du cours.")
 
         enseignant_id = request.data.get('enseignant_id')
         if not enseignant_id:
             return Response({"detail": "L'id de l'enseignant est requis."}, status=status.HTTP_400_BAD_REQUEST)
 
-        enseignant = get_object_or_404(User, pk=enseignant_id)
+        enseignant = get_object_or_404(Profile, pk=enseignant_id, user_type="enseignant")
         if enseignant not in cours.enseignants.all():
             return Response({"detail": "Enseignant non présent dans le cours."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -148,8 +149,11 @@ class CoursCreateView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class CoursUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
-    queryset = Cours.objects.select_related('departement', 'enseignant_principal')
+class CoursUpdateView(generics.RetrieveAPIView, generics.UpdateAPIView):
+    queryset = Cours.objects.select_related(
+        'departement',
+        'enseignant_principal'
+    )
     serializer_class = CoursSerializer
     permission_classes = [IsAuthenticated]
     http_method_names = ['get', 'patch']
@@ -157,38 +161,59 @@ class CoursUpdateView(generics.UpdateAPIView, generics.RetrieveAPIView):
     @transaction.atomic
     def patch(self, request, *args, **kwargs):
         cours = self.get_object()
+        profile = request.user.profile
         payload = request.data
 
-        # Autorisation : enseignant_cadre ou enseignant_principal
-        check_role(request.user, ['enseignant_cadre', 'enseignant_principal'])
+        # 🔐 Permissions
+        if profile.user_type == "enseignant_principal":
+            allowed_fields = {
+                "titre", "niveau",
+                "description_brief",
+                "color_code",
+                "icon_name",
+            }
+        elif profile.user_type == "enseignant_cadre":
+            allowed_fields = "__all__"
+        else:
+            raise PermissionDenied("Accès interdit.")
 
-        # Champs modifiables
+        # 📝 Titre
         if 'titre' in payload:
-            titre = (payload.get('titre') or "").strip()
-            if not titre:
-                return Response({"detail": "Le titre ne peut pas être vide."}, status=status.HTTP_400_BAD_REQUEST)
-            cours.titre = titre
+            cours.titre = payload['titre'].strip()
 
+        # 🎓 Niveau
         if 'niveau' in payload:
-            niveau = (payload.get('niveau') or "").strip()
-            if not niveau:
-                return Response({"detail": "Le niveau ne peut pas être vide."}, status=status.HTTP_400_BAD_REQUEST)
-            cours.niveau = niveau
+            cours.niveau = payload['niveau'].strip()
 
-        if 'departement' in payload:
-            dep_id = payload.get('departement')
-            departement = get_object_or_404(Departement, pk=dep_id)
-            cours.departement = departement
+        # 🧾 Description courte
+        if 'description_brief' in payload:
+            cours.description_brief = payload['description_brief']
 
-        if 'enseignant_principal' in payload:
-            principal_id = payload.get('enseignant_principal')
-            if principal_id in [None, "", "null"]:
-                cours.enseignant_principal = None
-            else:
-                principal = get_object_or_404(User, pk=principal_id)
-                if getattr(principal, "user_type", None) != 'enseignant_principal':
-                    return Response({"detail": "L'utilisateur choisi n'est pas un enseignant_principal."}, status=status.HTTP_400_BAD_REQUEST)
+        # 🎨 Couleur
+        if 'color_code' in payload:
+            cours.color_code = payload['color_code']
+
+        # 🧩 Icône
+        if 'icon_name' in payload:
+            cours.icon_name = payload['icon_name']
+
+        # 👨‍🏫 Enseignant principal (cadre seulement)
+        if profile.user_type == "enseignant_cadre" and 'enseignant_principal' in payload:
+            principal_id = payload['enseignant_principal']
+            if principal_id:
+                principal = get_object_or_404(
+                    Profile,
+                    pk=principal_id,
+                    user_type="enseignant_principal"
+                )
                 cours.enseignant_principal = principal
+            else:
+                cours.enseignant_principal = None
+
+        # 🏫 Département (cadre seulement)
+        if profile.user_type == "enseignant_cadre" and 'departement' in payload:
+            dep = get_object_or_404(Departement, pk=payload['departement'])
+            cours.departement = dep
 
         cours.save()
         return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
