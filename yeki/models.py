@@ -98,14 +98,12 @@ class Cours(models.Model):
         max_length=7,
         default="#008080",
         help_text="Code couleur hexadécimal (#RRGGBB)",
-        blank=True, null=True
     )
 
     icon_name = models.CharField(
         max_length=50,
         default="school",
         help_text="Nom de l’icône Flutter (MaterialIcons)",
-        blank=True, null=True
     )
 
     nb_devoirs = models.PositiveIntegerField(default=0)
