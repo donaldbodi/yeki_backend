@@ -79,7 +79,7 @@ class Departement(models.Model):
 # --- NIVEAU 3 ---
 class Cours(models.Model):
     titre = models.CharField(max_length=200)
-    niveau = models.CharField(max_length=200)   # <= déjà présent
+    niveau = models.CharField(max_length=200)  
     departement = models.ForeignKey(Departement, on_delete=models.CASCADE, related_name="cours")
     matiere = models.CharField(max_length=255, blank='true')
     concours = models.CharField(max_length=255, blank='true')
