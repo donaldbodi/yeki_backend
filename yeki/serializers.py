@@ -197,12 +197,12 @@ class CoursCreateSerializer(serializers.ModelSerializer):
             niveau=validated_data['niveau'],
 
             # UI
-            description_brief=validated_data.get('description_brief'),
             color_code=validated_data.get('color_code'),
             icon_name=validated_data.get('icon_name'),
 
             # 👇 ENSEIGNANT PRINCIPAL
             enseignant_principal=validated_data.get('enseignant_principal', None),
+            description_brief=validated_data.get('description_brief'),
         )
 
 

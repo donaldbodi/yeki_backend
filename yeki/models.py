@@ -79,6 +79,29 @@ class Departement(models.Model):
 class Cours(models.Model):
     titre = models.CharField(max_length=200)
     niveau = models.CharField(max_length=200)
+    # --- EXISTANTS ---
+    matiere = models.CharField(max_length=255, blank=True)
+    concours = models.CharField(max_length=255, blank=True)
+
+    enseignant_principal = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={'user_type': 'enseignant_principal'},
+        related_name='cours_principal'
+    )
+
+    enseignants = models.ManyToManyField(
+        Profile,
+        blank=True,
+        limit_choices_to={'user_type': 'enseignant'},
+        related_name='cours_secondaires'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    nb_apprenants = models.PositiveIntegerField(default=0)
 
     # Relations
     departement = models.ForeignKey(
@@ -109,33 +132,30 @@ class Cours(models.Model):
     nb_devoirs = models.PositiveIntegerField(default=0)
     nb_lecons = models.PositiveIntegerField(default=0)
 
-    # --- EXISTANTS ---
-    matiere = models.CharField(max_length=255, blank=True)
-    concours = models.CharField(max_length=255, blank=True)
-    description = models.TextField(blank=True, null=True)
-
-    nb_apprenants = models.PositiveIntegerField(default=0)
-
-    enseignant_principal = models.ForeignKey(
-        Profile,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        limit_choices_to={'user_type': 'enseignant_principal'},
-        related_name='cours_principal'
-    )
-
-    enseignants = models.ManyToManyField(
-        Profile,
-        blank=True,
-        limit_choices_to={'user_type': 'enseignant'},
-        related_name='cours_secondaires'
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.titre} ({self.niveau})"
+
+    # ✅ Seul un enseignant_cadre peut créer un cours
+    @staticmethod
+    def create_cours(user, departement, titre, niveau, color_code, icon_name, enseignant_principal=None, description_brief=None):
+        try:
+            profile = user.profile
+        except Profile.DoesNotExist:
+            raise PermissionDenied("Profil utilisateur introuvable.")
+
+        if profile.user_type != "enseignant_cadre":
+            raise PermissionDenied("Seul un enseignant_cadre peut créer un cours.")
+
+        return Cours.objects.create(
+            description_brief=description_brief,
+            color_code=color_code,
+            icon_name=icon_name,
+            departement=departement,
+            titre=titre,
+            niveau=niveau,
+            enseignant_principal=enseignant_principal
+        )
 
 
 # --- NIVEAU 4 ---
