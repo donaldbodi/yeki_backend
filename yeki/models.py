@@ -208,7 +208,7 @@ class Lecon(models.Model):
         blank=True
     )
 
-    created_at = models.DateTimeField(auto_now_add=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.titre} ({self.cours.titre})"
