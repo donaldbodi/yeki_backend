@@ -177,7 +177,9 @@ class Lecon(models.Model):
     module = models.ForeignKey(
         Module,
         on_delete=models.CASCADE,
-        related_name="lecons"
+        related_name="lecons",
+        null=True,
+        blank=True,
     )
 
     description = models.TextField()
