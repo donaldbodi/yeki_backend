@@ -186,7 +186,7 @@ class Lecon(models.Model):
         upload_to='lecons/pdf/',
         help_text="PDF du cours",
         null=True,
-        blank=True
+        blank=True,
     )
 
     video = models.FileField(
