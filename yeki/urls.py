@@ -51,4 +51,5 @@ urlpatterns = [
     # --- LEÇONS ---
     #path('lecons/create/', LeconCreateView.as_view(), name='lecon-create'),
     #path('lecons/<int:pk>/', LeconDetailView.as_view(), name='lecon-detail'),
+    path('api/cours/<int:cours_id>/lecons/', AjouterLeconView.as_view(),name='ajouter-lecon')
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

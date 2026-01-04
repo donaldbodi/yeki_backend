@@ -14,17 +14,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Sum, Avg
 
 from .models import Parcours, Departement, Cours, Lecon, Profile
-from .serializers import (
-    CoursCreateSerializer,
-    RegisterSerializer,
-    LoginSerializer,
-    ParcoursSerializer,
-    EnseignantSerializer,
-    DepartementSerializer,
-    CoursSerializer,
-    EnseignantCadreLightSerializer,
-    LeconSerializer
-)
+from .serializers import *
 
 User = get_user_model()
 
@@ -252,6 +242,29 @@ def liste_cours(request):
     serializer = CoursSerializer(qs, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
+#Lecons
+class AjouterLeconView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+
+        if cours.enseignant_principal != request.user.profile:
+            raise PermissionDenied("Seul l’enseignant principal peut ajouter une leçon.")
+
+        serializer = LeconCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(
+                cours=cours,
+                created_by=request.user.profile
+            )
+
+            cours.nb_lecons += 1
+            cours.save(update_fields=['nb_lecons'])
+
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # ---------------------------
 # Liste des enseignants cadres (light)

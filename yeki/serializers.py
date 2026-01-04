@@ -127,6 +127,23 @@ class LeconSerializer(serializers.ModelSerializer):
         model = Lecon
         fields = ['id', 'titre', 'contenu_html', 'created_by', 'cours', 'created_at']
 
+    
+class LeconCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lecon
+        fields = [
+            'titre',
+            'description',
+            'fichier_pdf',
+            'video',
+            'module',
+        ]
+
+    def validate_fichier_pdf(self, value):
+        if not value.name.endswith('.pdf'):
+            raise serializers.ValidationError("Seuls les fichiers PDF sont autorisés.")
+        return value
+
 
 # =======================
 # COURS SERIALIZER

@@ -156,40 +156,68 @@ class Cours(models.Model):
             niveau=niveau,
             enseignant_principal=enseignant_principal
         )
+    
+class Module(models.Model):
+    titre = models.CharField(max_length=200)
+    cours = models.ForeignKey(
+        Cours,
+        on_delete=models.CASCADE,
+        related_name="modules"
+    )
+    ordre = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return f"{self.titre} - {self.cours.titre}"
 
 
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
-    fichier = models.FileField(upload_to='lecons/')
-    video = models.FileField(upload_to='video', blank=True, null=True)
+
+    module = models.ForeignKey(
+        Module,
+        on_delete=models.CASCADE,
+        related_name="lecons"
+    )
+
     description = models.TextField()
-    contenu_html = models.TextField(blank=True, null=True)
-    cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="lecons")
-    created_by = models.ForeignKey(Profile, on_delete=models.SET_NULL, null=True, blank=True)
+
+    fichier_pdf = models.FileField(
+        upload_to='lecons/pdf/',
+        help_text="PDF du cours"
+    )
+
+    video = models.FileField(
+        upload_to='lecons/video/',
+        blank=True,
+        null=True
+    )
+
+    cours = models.ForeignKey(
+        Cours,
+        on_delete=models.CASCADE,
+        related_name="lecons"
+    )
+
+    created_by = models.ForeignKey(
+        Profile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.titre} ({self.cours.titre})"
 
-    # ✅ Seul un enseignant_principal peut créer une leçon
-    @staticmethod
-    def create_lecon(user, cours, titre, description):
-        if user.user_type != "enseignant_principal":
-            raise PermissionDenied("Seul un enseignant_principal peut créer une leçon.")
-        return Lecon.objects.create(
-            cours=cours,
-            titre=titre,
-            description=description,
-            created_by=user
-        )
 
-@receiver(post_save, sender=Lecon)
+'''@receiver(post_save, sender=Lecon)
 def convertir_docx_en_html(sender, instance, **kwargs):
     if instance.fichier and instance.fichier.name.endswith(".docx"):
         with open(instance.fichier.path, "rb") as docx_file:
             result = mammoth.convert_to_html(docx_file)
             html = result.value  # HTML du contenu
             instance.contenu_html = html
-            instance.save()
+            instance.save()'''
 
