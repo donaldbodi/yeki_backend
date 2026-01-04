@@ -184,7 +184,9 @@ class Lecon(models.Model):
 
     fichier_pdf = models.FileField(
         upload_to='lecons/pdf/',
-        help_text="PDF du cours"
+        help_text="PDF du cours",
+        null=True,
+        blank=True
     )
 
     video = models.FileField(
@@ -206,7 +208,7 @@ class Lecon(models.Model):
         blank=True
     )
 
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, default='')
 
     def __str__(self):
         return f"{self.titre} ({self.cours.titre})"
