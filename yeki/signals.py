@@ -12,4 +12,4 @@ from .models import Profile, Lecon
 def increment_nb_lecons(sender, instance, **kwargs):
     cours = instance.cours
     cours.nb_lecons = cours.lecons.count()
-    cours.save(update_fields=["nb_lecons"])''''''
+    cours.save(update_fields=["nb_lecons"])'''
