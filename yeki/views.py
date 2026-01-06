@@ -266,6 +266,46 @@ class AjouterLeconView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+class ModuleCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, id=cours_id)
+
+        # 🔐 Sécurité : seul l’enseignant principal
+        if cours.enseignant_principal != request.user.profile:
+            raise PermissionDenied(
+                "Seul l'enseignant principal peut créer un module."
+            )
+
+        serializer = ModuleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        module = serializer.save(cours=cours)
+
+        return Response(
+            {
+                "id": module.id,
+                "titre": module.titre,
+                "ordre": module.ordre,
+                "cours": cours.id
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
+class ModuleListByCoursView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cours_id):
+        cours = get_object_or_404(Cours, id=cours_id)
+
+        modules = Module.objects.filter(cours=cours).order_by('ordre')
+        serializer = ModuleListSerializer(modules, many=True)
+
+        return Response(serializer.data)
+
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------

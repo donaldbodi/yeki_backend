@@ -51,5 +51,12 @@ urlpatterns = [
     # --- LEÇONS ---
     #path('lecons/create/', LeconCreateView.as_view(), name='lecon-create'),
     #path('lecons/<int:pk>/', LeconDetailView.as_view(), name='lecon-detail'),
-    path('api/cours/<int:cours_id>/lecons/', AjouterLeconView.as_view(),name='ajouter-lecon')
+    path('api/cours/<int:cours_id>/lecons/', AjouterLeconView.as_view(),name='ajouter-lecon'),
+
+    # --- MODULES --
+    path('api/cours/<int:cours_id>/modules/', ModuleCreateView.as_view(), name='module-create'),
+    # urls.py
+    path('api/cours/<int:cours_id>/liste-modules/',ModuleListByCoursView.as_view(),name='cours-modules'),
+
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+

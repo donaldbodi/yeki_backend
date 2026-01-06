@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
-from .models import Parcours, Departement, Cours, Lecon, Profile
+from .models import *
 
 User = get_user_model()
 
@@ -30,11 +30,9 @@ class ProfileSerializer(serializers.ModelSerializer):
             'niveau', 'filiere', 'licence', 'is_active', 'avatar', 'bio'
         ]
 
-
 # =======================
 # REGISTER SERIALIZER
 # =======================
-User = get_user_model()
 
 class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
@@ -236,6 +234,17 @@ class CoursListSerializer(serializers.ModelSerializer):
             'nb_lecons',
             'nb_devoirs',
         ]
+
+
+class ModuleCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Module
+        fields = ['titre', 'ordre']
+
+class ModuleListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Module
+        fields = ['id', 'titre', 'ordre']
 
 # =======================
 # DEPARTEMENT SERIALIZER

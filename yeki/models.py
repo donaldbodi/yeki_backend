@@ -156,18 +156,30 @@ class Cours(models.Model):
             niveau=niveau,
             enseignant_principal=enseignant_principal
         )
-    
+
+
 class Module(models.Model):
     titre = models.CharField(max_length=200)
+
     cours = models.ForeignKey(
         Cours,
         on_delete=models.CASCADE,
         related_name="modules"
     )
-    ordre = models.PositiveIntegerField(default=1)
+
+    ordre = models.PositiveIntegerField(
+        help_text="Ordre défini par l'enseignant principal"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['ordre']
+        unique_together = ('cours', 'ordre')
 
     def __str__(self):
-        return f"{self.titre} - {self.cours.titre}"
+        return f"{self.ordre}. {self.titre}"
+
 
 
 # --- NIVEAU 4 ---
