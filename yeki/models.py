@@ -186,7 +186,13 @@ class Module(models.Model):
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
 
-    
+    module = models.ForeignKey(
+        Module,
+        on_delete=models.CASCADE,
+        related_name="lecons",
+        null=True,
+        blank=True,
+    )
 
     description = models.TextField()
 
