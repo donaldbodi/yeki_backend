@@ -160,6 +160,8 @@ class Cours(models.Model):
 
 class Module(models.Model):
     titre = models.CharField(max_length=200)
+    
+    desription = models.CharField(max_length=200, default='')
 
     cours = models.ForeignKey(
         Cours,

@@ -235,16 +235,15 @@ class CoursListSerializer(serializers.ModelSerializer):
             'nb_devoirs',
         ]
 
-
 class ModuleCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Module
-        fields = ['titre', 'ordre']
+        fields = ['titre', 'ordre', 'desription']
 
 class ModuleListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Module
-        fields = ['id', 'titre', 'ordre']
+        fields = ['id', 'titre', 'ordre', 'desription']
 
 # =======================
 # DEPARTEMENT SERIALIZER

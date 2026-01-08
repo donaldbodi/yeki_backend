@@ -7,4 +7,5 @@ admin.site.register(Departement)
 admin.site.register(Cours)
 admin.site.register(Profile)
 admin.site.register(Lecon)
+admin.site.register(Module)
 
