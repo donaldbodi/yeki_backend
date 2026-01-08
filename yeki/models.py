@@ -181,7 +181,6 @@ class Module(models.Model):
         return f"{self.ordre}. {self.titre}"
 
 
-
 # --- NIVEAU 4 ---
 class Lecon(models.Model):
     titre = models.CharField(max_length=200)
