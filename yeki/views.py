@@ -296,7 +296,7 @@ class ModuleCreateView(APIView):
 
 
 class ModuleListByCoursView(APIView):
-    permission_classes = [IsAuthenticated]
+    #permission_classes = [IsAuthenticated]
 
     def get(self, request, cours_id):
         cours = get_object_or_404(Cours, id=cours_id)
