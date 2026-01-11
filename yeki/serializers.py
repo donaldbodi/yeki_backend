@@ -238,12 +238,12 @@ class CoursListSerializer(serializers.ModelSerializer):
 class ModuleCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Module
-        fields = ['titre', 'ordre', 'desription']
+        fields = ['titre', 'ordre', 'description']
 
 class ModuleListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Module
-        fields = ['id', 'titre', 'ordre', 'desription']
+        fields = ['id', 'titre', 'ordre', 'description']
 
 # =======================
 # DEPARTEMENT SERIALIZER
