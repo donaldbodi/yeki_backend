@@ -42,6 +42,7 @@ urlpatterns = [
 
     # --- COURS ---
     path('cours/create/', CoursCreateView.as_view(), name='cours-create'),
+    path("apprenant/cursus/", ApprenantCursusAPIView.as_view(), name="apprenant-cursus"),
     #path('cours/<int:pk>/', CoursDetailView.as_view(), name='cours-detail'),
 
     # --- GESTION ENSEIGNANTS SECONDAIRES ---

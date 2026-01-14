@@ -123,6 +123,30 @@ class RemoveEnseignantSecondaireView(APIView):
         return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
 
 
+class ApprenantCursusAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = request.user.profile
+
+        # 🔐 SÉCURITÉ : apprenant seulement
+        if profile.user_type != "apprenant":
+            return Response(
+                {"detail": "Accès réservé aux apprenants"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if not profile.cursus:
+            return Response([], status=status.HTTP_200_OK)
+
+        cours = Cours.objects.filter(
+            departement__parcours__nom=profile.cursus
+        ).select_related("enseignant_principal")
+
+        serializer = CursusApprenantSerializer(cours, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 # ---------------------------
 # Créer / Mettre à jour un cours
 # ---------------------------
@@ -327,6 +351,7 @@ def liste_enseignants_secondaires(request):
     qs = Profile.objects.filter(user_type="enseignant")
     data = EnseignantSerializer(qs, many=True).data
     return Response(data, status=status.HTTP_200_OK)
+
 
 @api_view(['GET'])
 #@permission_classes([IsAuthenticated])

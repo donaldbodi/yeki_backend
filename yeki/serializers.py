@@ -125,7 +125,7 @@ class LeconSerializer(serializers.ModelSerializer):
         model = Lecon
         fields = ['id', 'titre', 'fichier_pdf', 'module','description','video', 'created_by', 'cours', 'created_at']
 
-    
+
 class LeconCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lecon
@@ -234,6 +234,35 @@ class CoursListSerializer(serializers.ModelSerializer):
             'nb_lecons',
             'nb_devoirs',
         ]
+
+
+class CursusApprenantSerializer(serializers.ModelSerializer):
+    teacher = serializers.SerializerMethodField()
+    title = serializers.CharField(source="titre")
+    description = serializers.CharField(source="description_brief")
+    lessons = serializers.IntegerField(source="nb_lecons")
+    assignments = serializers.IntegerField(source="nb_devoirs")
+    icon = serializers.CharField(source="icon_name")
+    color = serializers.CharField(source="color_code")
+
+    class Meta:
+        model = Cours
+        fields = [
+            "id",
+            "title",
+            "description",
+            "teacher",
+            "lessons",
+            "assignments",
+            "icon",
+            "color",
+        ]
+
+    def get_teacher(self, obj):
+        if obj.enseignant_principal:
+            return obj.enseignant_principal.user.username
+        return "—"
+
 
 class ModuleCreateSerializer(serializers.ModelSerializer):
     class Meta:
