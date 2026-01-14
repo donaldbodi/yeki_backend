@@ -124,7 +124,7 @@ class RemoveEnseignantSecondaireView(APIView):
 
 
 class ApprenantCursusAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    #permission_classes = [IsAuthenticated]
 
     def get(self, request):
         profile = request.user.profile
