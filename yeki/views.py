@@ -245,6 +245,8 @@ def liste_cours(request):
 #Lecons
 class AjouterLeconView(APIView):
     permission_classes = [IsAuthenticated]
+    #parser_classes = [MultiPartParser, FormParser]
+
 
     def post(self, request, cours_id):
         cours = get_object_or_404(Cours, pk=cours_id)
