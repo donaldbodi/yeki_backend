@@ -258,7 +258,7 @@ class CursusApprenantSerializer(serializers.ModelSerializer):
             "color",
         ]
 
-    def get_teacher(self, obj):
+    def get_enseignant_principal(self, obj):
         if obj.enseignant_principal:
             return obj.enseignant_principal.user.username
         return "—"
