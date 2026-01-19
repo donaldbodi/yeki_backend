@@ -119,11 +119,28 @@ class EnseignantSerializer(serializers.ModelSerializer):
 # LEÇON SERIALIZER
 # =======================
 class LeconSerializer(serializers.ModelSerializer):
+    pdf_url = serializers.SerializerMethodField()
     created_by = EnseignantSerializer(read_only=True)
 
     class Meta:
         model = Lecon
-        fields = ['id', 'titre', 'fichier_pdf', 'module','description','video', 'created_by', 'cours', 'created_at']
+        fields = [
+            'id',
+            'titre',
+            'description',
+            'pdf_url',
+            'video',
+            'module',
+            'created_by',
+            'cours',
+            'created_at',
+        ]
+
+    def get_pdf_url(self, obj):
+        if obj.fichier_pdf:
+            request = self.context.get('request')
+            return request.build_absolute_uri(obj.fichier_pdf.url)
+        return None
 
 
 class LeconCreateSerializer(serializers.ModelSerializer):
