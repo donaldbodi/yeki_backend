@@ -237,7 +237,7 @@ class CoursListSerializer(serializers.ModelSerializer):
 
 
 class CursusApprenantSerializer(serializers.ModelSerializer):
-    teacher = serializers.SerializerMethodField()
+    enseignant_principal = serializers.SerializerMethodField()
     title = serializers.CharField(source="titre")
     description = serializers.CharField(source="description_brief")
     lessons = serializers.IntegerField(source="nb_lecons")
@@ -251,7 +251,7 @@ class CursusApprenantSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "description",
-            "teacher",
+            "enseignant_principal",
             "lessons",
             "assignments",
             "icon",
