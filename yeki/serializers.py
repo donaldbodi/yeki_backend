@@ -303,3 +303,29 @@ class ParcoursSerializer(serializers.ModelSerializer):
     class Meta:
         model = Parcours
         fields = ['id', 'nom', 'admin', 'departements']
+
+
+class LeconLightSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lecon
+        fields = [
+            'id',
+            'titre',
+            'description',
+            'fichier_pdf',
+            'video',
+        ]
+
+
+class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
+    lecons = LeconLightSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Module
+        fields = [
+            'id',
+            'titre',
+            'description',
+            'ordre',
+            'lecons',
+        ]

@@ -233,6 +233,23 @@ class CoursUpdateView(generics.RetrieveAPIView, generics.UpdateAPIView):
         return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
 
 
+class ModulesAvecLeconsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cours_id):
+        cours = get_object_or_404(Cours, id=cours_id)
+
+        modules = (
+            Module.objects
+            .filter(cours=cours)
+            .prefetch_related('lecons')
+            .order_by('ordre')
+        )
+
+        serializer = ModuleAvecLeconsSerializer(modules, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class DepartementNiveauxAPIView(APIView):
     def get(self, request, departement_id):
         niveaux = (
