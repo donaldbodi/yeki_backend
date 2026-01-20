@@ -136,10 +136,12 @@ class LeconSerializer(serializers.ModelSerializer):
             'created_at',
         ]
 
-    def get_fichier_pdf(self, obj):
+    def get_pdf_url(self, obj):
         if obj.fichier_pdf:
             request = self.context.get('request')
-            return request.build_absolute_uri(obj.fichier_pdf.url)
+            if request:
+                return request.build_absolute_uri(obj.fichier_pdf.url)
+            return obj.fichier_pdf.url
         return None
 
 
