@@ -325,6 +325,9 @@ class ParcoursSerializer(serializers.ModelSerializer):
 
 
 class LeconLightSerializer(serializers.ModelSerializer):
+    fichier_pdf = serializers.SerializerMethodField()
+    video = serializers.SerializerMethodField()
+
     class Meta:
         model = Lecon
         fields = [
@@ -334,6 +337,19 @@ class LeconLightSerializer(serializers.ModelSerializer):
             'fichier_pdf',
             'video',
         ]
+
+    def get_fichier_pdf(self, obj):
+        if obj.fichier_pdf:
+            request = self.context.get('request')
+            return request.build_absolute_uri(obj.fichier_pdf.url)
+        return None
+
+    def get_video(self, obj):
+        if obj.video:
+            request = self.context.get('request')
+            return request.build_absolute_uri(obj.video.url)
+        return None
+
 
 
 class ModuleAvecLeconsSerializer(serializers.ModelSerializer):

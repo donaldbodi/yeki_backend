@@ -338,16 +338,27 @@ class ModuleCreateView(APIView):
         )
 
 
-class ModuleListByCoursView(APIView):
-    #permission_classes = [IsAuthenticated]
+class ModulesAvecLeconsView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, cours_id):
         cours = get_object_or_404(Cours, id=cours_id)
 
-        modules = Module.objects.filter(cours=cours).order_by('ordre')
-        serializer = ModuleListSerializer(modules, many=True)
+        modules = (
+            Module.objects
+            .filter(cours=cours)
+            .prefetch_related('lecons')
+            .order_by('ordre')
+        )
 
-        return Response(serializer.data)
+        serializer = ModuleAvecLeconsSerializer(
+            modules,
+            many=True,
+            context={'request': request}  # ✅ LIGNE CRITIQUE
+        )
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 # ---------------------------
 # Liste des enseignants cadres (light)
