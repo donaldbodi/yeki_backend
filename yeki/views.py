@@ -233,7 +233,7 @@ class CoursUpdateView(generics.RetrieveAPIView, generics.UpdateAPIView):
         return Response(CoursSerializer(cours).data, status=status.HTTP_200_OK)
 
 
-class ModulesAvecLeconsView(APIView):
+class ModuleListByCoursView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, cours_id):
