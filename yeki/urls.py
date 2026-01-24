@@ -58,12 +58,6 @@ urlpatterns = [
     path('cours/<int:cours_id>/modules/', ModuleCreateView.as_view(), name='module-create'),
     # urls.py
     path('cours/<int:cours_id>/liste-modules/',ModuleListByCoursView.as_view(),name='cours-modules'),
-    path(
-    'cours/<int:cours_id>/modules-avec-lecons/',
-    ModulesAvecLeconsView.as_view(),
-    name='modules-avec-lecons'
-),
-
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
