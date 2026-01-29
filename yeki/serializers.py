@@ -136,7 +136,7 @@ class LeconSerializer(serializers.ModelSerializer):
             'created_at',
         ]
 
-    def get_pdf_url(self, obj):
+    def get_fichier_pdf(self, obj):
         if obj.fichier_pdf:
             request = self.context.get('request')
             if request:
