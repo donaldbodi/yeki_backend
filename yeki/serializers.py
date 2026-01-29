@@ -364,3 +364,40 @@ class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
             'ordre',
             'lecons',
         ]
+
+
+class QuestionExerciceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QuestionExercice
+        fields = [
+            'id',
+            'texte',
+            'type',
+            'choix',
+            'points',
+        ]
+
+
+class ExerciceSerializer(serializers.ModelSerializer):
+    questions = QuestionExerciceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Exercice
+        fields = [
+            'id',
+            'titre',
+            'enonce',
+            'difficulte',
+            'questions',
+        ]
+
+
+class ExerciceCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Exercice
+        fields = [
+            'titre',
+            'enonce',
+            'difficulte',
+            'module',
+        ]

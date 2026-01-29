@@ -338,6 +338,43 @@ class ModuleCreateView(APIView):
         )
 
 
+#Exercices
+
+class ExerciceListByCoursView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cours_id):
+        exercices = (
+            Exercice.objects
+            .filter(cours_id=cours_id)
+            .prefetch_related("questions")
+            .order_by("difficulte")
+        )
+
+        serializer = ExerciceSerializer(exercices, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ExerciceCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, id=cours_id)
+
+        if cours.enseignant_principal != request.user.profile:
+            raise PermissionDenied("Seul l’enseignant principal peut créer un exercice.")
+
+        serializer = ExerciceCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        exercice = serializer.save(cours=cours)
+
+        return Response(
+            ExerciceSerializer(exercice).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------

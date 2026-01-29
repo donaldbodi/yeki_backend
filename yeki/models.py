@@ -228,6 +228,60 @@ class Lecon(models.Model):
     def __str__(self):
         return f"{self.titre} ({self.cours.titre})"
 
+class Exercice(models.Model):
+    DIFFICULTE_CHOICES = [
+        (1, "★"),
+        (2, "★★"),
+        (3, "★★★"),
+        (4, "★★★★"),
+        (5, "★★★★★"),
+    ]
+
+    titre = models.CharField(max_length=200)
+    enonce = models.TextField()
+    difficulte = models.PositiveSmallIntegerField(choices=DIFFICULTE_CHOICES)
+
+    cours = models.ForeignKey(
+        Cours,
+        on_delete=models.CASCADE,
+        related_name="exercices"
+    )
+
+    module = models.ForeignKey(
+        Module,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="exercices"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.titre} (★{self.difficulte})"
+
+class QuestionExercice(models.Model):
+    TYPE_CHOICES = [
+        ('qcm', 'QCM'),
+        ('texte', 'Texte'),
+    ]
+
+    exercice = models.ForeignKey(
+        Exercice,
+        on_delete=models.CASCADE,
+        related_name="questions"
+    )
+
+    texte = models.TextField()
+    type = models.CharField(max_length=10, choices=TYPE_CHOICES)
+    choix = models.JSONField(blank=True, null=True)  # pour QCM
+    bonne_reponse = models.CharField(max_length=255)
+    points = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return self.texte[:50]
+
+
 
 '''@receiver(post_save, sender=Lecon)
 def convertir_docx_en_html(sender, instance, **kwargs):

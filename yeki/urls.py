@@ -58,6 +58,19 @@ urlpatterns = [
     path('cours/<int:cours_id>/modules/', ModuleCreateView.as_view(), name='module-create'),
     # urls.py
     path('cours/<int:cours_id>/liste-modules/',ModuleListByCoursView.as_view(),name='cours-modules'),
+    
+    path(
+    'cours/<int:cours_id>/exercices/',
+    ExerciceListByCoursView.as_view(),
+    name='cours-exercices'
+),
+
+path(
+    'cours/<int:cours_id>/exercices/create/',
+    ExerciceCreateView.as_view(),
+    name='exercice-create'
+),
+
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
