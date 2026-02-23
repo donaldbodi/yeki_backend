@@ -338,43 +338,106 @@ class ModuleCreateView(APIView):
         )
 
 
-#Exercices
-
-class ExerciceListByCoursView(APIView):
+class ListeExercicesCoursView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, cours_id):
-        exercices = (
-            Exercice.objects
-            .filter(cours_id=cours_id)
-            .prefetch_related("questions")
-            .order_by("difficulte")
-        )
-
+        exercices = Exercice.objects.filter(cours_id=cours_id).prefetch_related("questions__choix")
         serializer = ExerciceSerializer(exercices, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.data)
 
 
-class ExerciceCreateView(APIView):
+class SoumettreEvaluationView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, cours_id):
-        cours = get_object_or_404(Cours, id=cours_id)
+    def post(self, request, exercice_id):
+        user = request.user
+        exercice = get_object_or_404(Exercice, id=exercice_id)
 
-        if cours.enseignant_principal != request.user.profile:
-            raise PermissionDenied("Seul l’enseignant principal peut créer un exercice.")
-
-        serializer = ExerciceCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        exercice = serializer.save(cours=cours)
-
-        return Response(
-            ExerciceSerializer(exercice).data,
-            status=status.HTTP_201_CREATED
+        session = get_object_or_404(
+            SessionExercice,
+            user=user,
+            exercice=exercice,
+            termine=False
         )
 
+        # ⛔ Vérifier chrono expiré
+        if session.temps_restant() <= 0:
+            session.termine = True
+            session.save()
+            return Response(
+                {"detail": "Temps écoulé. Examen terminé."},
+                status=403
+            )
 
+        reponses = request.data.get("reponses", {})
+        score = 0
+        total = 0
+
+        for question in exercice.questions.all():
+            bonne = question.bonne_reponse.lower().strip()
+            user_rep = reponses.get(str(question.id), "").lower().strip()
+
+            total += question.points
+            if user_rep == bonne:
+                score += question.points
+
+        EvaluationExercice.objects.create(
+            user=user,
+            exercice=exercice,
+            score=score,
+            total=total
+        )
+
+        session.termine = True
+        session.save()
+
+        return Response({
+            "score": score,
+            "total": total,
+            "message": "Examen soumis avec succès",
+        })
+
+class HistoriqueEvaluationsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        evaluations = EvaluationExercice.objects.filter(user=request.user).order_by("-date")
+        serializer = EvaluationSerializer(evaluations, many=True)
+        return Response(serializer.data)
+
+
+class DemarrerExerciceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, exercice_id):
+        user = request.user
+        exercice = get_object_or_404(Exercice, id=exercice_id)
+
+        # 🔒 Anti-triche : vérifier tentatives
+        tentatives = EvaluationExercice.objects.filter(
+            user=user, exercice=exercice
+        ).count()
+
+        if tentatives >= exercice.tentatives_max:
+            return Response(
+                {"detail": "Nombre maximum de tentatives atteint."},
+                status=403
+            )
+
+        # 🔁 Vérifier session existante non terminée
+        session = SessionExercice.objects.filter(
+            user=user, exercice=exercice, termine=False
+        ).first()
+
+        if not session:
+            session = SessionExercice.objects.create(
+                user=user,
+                exercice=exercice
+            )
+
+        serializer = SessionSerializer(session)
+        return Response(serializer.data)
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------

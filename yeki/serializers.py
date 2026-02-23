@@ -366,38 +366,43 @@ class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
         ]
 
 
-class QuestionExerciceSerializer(serializers.ModelSerializer):
+class ChoixSerializer(serializers.ModelSerializer):
     class Meta:
-        model = QuestionExercice
-        fields = [
-            'id',
-            'texte',
-            'type',
-            'choix',
-            'points',
-        ]
+        model = Choix
+        fields = ["id", "texte"]
+
+
+class QuestionSerializer(serializers.ModelSerializer):
+    choix = ChoixSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Question
+        fields = ["id", "text", "type_question", "bonne_reponse", "points", "choix"]
 
 
 class ExerciceSerializer(serializers.ModelSerializer):
-    questions = QuestionExerciceSerializer(many=True, read_only=True)
+    questions = QuestionSerializer(many=True, read_only=True)
 
     class Meta:
         model = Exercice
-        fields = [
-            'id',
-            'titre',
-            'enonce',
-            'difficulte',
-            'questions',
-        ]
+        fields = ["id", "titre", "enonce", "etoiles", "questions"]
 
 
-class ExerciceCreateSerializer(serializers.ModelSerializer):
+class SessionSerializer(serializers.ModelSerializer):
+    temps_restant = serializers.SerializerMethodField()
+
     class Meta:
-        model = Exercice
-        fields = [
-            'titre',
-            'enonce',
-            'difficulte',
-            'module',
-        ]
+        model = SessionExercice
+        fields = ["id", "exercice", "debut", "termine", "temps_restant"]
+
+    def get_temps_restant(self, obj):
+        return obj.temps_restant()
+
+
+class EvaluationSerializer(serializers.ModelSerializer):
+    titre = serializers.CharField(source="exercice.titre", read_only=True)
+    etoiles = serializers.IntegerField(source="exercice.etoiles", read_only=True)
+
+    class Meta:
+        model = EvaluationExercice
+        fields = ["id", "titre", "etoiles", "score", "total", "date"]

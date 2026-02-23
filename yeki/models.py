@@ -1,7 +1,7 @@
 from django.db import models
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.models import User
-import mammoth
+#import mammoth
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -228,60 +228,67 @@ class Lecon(models.Model):
     def __str__(self):
         return f"{self.titre} ({self.cours.titre})"
 
+
 class Exercice(models.Model):
-    DIFFICULTE_CHOICES = [
-        (1, "★"),
-        (2, "★★"),
-        (3, "★★★"),
-        (4, "★★★★"),
-        (5, "★★★★★"),
-    ]
-
-    titre = models.CharField(max_length=200)
+    cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="exercices")
+    titre = models.CharField(max_length=255)
     enonce = models.TextField()
-    difficulte = models.PositiveSmallIntegerField(choices=DIFFICULTE_CHOICES)
-
-    cours = models.ForeignKey(
-        Cours,
-        on_delete=models.CASCADE,
-        related_name="exercices"
-    )
-
-    module = models.ForeignKey(
-        Module,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="exercices"
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
+    etoiles = models.IntegerField()
+    duree_minutes = models.IntegerField(default=10)  # durée examen
+    tentatives_max = models.IntegerField(default=1)
 
     def __str__(self):
-        return f"{self.titre} (★{self.difficulte})"
+        return f"{self.titre} ({self.etoiles}⭐)"
 
-class QuestionExercice(models.Model):
-    TYPE_CHOICES = [
-        ('qcm', 'QCM'),
-        ('texte', 'Texte'),
-    ]
 
-    exercice = models.ForeignKey(
-        Exercice,
-        on_delete=models.CASCADE,
-        related_name="questions"
+class SessionExercice(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE)
+    debut = models.DateTimeField(auto_now_add=True)
+    termine = models.BooleanField(default=False)
+
+    def temps_restant(self):
+        from django.utils import timezone
+        delta = timezone.now() - self.debut
+        return max(0, self.exercice.duree_minutes * 60 - delta.total_seconds())
+
+    def __str__(self):
+        return f"Session {self.user} - {self.exercice}"
+
+
+class Question(models.Model):
+    TYPE_CHOICES = (
+        ("qcm", "QCM"),
+        ("texte", "Texte"),
     )
 
-    texte = models.TextField()
-    type = models.CharField(max_length=10, choices=TYPE_CHOICES)
-    choix = models.JSONField(blank=True, null=True)  # pour QCM
+    exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE, related_name="questions")
+    text = models.TextField()
+    type_question = models.CharField(max_length=10, choices=TYPE_CHOICES)
     bonne_reponse = models.CharField(max_length=255)
-    points = models.PositiveIntegerField(default=1)
+    points = models.IntegerField(default=1)
 
     def __str__(self):
-        return self.texte[:50]
+        return self.text
 
 
+class Choix(models.Model):
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="choix")
+    texte = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.texte
+
+
+class EvaluationExercice(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE)
+    score = models.IntegerField()
+    total = models.IntegerField()
+    date = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.exercice.titre} ({self.score}/{self.total})"
 
 '''@receiver(post_save, sender=Lecon)
 def convertir_docx_en_html(sender, instance, **kwargs):
