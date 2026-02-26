@@ -376,7 +376,13 @@ class SoumettreEvaluationView(APIView):
 
         for question in exercice.questions.all():
             bonne = question.bonne_reponse.lower().strip()
-            user_rep = reponses.get(str(question.id), "").lower().strip()
+
+            # support id OU texte (compatibilité Flutter)
+            user_rep = (
+                reponses.get(str(question.id)) or
+                reponses.get(question.text) or
+                ""
+            ).lower().strip()
 
             total += question.points
             if user_rep == bonne:
@@ -438,7 +444,35 @@ class DemarrerExerciceView(APIView):
 
         serializer = SessionSerializer(session)
         return Response(serializer.data)
-    
+
+
+class ExerciceDetailView(APIView):
+    #permission_classes = [IsAuthenticated]
+
+    def get(self, request, exercice_id):
+        user = request.user
+        exercice = get_object_or_404(
+            Exercice.objects.prefetch_related("questions__choix"),
+            id=exercice_id
+        )
+
+        # session en cours
+        session = SessionExercice.objects.filter(
+            user=user,
+            exercice=exercice,
+            termine=False
+        ).first()
+
+        data = ExerciceSerializer(exercice).data
+
+        if session:
+            data["temps_restant"] = session.temps_restant()
+        else:
+            data["temps_restant"] = exercice.duree
+
+        return Response(data, status=status.HTTP_200_OK)
+
+
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------

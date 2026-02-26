@@ -373,11 +373,17 @@ class ChoixSerializer(serializers.ModelSerializer):
 
 
 class QuestionSerializer(serializers.ModelSerializer):
-    choix = ChoixSerializer(many=True, read_only=True)
+    type = serializers.CharField(source="type_question")
+    choix = serializers.SerializerMethodField()
 
     class Meta:
         model = Question
-        fields = ["id", "text", "type_question", "bonne_reponse", "points", "choix"]
+        fields = ["id", "text", "type", "points", "choix"]
+
+    def get_choix(self, obj):
+        if obj.type_question.lower() == "qcm":
+            return [c.texte for c in obj.choix.all()]
+        return []
 
 
 class ExerciceSerializer(serializers.ModelSerializer):
@@ -396,7 +402,7 @@ class SessionSerializer(serializers.ModelSerializer):
         fields = ["id", "exercice", "debut", "termine", "temps_restant"]
 
     def get_temps_restant(self, obj):
-        return obj.temps_restant()
+        return obj.temps_restant()  # déjà défini dans ton modèle
 
 
 class EvaluationSerializer(serializers.ModelSerializer):

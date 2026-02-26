@@ -237,6 +237,11 @@ class Exercice(models.Model):
     duree_minutes = models.IntegerField(default=10)  # durée examen
     tentatives_max = models.IntegerField(default=1)
 
+    @property
+    def duree(self):
+        """Durée en secondes pour Flutter"""
+        return self.duree_minutes * 60
+
     def __str__(self):
         return f"{self.titre} ({self.etoiles}⭐)"
 
