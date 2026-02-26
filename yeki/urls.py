@@ -61,7 +61,7 @@ urlpatterns = [
     path("cours/<int:cours_id>/exercices/", ListeExercicesCoursView.as_view()),
     path("exercices/<int:exercice_id>/evaluer/", SoumettreEvaluationView.as_view()),
     path("evaluations/historique/", HistoriqueEvaluationsView.as_view()),
-    path("api/exercices/<int:exercice_id>/", ExerciceDetailView.as_view()),
+    path("exercices/<int:exercice_id>/", ExerciceDetailView.as_view()),
     path("exercices/<int:exercice_id>/demarrer/", DemarrerExerciceView.as_view()),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
