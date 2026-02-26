@@ -11,4 +11,5 @@ admin.site.register(Module)
 admin.site.register(Exercice)
 admin.site.register(SessionExercice)
 admin.site.register(Question)
+admin.site.register(Choix)
 
