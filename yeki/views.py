@@ -447,7 +447,7 @@ class DemarrerExerciceView(APIView):
 
 
 class ExerciceDetailView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, exercice_id):
         user = request.user
