@@ -12,4 +12,6 @@ admin.site.register(Exercice)
 admin.site.register(SessionExercice)
 admin.site.register(Question)
 admin.site.register(Choix)
+admin.site.register(SoumissionDevoir)
+admin.site.register(Devoir)
 
