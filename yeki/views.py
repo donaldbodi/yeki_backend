@@ -2,6 +2,7 @@
 from django.shortcuts import render, get_object_or_404
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
+from django.utils import timezone
 
 from rest_framework import status, generics
 from rest_framework.views import APIView
@@ -473,6 +474,78 @@ class ExerciceDetailView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
+# 📚 LISTE DES DEVOIRS
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def liste_devoirs(request):
+    devoirs = Devoir.objects.all().order_by("-date_limite")
+    serializer = DevoirSerializer(
+        devoirs, many=True, context={"request": request}
+    )
+    return Response(serializer.data)
+
+
+# 📄 DETAIL D’UN DEVOIR
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def detail_devoir(request, pk):
+    devoir = Devoir.objects.get(pk=pk)
+    serializer = DevoirSerializer(
+        devoir, context={"request": request}
+    )
+    return Response(serializer.data)
+
+
+# ▶️ DEMARRER DEVOIR
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def demarrer_devoir(request, pk):
+    devoir = Devoir.objects.get(pk=pk)
+
+    SoumissionDevoir.objects.get_or_create(
+        utilisateur=request.user,
+        devoir=devoir
+    )
+
+    return Response({"message": "Devoir démarré"})
+
+
+# 📤 SOUMETTRE DEVOIR
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def soumettre_devoir(request, pk):
+    devoir = Devoir.objects.get(pk=pk)
+
+    soumission, _ = SoumissionDevoir.objects.get_or_create(
+        utilisateur=request.user,
+        devoir=devoir
+    )
+
+    soumission.date_soumission = timezone.now()
+    soumission.save()
+
+    return Response({"message": "Devoir soumis avec succès"})
+    
+
+# 📊 RESULTAT
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def resultat_devoir(request, pk):
+    soum = SoumissionDevoir.objects.filter(
+        utilisateur=request.user,
+        devoir_id=pk
+    ).first()
+
+    if not soum:
+        return Response({"detail": "Aucune soumission"}, status=404)
+
+    return Response({
+        "note": soum.note,
+        "corrige": soum.corrige,
+        "date_soumission": soum.date_soumission
+    })
+
+    
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------

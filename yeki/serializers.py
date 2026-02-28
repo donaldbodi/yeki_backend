@@ -412,3 +412,30 @@ class EvaluationSerializer(serializers.ModelSerializer):
     class Meta:
         model = EvaluationExercice
         fields = ["id", "titre", "etoiles", "score", "total", "date"]
+
+
+class DevoirSerializer(serializers.ModelSerializer):
+    statut = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Devoir
+        fields = [
+            "id",
+            "titre",
+            "matiere",
+            "niveau",
+            "date_limite",
+            "is_concours",
+            "concours",
+            "statut",
+        ]
+
+    def get_statut(self, obj):
+        user = self.context["request"].user
+        soum = SoumissionDevoir.objects.filter(
+            utilisateur=user, devoir=obj
+        ).first()
+
+        if not soum:
+            return "En attente"
+        return "Corrigé" if soum.corrige else "Soumis"

@@ -295,6 +295,36 @@ class EvaluationExercice(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.exercice.titre} ({self.score}/{self.total})"
 
+
+class Devoir(models.Model):
+    MATIERES = [
+        ("Mathématiques", "Mathématiques"),
+        ("Physique", "Physique"),
+    ]
+
+    titre = models.CharField(max_length=255)
+    matiere = models.CharField(max_length=100, choices=MATIERES)
+    niveau = models.IntegerField(default=1)
+    date_limite = models.DateTimeField()
+    is_concours = models.BooleanField(default=False)
+    concours = models.CharField(max_length=255, null=True, blank=True)
+    enonce = models.TextField()
+
+    def __str__(self):
+        return self.titre
+
+
+class SoumissionDevoir(models.Model):
+    utilisateur = models.ForeignKey(User, on_delete=models.CASCADE)
+    devoir = models.ForeignKey(Devoir, on_delete=models.CASCADE)
+    date_soumission = models.DateTimeField(auto_now_add=True)
+    note = models.FloatField(null=True, blank=True)
+    corrige = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("utilisateur", "devoir")
+
+
 '''@receiver(post_save, sender=Lecon)
 def convertir_docx_en_html(sender, instance, **kwargs):
     if instance.fichier and instance.fichier.name.endswith(".docx"):
