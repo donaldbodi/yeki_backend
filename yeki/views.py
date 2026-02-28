@@ -339,7 +339,7 @@ class ModuleCreateView(APIView):
 
 
 class ListeExercicesCoursView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, cours_id):
         exercices = Exercice.objects.filter(cours_id=cours_id).prefetch_related("questions__choix")
@@ -348,7 +348,7 @@ class ListeExercicesCoursView(APIView):
 
 
 class SoumettreEvaluationView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, exercice_id):
         user = request.user
@@ -414,7 +414,7 @@ class HistoriqueEvaluationsView(APIView):
 
 
 class DemarrerExerciceView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, exercice_id):
         user = request.user

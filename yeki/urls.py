@@ -56,7 +56,6 @@ urlpatterns = [
 
     # --- MODULES --
     path('cours/<int:cours_id>/modules/', ModuleCreateView.as_view(), name='module-create'),
-    # urls.py
     path('cours/<int:cours_id>/liste-modules/',ModuleListByCoursView.as_view(),name='cours-modules'),
     path("cours/<int:cours_id>/exercices/", ListeExercicesCoursView.as_view()),
     path("exercices/<int:exercice_id>/evaluer/", SoumettreEvaluationView.as_view()),
