@@ -14,4 +14,5 @@ admin.site.register(Question)
 admin.site.register(Choix)
 admin.site.register(SoumissionDevoir)
 admin.site.register(Devoir)
+admin.site.register(ForumMessage)
 

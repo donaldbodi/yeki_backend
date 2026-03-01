@@ -325,6 +325,20 @@ class SoumissionDevoir(models.Model):
         unique_together = ("utilisateur", "devoir")
 
 
+class ForumMessage(models.Model):
+    sender = models.ForeignKey(User, on_delete=models.CASCADE)
+    cours = models.ForeignKey(Cours, on_delete=models.CASCADE, null=True, blank=True)
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
+    text = models.TextField(blank=True)
+    image = models.ImageField(upload_to='forum_images/', null=True, blank=True)
+    audio = models.FileField(upload_to='forum_audios/', null=True, blank=True)
+    role = models.CharField(max_length=50, choices=(('enseignant','enseignant'),('eleve','élève')))
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.sender.username} - {self.text[:20]}"
+
+
 '''@receiver(post_save, sender=Lecon)
 def convertir_docx_en_html(sender, instance, **kwargs):
     if instance.fichier and instance.fichier.name.endswith(".docx"):

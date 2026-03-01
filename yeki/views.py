@@ -545,7 +545,35 @@ def resultat_devoir(request, pk):
         "date_soumission": soum.date_soumission
     })
 
-    
+
+# GET tous les messages + réponses
+class ForumMessagesListAPIView(generics.ListAPIView):
+    serializer_class = ForumMessageSerializer
+
+    def get_queryset(self):
+        cours_id = self.request.query_params.get('cours_id')
+        if cours_id:
+            return ForumMessage.objects.filter(cours_id=cours_id, parent=None).order_by('-timestamp')
+        return ForumMessage.objects.filter(parent=None).order_by('-timestamp')
+
+
+# POST nouvelle question ou réponse
+class ForumMessageCreateAPIView(generics.CreateAPIView):
+    serializer_class = ForumMessageSerializer
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, *args, **kwargs):
+        data = request.data.copy()
+        user = request.user
+        data['sender'] = user.id
+
+        serializer = ForumMessageSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------

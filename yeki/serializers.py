@@ -439,3 +439,15 @@ class DevoirSerializer(serializers.ModelSerializer):
         if not soum:
             return "En attente"
         return "Corrigé" if soum.corrige else "Soumis"
+
+
+class ForumMessageSerializer(serializers.ModelSerializer):
+    replies = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ForumMessage
+        fields = ['id', 'parent', 'text', 'image', 'audio', 'sender', 'role', 'timestamp', 'replies']
+
+    def get_replies(self, obj):
+        serializer = ForumMessageSerializer(obj.replies.all(), many=True)
+        return serializer.data

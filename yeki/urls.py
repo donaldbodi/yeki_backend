@@ -67,6 +67,8 @@ urlpatterns = [
     path("devoirs/<int:pk>/demarrer/", views.demarrer_devoir),
     path("devoirs/<int:pk>/soumettre/", views.soumettre_devoir),
     path("devoirs/<int:pk>/resultat/", views.resultat_devoir),
+    path('forum/messages/', ForumMessagesListAPIView.as_view(), name='forum-messages-list'),
+    path('forum/messages/create/', ForumMessageCreateAPIView.as_view(), name='forum-message-create'),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
