@@ -3,7 +3,7 @@ from django.shortcuts import render, get_object_or_404
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
-
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
