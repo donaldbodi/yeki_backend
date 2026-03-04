@@ -10,6 +10,8 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from django.contrib.auth.hashers import check_password
 
 from django.contrib.auth import get_user_model
 from django.db.models import Sum, Avg
@@ -472,8 +474,195 @@ class ExerciceDetailView(APIView):
             data["temps_restant"] = exercice.duree
 
         return Response(data, status=status.HTTP_200_OK)
+    
+
+# ─────────────────────────────────────────────────────
+# ENDPOINT 1 : GET /api/profil/me/
+# Retourne le profil complet de l'utilisateur connecté
+# ─────────────────────────────────────────────────────
+class ProfilMeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        serializer = ProfilDetailSerializer(profile, context={"request": request})
+        return Response(serializer.data, status=200)
 
 
+# ─────────────────────────────────────────────────────
+# ENDPOINT 2 : PATCH /api/profil/update/
+# Modifier les infos du profil (y compris avatar en multipart)
+# ─────────────────────────────────────────────────────
+class ProfilUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def patch(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        data = request.data
+
+        # Champs User Django
+        user = request.user
+        if "first_name" in data:
+            user.first_name = data["first_name"]
+        if "last_name" in data:
+            user.last_name = data["last_name"]
+        if "email" in data:
+            user.email = data["email"]
+        user.save()
+
+        # Champs Profile
+        for field in ["phone", "bio", "cursus", "sub_cursus", "niveau", "filiere", "licence"]:
+            if field in data:
+                setattr(profile, field, data[field])
+
+        # Avatar (fichier image)
+        if "avatar" in request.FILES:
+            profile.avatar = request.FILES["avatar"]
+
+        profile.save()
+
+        serializer = ProfilDetailSerializer(profile, context={"request": request})
+        return Response(serializer.data, status=200)
+
+
+# ─────────────────────────────────────────────────────
+# ENDPOINT 3 : DELETE /api/profil/delete/
+# Supprimer définitivement le compte
+# ─────────────────────────────────────────────────────
+class ProfilDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        user = request.user
+        try:
+            user.auth_token.delete()
+        except Exception:
+            pass
+        user.delete()
+        return Response({"detail": "Compte supprimé avec succès."}, status=200)
+
+
+# ─────────────────────────────────────────────────────
+# ENDPOINT 4 : GET /api/profil/stats/
+# Stats personnalisées selon le rôle
+# ─────────────────────────────────────────────────────
+class ProfilStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        role = profile.user_type
+        stats = {}
+
+        if role == "apprenant":
+            # Nombre de cours disponibles dans son cursus
+            nb_cours = Cours.objects.filter(
+                departement__parcours__nom=profile.cursus
+            ).count() if profile.cursus else 0
+            # Devoirs : tous les devoirs (on peut filtrer plus tard)
+            nb_devoirs = SoumissionDevoir.objects.filter(
+                utilisateur=request.user
+            ).count()
+            # Évaluations : score moyen
+            evals = EvaluationExercice.objects.filter(user=request.user)
+            if evals.exists():
+                moyenne = sum(
+                    (e.score / e.total * 20) for e in evals if e.total > 0
+                ) / evals.count()
+            else:
+                moyenne = 0.0
+            stats = {
+                "nb_cours": nb_cours,
+                "nb_devoirs": nb_devoirs,
+                "moyenne": round(moyenne, 1),
+            }
+
+        elif role in ["enseignant_principal", "enseignant"]:
+            if role == "enseignant_principal":
+                nb_cours = Cours.objects.filter(enseignant_principal=profile).count()
+            else:
+                nb_cours = profile.cours_secondaires.count()
+            nb_lecons = Lecon.objects.filter(created_by=profile).count()
+            stats = {
+                "nb_cours": nb_cours,
+                "nb_lecons": nb_lecons,
+                "nb_devoirs": 0,
+            }
+
+        elif role == "enseignant_cadre":
+            nb_departements = Departement.objects.filter(cadre=profile).count()
+            nb_cours = Cours.objects.filter(departement__cadre=profile).count()
+            stats = {
+                "nb_departements": nb_departements,
+                "nb_cours": nb_cours,
+                "nb_devoirs": 0,
+            }
+
+        else:
+            stats = {"nb_cours": 0, "nb_devoirs": 0, "moyenne": 0.0}
+
+        return Response(stats, status=200)
+
+
+# ─────────────────────────────────────────────────────
+# ENDPOINT 5 : POST /api/auth/change-password/
+# Changer le mot de passe (ancien + nouveau requis)
+# ─────────────────────────────────────────────────────
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        old_password = request.data.get("old_password", "")
+        new_password = request.data.get("new_password", "")
+
+        if not old_password or not new_password:
+            return Response(
+                {"detail": "Les deux champs sont requis."},
+                status=400
+            )
+
+        if not check_password(old_password, user.password):
+            return Response(
+                {"detail": "Ancien mot de passe incorrect."},
+                status=400
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {"detail": "Le nouveau mot de passe doit contenir au moins 8 caractères."},
+                status=400
+            )
+
+        user.set_password(new_password)
+        user.save()
+
+        # Renouveler le token après changement de mdp
+        try:
+            user.auth_token.delete()
+        except Exception:
+            pass
+        token, _ = Token.objects.get_or_create(user=user)
+
+        return Response(
+            {"detail": "Mot de passe modifié avec succès.", "token": token.key},
+            status=200
+        )
+
+        
 # 📚 LISTE DES DEVOIRS
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])

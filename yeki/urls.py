@@ -70,5 +70,11 @@ urlpatterns = [
     path('forum/messages/', ForumMessagesListAPIView.as_view(), name='forum-messages-list'),
     path('forum/messages/create/', ForumMessageCreateAPIView.as_view(), name='forum-message-create'),
 
+    path('profil/me/',       ProfilMeView.as_view(),      name='profil-me'),
+    path('profil/update/',   ProfilUpdateView.as_view(),  name='profil-update'),
+    path('profil/delete/',   ProfilDeleteView.as_view(),  name='profil-delete'),
+    path('profil/stats/',    ProfilStatsView.as_view(),   name='profil-stats'),
+    path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
+
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

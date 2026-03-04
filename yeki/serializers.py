@@ -451,3 +451,32 @@ class ForumMessageSerializer(serializers.ModelSerializer):
     def get_replies(self, obj):
         serializer = ForumMessageSerializer(obj.replies.all(), many=True)
         return serializer.data
+    
+
+class ProfilDetailSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    avatar = serializers.SerializerMethodField()
+
+    # Champs user.first/last_name exposés à plat
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
+    last_name  = serializers.CharField(source="user.last_name",  read_only=True)
+    email      = serializers.CharField(source="user.email",      read_only=True)
+    username   = serializers.CharField(source="user.username",   read_only=True)
+
+    class Meta:
+        model = Profile
+        fields = [
+            "id", "user", "user_type",
+            "first_name", "last_name", "email", "username",
+            "phone", "bio",
+            "cursus", "sub_cursus", "niveau", "filiere", "licence",
+            "is_active", "avatar",
+        ]
+
+    def get_avatar(self, obj):
+        if obj.avatar:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.avatar.url)
+            return obj.avatar.url
+        return None
