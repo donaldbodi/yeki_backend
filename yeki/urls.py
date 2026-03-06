@@ -62,11 +62,54 @@ urlpatterns = [
     path("evaluations/historique/", HistoriqueEvaluationsView.as_view()),
     path("exercices/<int:exercice_id>/", ExerciceDetailView.as_view()),
     path("exercices/<int:exercice_id>/demarrer/", DemarrerExerciceView.as_view()),
-    path("devoirs/", views.liste_devoirs),
-    path("devoirs/<int:pk>/", views.detail_devoir),
-    path("devoirs/<int:pk>/demarrer/", views.demarrer_devoir),
-    path("devoirs/<int:pk>/soumettre/", views.soumettre_devoir),
-    path("devoirs/<int:pk>/resultat/", views.resultat_devoir),
+    path("devoirs/",                       ListeDevoirsView.as_view(),    name="liste-devoirs"),
+
+    # GET  /api/devoirs/<id>/
+    path("devoirs/<int:devoir_id>/",       DetailDevoirView.as_view(),    name="detail-devoir"),
+
+    # POST /api/devoirs/<id>/demarrer/     → crée/reprend soumission
+    path("devoirs/<int:devoir_id>/demarrer/",  DemarrerDevoirView.as_view(),  name="demarrer-devoir"),
+
+    # POST /api/devoirs/<id>/soumettre/    → { reponses: {q_id: valeur} }
+    path("devoirs/<int:devoir_id>/soumettre/", SoumettreDevoirView.as_view(), name="soumettre-devoir"),
+
+    # POST /api/devoirs/<id>/focus-perdu/  → signal de triche
+    path("devoirs/<int:devoir_id>/focus-perdu/", SignalerFocusDevoirView.as_view(), name="focus-devoir"),
+
+    # GET  /api/devoirs/mes-soumissions/   → historique apprenant
+    path("devoirs/mes-soumissions/",       MesSoumissionsView.as_view(),  name="mes-soumissions"),
+
+    # GET  /api/devoirs/<id>/resultat/
+    path("devoirs/<int:devoir_id>/resultat/", ResultatDevoirView.as_view(), name="resultat-devoir"),
+
+
+    # ── Olympiades ────────────────────────────────────────────
+    # GET  /api/olympiades/
+    path("olympiades/",                    ListeOlympiadesView.as_view(),     name="liste-olympiades"),
+
+    # GET  /api/olympiades/<id>/
+    path("olympiades/<int:olympiade_id>/", DetailOlympiadeView.as_view(),    name="detail-olympiade"),
+
+    # POST /api/olympiades/<id>/inscrire/
+    path("olympiades/<int:olympiade_id>/inscrire/",  SInscrireOlympiadeView.as_view(),   name="inscrire-olympiade"),
+
+    # POST /api/olympiades/<id>/demarrer/
+    path("olympiades/<int:olympiade_id>/demarrer/",  DemarrerOlympiadeView.as_view(),    name="demarrer-olympiade"),
+
+    # POST /api/olympiades/<id>/soumettre/
+    path("olympiades/<int:olympiade_id>/soumettre/", SoumettreOlympiadeView.as_view(),   name="soumettre-olympiade"),
+
+    # POST /api/olympiades/<id>/focus-perdu/
+    path("olympiades/<int:olympiade_id>/focus-perdu/", FocusPeduOlympiadeView.as_view(), name="focus-olympiade"),
+
+    # GET  /api/olympiades/<id>/classement/
+    path("olympiades/<int:olympiade_id>/classement/", ClassementOlympiadeView.as_view(), name="classement-olympiade"),
+
+    # POST /api/olympiades/<id>/calculer-classement/   (admin)
+    path("olympiades/<int:olympiade_id>/calculer-classement/", CalculerClassementView.as_view(), name="calculer-classement"),
+
+    # GET  /api/olympiades/<id>/mon-inscription/
+    path("olympiades/<int:olympiade_id>/mon-inscription/", MonInscriptionOlympiadeView.as_view(), name="mon-inscription-olympiade"),
     path('forum/messages/', ForumMessagesListAPIView.as_view(), name='forum-messages-list'),
     path('forum/messages/create/', ForumMessageCreateAPIView.as_view(), name='forum-message-create'),
 

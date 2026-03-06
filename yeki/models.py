@@ -1,9 +1,10 @@
 from django.db import models
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.auth.models import User
 #import mammoth
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 
 class Profile(models.Model):
@@ -296,33 +297,368 @@ class EvaluationExercice(models.Model):
         return f"{self.user.username} - {self.exercice.titre} ({self.score}/{self.total})"
 
 
+# ─────────────────────────────────────────────────────────────────
+# DEVOIR GÉNÉRAL (cursus, concours, formation classique/métier)
+# ─────────────────────────────────────────────────────────────────
+
 class Devoir(models.Model):
-    MATIERES = [
-        ("Mathématiques", "Mathématiques"),
-        ("Physique", "Physique"),
+
+    # ── Type de devoir ──────────────────────────────────────────
+    TYPE_CHOICES = [
+        ("cursus",           "Devoir de cursus"),
+        ("concours",         "Préparation concours"),
+        ("formation_classique", "Formation classique"),
+        ("formation_metier", "Formation métier"),
+        ("olympiade",        "Olympiade"),
     ]
 
-    titre = models.CharField(max_length=255)
-    matiere = models.CharField(max_length=100, choices=MATIERES)
-    niveau = models.IntegerField(default=1)
-    date_limite = models.DateTimeField()
-    is_concours = models.BooleanField(default=False)
-    concours = models.CharField(max_length=255, null=True, blank=True)
-    enonce = models.TextField()
+    MATIERE_CHOICES = [
+        ("Mathématiques",    "Mathématiques"),
+        ("Physique",         "Physique"),
+        ("Chimie",           "Chimie"),
+        ("SVT",              "SVT"),
+        ("Informatique",     "Informatique"),
+        ("Français",         "Français"),
+        ("Anglais",          "Anglais"),
+        ("Histoire-Géo",     "Histoire-Géo"),
+        ("Philosophie",      "Philosophie"),
+        ("Économie",         "Économie"),
+        ("Autre",            "Autre"),
+    ]
+
+    NIVEAU_CHOICES = [
+        ("Terminale", "Terminale"),
+        ("1ère",      "1ère"),
+        ("2nde",      "2nde"),
+        ("3ème",      "3ème"),
+        ("Licence 1", "Licence 1"),
+        ("Licence 2", "Licence 2"),
+        ("Licence 3", "Licence 3"),
+        ("Master 1",  "Master 1"),
+        ("Master 2",  "Master 2"),
+        ("Autre",     "Autre"),
+    ]
+
+    # ── Champs de base ───────────────────────────────────────────
+    titre        = models.CharField(max_length=255)
+    description  = models.TextField(blank=True)
+    type_devoir  = models.CharField(max_length=25, choices=TYPE_CHOICES, default="cursus")
+    matiere      = models.CharField(max_length=100, choices=MATIERE_CHOICES)
+    niveau       = models.CharField(max_length=50, choices=NIVEAU_CHOICES, default="Terminale")
+    enonce       = models.TextField()
+
+    # ── Dates ────────────────────────────────────────────────────
+    date_creation  = models.DateTimeField(auto_now_add=True)
+    date_debut     = models.DateTimeField(default=timezone.now,
+                                          help_text="Quand le devoir devient visible/accessible")
+    date_limite    = models.DateTimeField(help_text="Date de remise obligatoire")
+
+    # ── Concours / Formation ─────────────────────────────────────
+    concours_lie   = models.CharField(max_length=255, blank=True, null=True,
+                                       help_text="Ex: BEPC, BAC, Concours ENS…")
+    formation_liee = models.CharField(max_length=255, blank=True, null=True,
+                                       help_text="Nom de la formation liée")
+
+    # ── Paramètres pédagogiques ──────────────────────────────────
+    duree_minutes       = models.PositiveIntegerField(default=60,
+                                                       help_text="Durée max de composition en minutes")
+    tentatives_max      = models.PositiveIntegerField(default=1)
+    note_sur            = models.PositiveIntegerField(default=20)
+    coefficient         = models.FloatField(default=1.0)
+
+    # ── Visibilité & accès ───────────────────────────────────────
+    est_publie          = models.BooleanField(default=False)
+    acces_restreint     = models.BooleanField(default=False,
+                                               help_text="Si True, seuls les apprenants du cursus lié peuvent y accéder")
+    cours_lie           = models.ForeignKey(
+                            "Cours", on_delete=models.SET_NULL,
+                            null=True, blank=True, related_name="devoirs"
+                          )
+
+    # ── Auteur ───────────────────────────────────────────────────
+    cree_par = models.ForeignKey(
+        "Profile", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="devoirs_crees"
+    )
+
+    class Meta:
+        ordering = ["-date_limite"]
 
     def __str__(self):
-        return self.titre
+        return f"[{self.get_type_devoir_display()}] {self.titre}"
 
+    @property
+    def est_ouvert(self):
+        now = timezone.now()
+        return self.date_debut <= now <= self.date_limite
+
+    @property
+    def est_expire(self):
+        return timezone.now() > self.date_limite
+
+    def clean(self):
+        if self.date_debut and self.date_limite:
+            if self.date_limite <= self.date_debut:
+                raise ValidationError("La date limite doit être après la date de début.")
+
+
+# ─────────────────────────────────────────────────────────────────
+# QUESTIONS D'UN DEVOIR  (QCM ou texte libre)
+# ─────────────────────────────────────────────────────────────────
+
+class QuestionDevoir(models.Model):
+    TYPE_CHOICES = [
+        ("qcm",   "QCM"),
+        ("texte", "Texte libre"),
+    ]
+    devoir         = models.ForeignKey(Devoir, on_delete=models.CASCADE, related_name="questions")
+    texte          = models.TextField()
+    type_question  = models.CharField(max_length=10, choices=TYPE_CHOICES)
+    points         = models.FloatField(default=1.0)
+    ordre          = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ["ordre"]
+
+    def __str__(self):
+        return f"Q{self.ordre} — {self.texte[:60]}"
+
+
+class ChoixReponse(models.Model):
+    question     = models.ForeignKey(QuestionDevoir, on_delete=models.CASCADE, related_name="choix")
+    texte        = models.CharField(max_length=500)
+    est_correct  = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{'✓' if self.est_correct else '✗'} {self.texte[:40]}"
+
+
+# ─────────────────────────────────────────────────────────────────
+# SOUMISSION  (une par apprenant par devoir)
+# ─────────────────────────────────────────────────────────────────
 
 class SoumissionDevoir(models.Model):
-    utilisateur = models.ForeignKey(User, on_delete=models.CASCADE)
-    devoir = models.ForeignKey(Devoir, on_delete=models.CASCADE)
-    date_soumission = models.DateTimeField(auto_now_add=True)
-    note = models.FloatField(null=True, blank=True)
-    corrige = models.BooleanField(default=False)
+    STATUT_CHOICES = [
+        ("en_cours",    "En cours"),
+        ("soumis",      "Soumis"),
+        ("en_retard",   "En retard"),
+        ("corrige",     "Corrigé"),
+    ]
+
+    utilisateur     = models.ForeignKey(User, on_delete=models.CASCADE, related_name="soumissions")
+    devoir          = models.ForeignKey(Devoir, on_delete=models.CASCADE, related_name="soumissions")
+    statut          = models.CharField(max_length=15, choices=STATUT_CHOICES, default="en_cours")
+
+    # ── Timestamps ──────────────────────────────────────────────
+    debut           = models.DateTimeField(auto_now_add=True)
+    soumis_le       = models.DateTimeField(null=True, blank=True)
+
+    # ── Résultats ────────────────────────────────────────────────
+    note            = models.FloatField(null=True, blank=True)
+    commentaire     = models.TextField(blank=True)
+    corrige_par     = models.ForeignKey(
+                        User, on_delete=models.SET_NULL,
+                        null=True, blank=True, related_name="corrections"
+                      )
+    corrige_le      = models.DateTimeField(null=True, blank=True)
+
+    # ── Anti-triche ──────────────────────────────────────────────
+    nb_focus_perdu  = models.PositiveIntegerField(default=0,
+                                                    help_text="Nombre de fois que l'apprenant a quitté la page")
+    ip_address      = models.GenericIPAddressField(null=True, blank=True)
+    user_agent      = models.TextField(blank=True)
+    est_suspecte    = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("utilisateur", "devoir")
+
+    def __str__(self):
+        return f"{self.utilisateur.username} → {self.devoir.titre} [{self.statut}]"
+
+    @property
+    def est_en_retard(self):
+        if self.soumis_le and self.devoir.date_limite:
+            return self.soumis_le > self.devoir.date_limite
+        return False
+
+    def temps_restant_secondes(self):
+        if self.statut != "en_cours":
+            return 0
+        elapsed = (timezone.now() - self.debut).total_seconds()
+        return max(0, self.devoir.duree_minutes * 60 - elapsed)
+
+
+class ReponseDevoir(models.Model):
+    """Stocke la réponse d'un apprenant à une question."""
+    soumission  = models.ForeignKey(SoumissionDevoir, on_delete=models.CASCADE, related_name="reponses")
+    question    = models.ForeignKey(QuestionDevoir, on_delete=models.CASCADE)
+    reponse     = models.TextField(blank=True)     # texte libre OU texte du choix sélectionné
+    choix       = models.ForeignKey(ChoixReponse, on_delete=models.SET_NULL,
+                                     null=True, blank=True)  # pour QCM
+    est_correct = models.BooleanField(null=True, blank=True)  # rempli à la correction
+    points_obtenus = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("soumission", "question")
+
+
+# ─────────────────────────────────────────────────────────────────
+# OLYMPIADE  (type spécial avec logique propre)
+# ─────────────────────────────────────────────────────────────────
+
+class Olympiade(models.Model):
+    STATUT_CHOICES = [
+        ("inscription",  "Inscriptions ouvertes"),
+        ("fermee",       "Inscriptions fermées"),
+        ("en_cours",     "Olympiade en cours"),
+        ("terminee",     "Terminée"),
+    ]
+
+    # ── Identité ─────────────────────────────────────────────────
+    titre        = models.CharField(max_length=255)
+    description  = models.TextField(blank=True)
+    matiere      = models.CharField(max_length=100)
+    niveau       = models.CharField(max_length=50)
+    edition      = models.CharField(max_length=20, blank=True, help_text="Ex: 2025-1")
+
+    # ── Dates ────────────────────────────────────────────────────
+    date_ouverture_inscription = models.DateTimeField()
+    date_cloture_inscription   = models.DateTimeField()
+    date_debut_olympiade       = models.DateTimeField()
+    date_fin_olympiade         = models.DateTimeField()
+
+    # ── Paramètres de composition ────────────────────────────────
+    duree_minutes        = models.PositiveIntegerField(default=120)
+    nb_questions         = models.PositiveIntegerField(default=30)
+    note_sur             = models.PositiveIntegerField(default=20)
+    melanger_questions   = models.BooleanField(default=True,
+                                                help_text="Mélange l'ordre des questions par participant")
+    melanger_choix       = models.BooleanField(default=True,
+                                                help_text="Mélange les choix QCM par participant")
+    une_seule_session    = models.BooleanField(default=True,
+                                                help_text="Impossible de reprendre si on quitte")
+    max_focus_perdu      = models.PositiveIntegerField(default=3,
+                                                        help_text="Nb d'abandons de focus avant soumission forcée")
+
+    # ── Devoir lié ───────────────────────────────────────────────
+    devoir = models.OneToOneField(
+        Devoir, on_delete=models.CASCADE,
+        related_name="olympiade_config",
+        null=True, blank=True,
+        help_text="Le devoir contenant les questions de l'olympiade"
+    )
+
+    # ── Prix / Récompenses ───────────────────────────────────────
+    prix_1er    = models.CharField(max_length=255, blank=True)
+    prix_2eme   = models.CharField(max_length=255, blank=True)
+    prix_3eme   = models.CharField(max_length=255, blank=True)
+
+    # ── Auteur ───────────────────────────────────────────────────
+    organisateur = models.ForeignKey(
+        "Profile", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="olympiades_organisees"
+    )
+
+    cree_par = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True
+    )
+
+    class Meta:
+        ordering = ["-date_debut_olympiade"]
+
+    def __str__(self):
+        return f"Olympiade {self.titre} — {self.edition}"
+
+    @property
+    def statut_auto(self):
+        now = timezone.now()
+        if now < self.date_ouverture_inscription:
+            return "bientot"
+        if now <= self.date_cloture_inscription:
+            return "inscription"
+        if now < self.date_debut_olympiade:
+            return "fermee"
+        if now <= self.date_fin_olympiade:
+            return "en_cours"
+        return "terminee"
+
+    def clean(self):
+        if self.date_cloture_inscription >= self.date_debut_olympiade:
+            raise ValidationError("La clôture des inscriptions doit être avant le début de l'olympiade.")
+        if self.date_debut_olympiade >= self.date_fin_olympiade:
+            raise ValidationError("La date de début doit être avant la date de fin.")
+
+
+class InscriptionOlympiade(models.Model):
+    """Inscription d'un apprenant à une olympiade."""
+    STATUT_CHOICES = [
+        ("inscrit",    "Inscrit"),
+        ("confirme",   "Confirmé"),
+        ("disqualifie","Disqualifié"),
+    ]
+
+    olympiade   = models.ForeignKey(Olympiade, on_delete=models.CASCADE, related_name="inscriptions")
+    apprenant   = models.ForeignKey(User, on_delete=models.CASCADE, related_name="inscriptions_olympiade")
+    statut      = models.CharField(max_length=15, choices=STATUT_CHOICES, default="inscrit")
+    inscrit_le  = models.DateTimeField(auto_now_add=True)
+
+    # ── Session de composition ───────────────────────────────────
+    session_demarree    = models.BooleanField(default=False)
+    heure_debut_compo   = models.DateTimeField(null=True, blank=True)
+    heure_fin_compo     = models.DateTimeField(null=True, blank=True)
+    soumis              = models.BooleanField(default=False)
+    soumis_automatique  = models.BooleanField(default=False,
+                                               help_text="True si soumis automatiquement (temps écoulé / triche)")
+
+    # ── Anti-triche ──────────────────────────────────────────────
+    nb_focus_perdu      = models.PositiveIntegerField(default=0)
+    ip_inscription      = models.GenericIPAddressField(null=True, blank=True)
+    ip_composition      = models.GenericIPAddressField(null=True, blank=True)
+    user_agent          = models.TextField(blank=True)
+    est_suspecte        = models.BooleanField(default=False)
+    raison_suspicion    = models.TextField(blank=True)
+
+    # ── Résultat ─────────────────────────────────────────────────
+    note        = models.FloatField(null=True, blank=True)
+    classement  = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("olympiade", "apprenant")
+
+    def __str__(self):
+        return f"{self.apprenant.username} @ {self.olympiade.titre}"
+
+    def temps_restant_secondes(self):
+        if not self.heure_debut_compo or self.soumis:
+            return 0
+        elapsed = (timezone.now() - self.heure_debut_compo).total_seconds()
+        return max(0, self.olympiade.duree_minutes * 60 - elapsed)
+
+
+class ReponseOlympiade(models.Model):
+    """Réponse d'un participant à une question de l'olympiade."""
+    inscription  = models.ForeignKey(InscriptionOlympiade, on_delete=models.CASCADE, related_name="reponses")
+    question     = models.ForeignKey(QuestionDevoir, on_delete=models.CASCADE)
+    choix        = models.ForeignKey(ChoixReponse, on_delete=models.SET_NULL, null=True, blank=True)
+    reponse_texte = models.TextField(blank=True)
+    est_correct  = models.BooleanField(null=True, blank=True)
+    points_obtenus = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("inscription", "question")
+
+
+class ClassementOlympiade(models.Model):
+    """Classement final calculé après correction."""
+    olympiade   = models.ForeignKey(Olympiade, on_delete=models.CASCADE, related_name="classement")
+    apprenant   = models.ForeignKey(User, on_delete=models.CASCADE)
+    rang        = models.PositiveIntegerField()
+    note        = models.FloatField()
+    mention     = models.CharField(max_length=50, blank=True)  # Or, Argent, Bronze…
+
+    class Meta:
+        ordering = ["rang"]
+        unique_together = ("olympiade", "apprenant")
 
 
 class ForumMessage(models.Model):

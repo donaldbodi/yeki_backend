@@ -662,77 +662,650 @@ class ChangePasswordView(APIView):
             status=200
         )
 
-        
-# 📚 LISTE DES DEVOIRS
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def liste_devoirs(request):
-    devoirs = Devoir.objects.all().order_by("-date_limite")
-    serializer = DevoirSerializer(
-        devoirs, many=True, context={"request": request}
-    )
-    return Response(serializer.data)
-
-
-# 📄 DETAIL D’UN DEVOIR
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def detail_devoir(request, pk):
-    devoir = Devoir.objects.get(pk=pk)
-    serializer = DevoirSerializer(
-        devoir, context={"request": request}
-    )
-    return Response(serializer.data)
-
-
-# ▶️ DEMARRER DEVOIR
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def demarrer_devoir(request, pk):
-    devoir = Devoir.objects.get(pk=pk)
-
-    SoumissionDevoir.objects.get_or_create(
-        utilisateur=request.user,
-        devoir=devoir
-    )
-
-    return Response({"message": "Devoir démarré"})
-
-
-# 📤 SOUMETTRE DEVOIR
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def soumettre_devoir(request, pk):
-    devoir = Devoir.objects.get(pk=pk)
-
-    soumission, _ = SoumissionDevoir.objects.get_or_create(
-        utilisateur=request.user,
-        devoir=devoir
-    )
-
-    soumission.date_soumission = timezone.now()
-    soumission.save()
-
-    return Response({"message": "Devoir soumis avec succès"})
     
+# ============================================================
+#  views_devoirs.py
+# ============================================================
 
-# 📊 RESULTAT
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def resultat_devoir(request, pk):
-    soum = SoumissionDevoir.objects.filter(
-        utilisateur=request.user,
-        devoir_id=pk
-    ).first()
 
-    if not soum:
-        return Response({"detail": "Aucune soumission"}, status=404)
+# ═══════════════════════════════════════════════════════════════
+#  DEVOIRS GÉNÉRAUX
+# ═══════════════════════════════════════════════════════════════
 
-    return Response({
-        "note": soum.note,
-        "corrige": soum.corrige,
-        "date_soumission": soum.date_soumission
-    })
+class ListeDevoirsView(APIView):
+    """
+    GET /api/devoirs/
+    Paramètres query optionnels :
+      - type_devoir   : cursus | concours | formation_classique | formation_metier | olympiade
+      - matiere       : Mathématiques | Physique | …
+      - niveau        : Terminale | Licence 1 | …
+      - statut        : non_commence | en_cours | soumis | corrige
+      - cours_id      : filtrer par cours lié
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = Devoir.objects.filter(est_publie=True).order_by("-date_limite")
+
+        # ── Filtres ──────────────────────────────────────────────
+        type_devoir = request.query_params.get("type_devoir")
+        matiere     = request.query_params.get("matiere")
+        niveau      = request.query_params.get("niveau")
+        statut_filtre = request.query_params.get("statut")
+        cours_id    = request.query_params.get("cours_id")
+
+        if type_devoir:
+            qs = qs.filter(type_devoir=type_devoir)
+        if matiere:
+            qs = qs.filter(matiere=matiere)
+        if niveau:
+            qs = qs.filter(niveau=niveau)
+        if cours_id:
+            qs = qs.filter(cours_lie_id=cours_id)
+
+        # Filtre par statut apprenant (post-queryset)
+        if statut_filtre:
+            soumissions = SoumissionDevoir.objects.filter(
+                utilisateur=request.user
+            ).values_list("devoir_id", "statut")
+            soum_map = {d_id: s for d_id, s in soumissions}
+
+            if statut_filtre == "non_commence":
+                ids_soumis = set(soum_map.keys())
+                qs = qs.exclude(id__in=ids_soumis)
+            else:
+                ids = [d_id for d_id, s in soum_map.items() if s == statut_filtre]
+                qs = qs.filter(id__in=ids)
+
+        serializer = DevoirListSerializer(qs, many=True, context={"request": request})
+        return Response(serializer.data)
+
+
+class DetailDevoirView(APIView):
+    """GET /api/devoirs/<id>/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
+
+        # Vérifier que le devoir est ouvert (ou déjà commencé par l'apprenant)
+        soum = SoumissionDevoir.objects.filter(
+            utilisateur=request.user, devoir=devoir
+        ).first()
+
+        if not devoir.est_ouvert and not soum:
+            return Response(
+                {"detail": "Ce devoir n'est pas encore accessible."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = DevoirDetailSerializer(devoir, context={"request": request})
+        return Response(serializer.data)
+
+
+class DemarrerDevoirView(APIView):
+    """POST /api/devoirs/<id>/demarrer/"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
+
+        if not devoir.est_ouvert:
+            return Response(
+                {"detail": "Le devoir n'est plus accessible."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Vérifier tentatives
+        nb_tentatives = SoumissionDevoir.objects.filter(
+            utilisateur=request.user,
+            devoir=devoir,
+            statut__in=["soumis", "corrige", "en_retard"]
+        ).count()
+
+        if nb_tentatives >= devoir.tentatives_max:
+            return Response(
+                {"detail": f"Nombre maximum de tentatives atteint ({devoir.tentatives_max})."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Créer ou récupérer la soumission
+        soum, created = SoumissionDevoir.objects.get_or_create(
+            utilisateur=request.user,
+            devoir=devoir,
+            defaults={
+                "statut": "en_cours",
+                "ip_address": self._get_ip(request),
+                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
+            }
+        )
+
+        if not created and soum.statut in ["soumis", "corrige"]:
+            return Response(
+                {"detail": "Vous avez déjà soumis ce devoir."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = SoumissionDetailSerializer(soum, context={"request": request})
+        return Response({
+            "soumission": serializer.data,
+            "temps_restant_secondes": soum.temps_restant_secondes(),
+        })
+
+    def _get_ip(self, request):
+        x_forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+        if x_forwarded:
+            return x_forwarded.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR")
+
+
+class SoumettreDevoirView(APIView):
+    """POST /api/devoirs/<id>/soumettre/"""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+        soum = get_object_or_404(
+            SoumissionDevoir, devoir=devoir,
+            utilisateur=request.user
+        )
+
+        if soum.statut in ["soumis", "corrige"]:
+            return Response(
+                {"detail": "Devoir déjà soumis."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Vérifier chrono
+        if soum.temps_restant_secondes() <= 0:
+            soum.statut = "soumis"
+            soum.soumis_le = timezone.now()
+            soum.save()
+            return Response({"detail": "Temps écoulé. Devoir auto-soumis."})
+
+        serializer_in = ReponseSubmitSerializer(data=request.data)
+        serializer_in.is_valid(raise_exception=True)
+        reponses = serializer_in.validated_data["reponses"]
+
+        # ── Enregistrer les réponses & corriger les QCM ──────────
+        score = 0.0
+        total = 0.0
+        has_texte = False
+
+        for question in devoir.questions.prefetch_related("choix").all():
+            total += question.points
+            user_rep = reponses.get(str(question.id), "").strip()
+
+            repobj, _ = ReponseDevoir.objects.get_or_create(
+                soumission=soum, question=question
+            )
+
+            if question.type_question == "qcm":
+                choix_correct = question.choix.filter(est_correct=True).first()
+                choix_selectionne = question.choix.filter(texte=user_rep).first()
+                repobj.reponse    = user_rep
+                repobj.choix      = choix_selectionne
+                if choix_selectionne and choix_selectionne.est_correct:
+                    repobj.est_correct     = True
+                    repobj.points_obtenus  = question.points
+                    score += question.points
+                else:
+                    repobj.est_correct    = False
+                    repobj.points_obtenus = 0
+            else:
+                repobj.reponse   = user_rep
+                repobj.est_correct = None   # correction manuelle
+                has_texte = True
+
+            repobj.save()
+
+        # ── Mise à jour soumission ────────────────────────────────
+        now = timezone.now()
+        soum.soumis_le = now
+        soum.statut    = "en_retard" if soum.est_en_retard else "soumis"
+
+        if not has_texte:
+            # 100% QCM → correction auto
+            note = round((score / total) * devoir.note_sur, 2) if total > 0 else 0
+            soum.note    = note
+            soum.statut  = "corrige"
+            soum.corrige_le = now
+
+        soum.save()
+
+        return Response({
+            "statut":     soum.statut,
+            "note":       soum.note,
+            "note_sur":   devoir.note_sur,
+            "en_retard":  soum.est_en_retard,
+            "message":    "Devoir soumis avec succès.",
+        })
+
+
+class SignalerFocusDevoirView(APIView):
+    """
+    POST /api/devoirs/<id>/focus-perdu/
+    Appelé par Flutter quand l'apprenant quitte l'app pendant la composition.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, devoir_id):
+        soum = get_object_or_404(
+            SoumissionDevoir,
+            devoir_id=devoir_id,
+            utilisateur=request.user,
+            statut="en_cours"
+        )
+        soum.nb_focus_perdu += 1
+
+        # Marquer suspect si trop de sorties
+        if soum.nb_focus_perdu >= 5:
+            soum.est_suspecte = True
+
+        soum.save(update_fields=["nb_focus_perdu", "est_suspecte"])
+        return Response({"nb_focus_perdu": soum.nb_focus_perdu})
+
+
+class MesSoumissionsView(APIView):
+    """GET /api/devoirs/mes-soumissions/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        soumissions = SoumissionDevoir.objects.filter(
+            utilisateur=request.user
+        ).select_related("devoir").order_by("-debut")
+
+        serializer = SoumissionDetailSerializer(
+            soumissions, many=True, context={"request": request}
+        )
+        return Response(serializer.data)
+
+
+class ResultatDevoirView(APIView):
+    """GET /api/devoirs/<id>/resultat/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, devoir_id):
+        soum = get_object_or_404(
+            SoumissionDevoir,
+            devoir_id=devoir_id,
+            utilisateur=request.user
+        )
+        if soum.statut not in ["corrige"]:
+            return Response(
+                {"detail": "Résultat pas encore disponible."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Construire le détail par question
+        detail = []
+        for rep in soum.reponses.select_related("question", "choix").all():
+            detail.append({
+                "question":       rep.question.texte,
+                "reponse":        rep.reponse,
+                "est_correct":    rep.est_correct,
+                "points_obtenus": rep.points_obtenus,
+                "points_max":     rep.question.points,
+            })
+
+        return Response({
+            "devoir":      soum.devoir.titre,
+            "note":        soum.note,
+            "note_sur":    soum.devoir.note_sur,
+            "commentaire": soum.commentaire,
+            "soumis_le":   soum.soumis_le,
+            "corrige_le":  soum.corrige_le,
+            "en_retard":   soum.est_en_retard,
+            "detail":      detail,
+        })
+
+
+# ═══════════════════════════════════════════════════════════════
+#  OLYMPIADES
+# ═══════════════════════════════════════════════════════════════
+
+class ListeOlympiadesView(APIView):
+    """GET /api/olympiades/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = Olympiade.objects.all().order_by("-date_debut_olympiade")
+
+        matiere = request.query_params.get("matiere")
+        niveau  = request.query_params.get("niveau")
+        statut  = request.query_params.get("statut")
+
+        if matiere:
+            qs = qs.filter(matiere=matiere)
+        if niveau:
+            qs = qs.filter(niveau=niveau)
+
+        serializer = OlympiadeListSerializer(qs, many=True, context={"request": request})
+        data = serializer.data
+
+        # Filtre statut post-sérialisation
+        if statut:
+            data = [d for d in data if d["statut"] == statut]
+
+        return Response(data)
+
+
+class DetailOlympiadeView(APIView):
+    """GET /api/olympiades/<id>/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+        serializer = OlympiadeDetailSerializer(olympiade, context={"request": request})
+        return Response(serializer.data)
+
+
+class SInscrireOlympiadeView(APIView):
+    """POST /api/olympiades/<id>/inscrire/"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+        now = timezone.now()
+
+        # ── Vérifications ────────────────────────────────────────
+        if now < olympiade.date_ouverture_inscription:
+            return Response(
+                {"detail": "Les inscriptions ne sont pas encore ouvertes."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        if now > olympiade.date_cloture_inscription:
+            return Response(
+                {"detail": "Les inscriptions sont clôturées."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        inscription, created = InscriptionOlympiade.objects.get_or_create(
+            olympiade=olympiade,
+            apprenant=request.user,
+            defaults={
+                "ip_inscription": self._get_ip(request),
+                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
+            }
+        )
+
+        if not created:
+            return Response(
+                {"detail": "Vous êtes déjà inscrit à cette olympiade."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = InscriptionOlympiadeSerializer(inscription, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _get_ip(self, request):
+        x_forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+        if x_forwarded:
+            return x_forwarded.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR")
+
+
+class DemarrerOlympiadeView(APIView):
+    """
+    POST /api/olympiades/<id>/demarrer/
+    Démarre la session de composition.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+        now = timezone.now()
+
+        if olympiade.statut_auto != "en_cours":
+            return Response(
+                {"detail": "L'olympiade n'est pas en cours actuellement."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        inscription = get_object_or_404(
+            InscriptionOlympiade,
+            olympiade=olympiade,
+            apprenant=request.user,
+            statut="inscrit"
+        )
+
+        if inscription.soumis:
+            return Response(
+                {"detail": "Vous avez déjà soumis votre composition."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Si une session unique est imposée et déjà démarrée
+        if olympiade.une_seule_session and inscription.session_demarree:
+            return Response(
+                {"detail": "Vous ne pouvez pas reprendre une session interrompue."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        inscription.session_demarree  = True
+        inscription.heure_debut_compo = inscription.heure_debut_compo or now
+        inscription.ip_composition    = self._get_ip(request)
+        inscription.save(update_fields=[
+            "session_demarree", "heure_debut_compo", "ip_composition"
+        ])
+
+        serializer = InscriptionOlympiadeSerializer(inscription, context={"request": request})
+        return Response({
+            "inscription":          serializer.data,
+            "temps_restant_secondes": inscription.temps_restant_secondes(),
+        })
+
+    def _get_ip(self, request):
+        x_forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+        if x_forwarded:
+            return x_forwarded.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR")
+
+
+class SoumettreOlympiadeView(APIView):
+    """POST /api/olympiades/<id>/soumettre/"""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+
+        inscription = get_object_or_404(
+            InscriptionOlympiade,
+            olympiade=olympiade,
+            apprenant=request.user,
+            session_demarree=True
+        )
+
+        if inscription.soumis:
+            return Response({"detail": "Déjà soumis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Vérifier que l'olympiade est encore en cours (ou temps expiré → auto-soumission)
+        temps_restant = inscription.temps_restant_secondes()
+        auto = temps_restant <= 0
+
+        reponses = request.data.get("reponses", {})
+
+        # ── Enregistrer les réponses ─────────────────────────────
+        score = 0.0
+        total = 0.0
+
+        if olympiade.devoir:
+            questions = olympiade.devoir.questions.prefetch_related("choix").all()
+
+            for question in questions:
+                total += question.points
+                user_rep = reponses.get(str(question.id), "").strip()
+
+                repobj, _ = ReponseOlympiade.objects.get_or_create(
+                    inscription=inscription, question=question
+                )
+
+                if question.type_question == "qcm":
+                    choix_sel = question.choix.filter(texte=user_rep).first()
+                    repobj.choix = choix_sel
+                    repobj.reponse_texte = user_rep
+                    if choix_sel and choix_sel.est_correct:
+                        repobj.est_correct    = True
+                        repobj.points_obtenus = question.points
+                        score += question.points
+                    else:
+                        repobj.est_correct    = False
+                        repobj.points_obtenus = 0
+                    repobj.save()
+
+        # ── Finaliser inscription ────────────────────────────────
+        note = round((score / total) * olympiade.note_sur, 2) if total > 0 else 0
+        now  = timezone.now()
+
+        inscription.soumis              = True
+        inscription.soumis_automatique  = auto
+        inscription.heure_fin_compo     = now
+        inscription.note                = note
+        inscription.save()
+
+        return Response({
+            "message":       "Composition soumise." if not auto else "Temps écoulé — soumission automatique.",
+            "note":          note,
+            "note_sur":      olympiade.note_sur,
+            "auto_soumis":   auto,
+        })
+
+
+class FocusPeduOlympiadeView(APIView):
+    """
+    POST /api/olympiades/<id>/focus-perdu/
+    Flutter appelle cet endpoint à chaque perte de focus.
+    Si le seuil est atteint → soumission automatique.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+
+        inscription = get_object_or_404(
+            InscriptionOlympiade,
+            olympiade=olympiade,
+            apprenant=request.user,
+            session_demarree=True,
+            soumis=False
+        )
+
+        inscription.nb_focus_perdu += 1
+
+        if inscription.nb_focus_perdu >= olympiade.max_focus_perdu:
+            inscription.est_suspecte   = True
+            inscription.soumis         = True
+            inscription.soumis_automatique = True
+            inscription.raison_suspicion = (
+                f"Trop de pertes de focus ({inscription.nb_focus_perdu})"
+            )
+            inscription.heure_fin_compo = timezone.now()
+            # Calculer le score avec ce qui a été soumis jusqu'ici
+            inscription.save()
+            return Response({
+                "detail":       "Composition soumise automatiquement pour comportement suspect.",
+                "force_submit": True,
+            }, status=status.HTTP_200_OK)
+
+        inscription.save(update_fields=["nb_focus_perdu", "est_suspecte"])
+
+        return Response({
+            "nb_focus_perdu":   inscription.nb_focus_perdu,
+            "max_focus_perdu":  olympiade.max_focus_perdu,
+            "restants":         olympiade.max_focus_perdu - inscription.nb_focus_perdu,
+            "force_submit":     False,
+        })
+
+
+class ClassementOlympiadeView(APIView):
+    """GET /api/olympiades/<id>/classement/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+
+        if olympiade.statut_auto not in ["terminee"]:
+            # Résultats visibles seulement après la fin
+            return Response(
+                {"detail": "Le classement sera disponible à la fin de l'olympiade."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        classement = ClassementOlympiade.objects.filter(
+            olympiade=olympiade
+        ).select_related("apprenant").order_by("rang")
+
+        serializer = ClassementOlympiadeSerializer(classement, many=True)
+        return Response(serializer.data)
+
+
+class CalculerClassementView(APIView):
+    """
+    POST /api/olympiades/<id>/calculer-classement/
+    Réservé admin / organisateur — calcule et sauvegarde le classement final.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+
+        # Vérifier que l'organisateur ou admin fait la requête
+        try:
+            profile = request.user.profile
+        except Exception:
+            return Response({"detail": "Profil introuvable."}, status=400)
+
+        if profile.user_type not in ["admin", "enseignant_admin"] and \
+           olympiade.organisateur != profile:
+            return Response({"detail": "Action réservée à l'organisateur."}, status=403)
+
+        if olympiade.statut_auto not in ["terminee"]:
+            return Response({"detail": "L'olympiade n'est pas encore terminée."}, status=400)
+
+        # Récupérer toutes les soumissions non-suspectes triées par note
+        inscriptions = InscriptionOlympiade.objects.filter(
+            olympiade=olympiade,
+            soumis=True,
+        ).order_by("-note")
+
+        ClassementOlympiade.objects.filter(olympiade=olympiade).delete()
+
+        MENTIONS = {1: "Or 🥇", 2: "Argent 🥈", 3: "Bronze 🥉"}
+
+        for rang, insc in enumerate(inscriptions, start=1):
+            mention = MENTIONS.get(rang, "Participant")
+            ClassementOlympiade.objects.create(
+                olympiade=olympiade,
+                apprenant=insc.apprenant,
+                rang=rang,
+                note=insc.note or 0,
+                mention=mention,
+            )
+            insc.classement = rang
+            insc.save(update_fields=["classement"])
+
+        return Response({
+            "detail": f"Classement calculé pour {inscriptions.count()} participants.",
+            "nb": inscriptions.count(),
+        })
+
+
+class MonInscriptionOlympiadeView(APIView):
+    """GET /api/olympiades/<id>/mon-inscription/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, olympiade_id):
+        inscription = get_object_or_404(
+            InscriptionOlympiade,
+            olympiade_id=olympiade_id,
+            apprenant=request.user
+        )
+        serializer = InscriptionOlympiadeSerializer(inscription, context={"request": request})
+        return Response(serializer.data)
 
 
 # GET tous les messages + réponses
