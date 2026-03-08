@@ -675,6 +675,85 @@ class ForumMessage(models.Model):
         return f"{self.sender.username} - {self.text[:20]}"
 
 
+# ─────────────────────────────────────────────────────────────────
+# QUESTION FORUM
+# Peut être liée à une leçon, un exercice ou un devoir
+# ─────────────────────────────────────────────────────────────────
+
+class QuestionForum(models.Model):
+    SOURCE_CHOICES = [
+        ("lecon",    "Leçon"),
+        ("exercice", "Exercice"),
+        ("devoir",   "Devoir"),
+        ("libre",    "Question libre"),
+    ]
+
+    auteur          = models.ForeignKey(User, on_delete=models.CASCADE, related_name="questions_forum")
+    contenu         = models.TextField()
+    source          = models.CharField(max_length=20, choices=SOURCE_CHOICES, default="libre")
+    cree_le         = models.DateTimeField(auto_now_add=True)
+    modifie_le      = models.DateTimeField(auto_now=True)
+
+    # Liens optionnels selon la source
+    # Si source == "lecon"
+    lecon_id        = models.IntegerField(null=True, blank=True)
+    lecon_titre     = models.CharField(max_length=255, blank=True)
+    cours_id        = models.IntegerField(null=True, blank=True)
+    cours_titre     = models.CharField(max_length=255, blank=True)
+
+    # Si source == "exercice"
+    exercice_id     = models.IntegerField(null=True, blank=True)
+    exercice_titre  = models.CharField(max_length=255, blank=True)
+
+    # Si source == "devoir" (lié à un cours précis)
+    devoir_id       = models.IntegerField(null=True, blank=True)
+    devoir_titre    = models.CharField(max_length=255, blank=True)
+
+    # Résolu ?
+    est_resolue     = models.BooleanField(default=False)
+    nb_vues         = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["-cree_le"]
+
+    def __str__(self):
+        return f"[{self.source}] {self.auteur.username} — {self.contenu[:60]}"
+
+    @property
+    def nb_reponses(self):
+        return self.reponses.count()
+
+
+# ─────────────────────────────────────────────────────────────────
+# RÉPONSE À UNE QUESTION
+# ─────────────────────────────────────────────────────────────────
+
+class ReponseQuestion(models.Model):
+    question        = models.ForeignKey(QuestionForum, on_delete=models.CASCADE, related_name="reponses")
+    auteur          = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reponses_forum")
+    contenu         = models.TextField()
+    cree_le         = models.DateTimeField(auto_now_add=True)
+    est_solution    = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["cree_le"]
+
+    def __str__(self):
+        return f"Réponse de {self.auteur.username} à Q{self.question.id}"
+
+
+# ─────────────────────────────────────────────────────────────────
+# LIKE sur une réponse
+# ─────────────────────────────────────────────────────────────────
+
+class LikeReponse(models.Model):
+    reponse         = models.ForeignKey(ReponseQuestion, on_delete=models.CASCADE, related_name="likes")
+    utilisateur     = models.ForeignKey(User, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ("reponse", "utilisateur")
+
+        
 '''@receiver(post_save, sender=Lecon)
 def convertir_docx_en_html(sender, instance, **kwargs):
     if instance.fichier and instance.fichier.name.endswith(".docx"):

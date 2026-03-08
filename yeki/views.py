@@ -22,6 +22,7 @@ from .serializers import *
 User = get_user_model()
 
 
+
 # ---------------------------
 # Utilitaire : vérification de rôle
 # ---------------------------
@@ -666,7 +667,55 @@ class ChangePasswordView(APIView):
 # ============================================================
 #  views_devoirs.py
 # ============================================================
+class DevoirsCoursView(APIView):
+    """
+    GET /api/cours/<cours_id>/devoirs/
+    Retourne les devoirs liés à un cours spécifique.
+    Inclut la soumission de l'utilisateur connecté.
+    """
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request, cours_id):
+        # Import ici pour éviter les imports circulaires
+        from .models import Devoir, SoumissionDevoir
+
+        # Devoirs liés à ce cours (type cursus, reliés au cours)
+        devoirs = Devoir.objects.filter(
+            cours_id=cours_id,      # Adaptez selon votre champ FK vers Cours
+            type_devoir='cursus',
+        ).order_by('date_limite')
+
+        result = []
+        for devoir in devoirs:
+            # Chercher la soumission de l'utilisateur
+            soumission = SoumissionDevoir.objects.filter(
+                devoir=devoir,
+                utilisateur=request.user,
+            ).first()
+
+            soumission_data = None
+            if soumission:
+                soumission_data = {
+                    'id':     soumission.id,
+                    'statut': soumission.statut,
+                    'note':   float(soumission.note) if soumission.note is not None else None,
+                    'soumis_le': soumission.soumis_le.isoformat() if soumission.soumis_le else None,
+                }
+
+            result.append({
+                'id':           devoir.id,
+                'titre':        devoir.titre,
+                'description':  devoir.description,
+                'date_debut':   devoir.date_debut.isoformat() if devoir.date_debut else None,
+                'date_limite':  devoir.date_limite.isoformat() if devoir.date_limite else None,
+                'est_ouvert':   devoir.est_ouvert,
+                'est_expire':   devoir.est_expire,
+                'nb_questions': devoir.questions.count(),
+                'note_sur':     float(devoir.note_sur) if hasattr(devoir, 'note_sur') else 20,
+                'ma_soumission': soumission_data,
+            })
+
+        return Response(result)
 
 # ═══════════════════════════════════════════════════════════════
 #  DEVOIRS GÉNÉRAUX
@@ -1334,6 +1383,206 @@ class ForumMessageCreateAPIView(generics.CreateAPIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+# ─────────────────────────────────────────────────────────────────
+# GET  /api/forum/questions/          → liste des questions
+# POST /api/forum/questions/          → créer une question
+# ─────────────────────────────────────────────────────────────────
+class ListeQuestionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = QuestionForum.objects.all()
+
+        # Filtres
+        source    = request.query_params.get("source")
+        lecon_id  = request.query_params.get("lecon_id")
+        exo_id    = request.query_params.get("exercice_id")
+        devoir_id = request.query_params.get("devoir_id")
+        cours_id  = request.query_params.get("cours_id")
+        resolue   = request.query_params.get("resolue")
+        since     = request.query_params.get("since")   # ISO timestamp pour polling temps réel
+
+        if source:
+            qs = qs.filter(source=source)
+        if lecon_id:
+            qs = qs.filter(lecon_id=lecon_id)
+        if exo_id:
+            qs = qs.filter(exercice_id=exo_id)
+        if devoir_id:
+            qs = qs.filter(devoir_id=devoir_id)
+        if cours_id:
+            qs = qs.filter(cours_id=cours_id)
+        if resolue is not None:
+            qs = qs.filter(est_resolue=(resolue == "true"))
+        if since:
+            qs = qs.filter(cree_le__gt=since)
+
+        # Annoter nb_reponses
+        from django.db.models import Count
+        qs = qs.annotate(nb_reponses=Count("reponses"))
+
+        serializer = QuestionForumListSerializer(
+            qs, many=True, context={"request": request}
+        )
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = QuestionForumCreateSerializer(
+            data=request.data, context={"request": request}
+        )
+        if serializer.is_valid():
+            question = serializer.save()
+            return Response(
+                QuestionForumListSerializer(question, context={"request": request}).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ─────────────────────────────────────────────────────────────────
+# GET  /api/forum/questions/<pk>/     → détail + réponses
+# DELETE /api/forum/questions/<pk>/   → supprimer (auteur seulement)
+# ─────────────────────────────────────────────────────────────────
+class DetailQuestionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            question = QuestionForum.objects.get(pk=pk)
+        except QuestionForum.DoesNotExist:
+            return Response({"detail": "Question introuvable."}, status=404)
+
+        # Incrémenter les vues
+        QuestionForum.objects.filter(pk=pk).update(nb_vues=question.nb_vues + 1)
+        question.refresh_from_db()
+
+        serializer = QuestionForumDetailSerializer(question, context={"request": request})
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        try:
+            question = QuestionForum.objects.get(pk=pk, auteur=request.user)
+        except QuestionForum.DoesNotExist:
+            return Response(status=404)
+        question.delete()
+        return Response(status=204)
+
+
+# ─────────────────────────────────────────────────────────────────
+# PATCH /api/forum/questions/<pk>/resoudre/  → marquer comme résolue
+# ─────────────────────────────────────────────────────────────────
+class ResoudreQuestionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            question = QuestionForum.objects.get(pk=pk, auteur=request.user)
+        except QuestionForum.DoesNotExist:
+            return Response(status=404)
+        question.est_resolue = not question.est_resolue
+        question.save()
+        return Response({"est_resolue": question.est_resolue})
+
+
+# ─────────────────────────────────────────────────────────────────
+# POST /api/forum/questions/<pk>/repondre/   → ajouter une réponse
+# ─────────────────────────────────────────────────────────────────
+class RepondreQuestionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            question = QuestionForum.objects.get(pk=pk)
+        except QuestionForum.DoesNotExist:
+            return Response({"detail": "Question introuvable."}, status=404)
+
+        serializer = ReponseCreateSerializer(
+            data=request.data,
+            context={"request": request, "question": question},
+        )
+        if serializer.is_valid():
+            reponse = serializer.save()
+            return Response(
+                ReponseSerializer(reponse, context={"request": request}).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ─────────────────────────────────────────────────────────────────
+# POST /api/forum/reponses/<pk>/liker/   → liker/unliker une réponse
+# ─────────────────────────────────────────────────────────────────
+class LikerReponseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            reponse = ReponseQuestion.objects.get(pk=pk)
+        except ReponseQuestion.DoesNotExist:
+            return Response(status=404)
+
+        like, created = LikeReponse.objects.get_or_create(
+            reponse=reponse, utilisateur=request.user
+        )
+        if not created:
+            like.delete()
+            liked = False
+        else:
+            liked = True
+
+        return Response({"liked": liked, "nb_likes": reponse.likes.count()})
+
+
+# ─────────────────────────────────────────────────────────────────
+# PATCH /api/forum/reponses/<pk>/solution/  → marquer comme solution
+# ─────────────────────────────────────────────────────────────────
+class MarquerSolutionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            reponse = ReponseQuestion.objects.get(pk=pk)
+            # Seul l'auteur de la question ou un enseignant peut marquer comme solution
+            if reponse.question.auteur != request.user:
+                # Vérifier si l'utilisateur est enseignant (adapter selon ton modèle)
+                # Pour l'instant on vérifie juste l'auteur de la question
+                return Response(status=403)
+        except ReponseQuestion.DoesNotExist:
+            return Response(status=404)
+
+        reponse.est_solution = not reponse.est_solution
+        reponse.save()
+
+        # Résoudre la question automatiquement si une solution est marquée
+        if reponse.est_solution:
+            reponse.question.est_resolue = True
+            reponse.question.save()
+
+        return Response({"est_solution": reponse.est_solution})
+
+
+# ─────────────────────────────────────────────────────────────────
+# GET /api/forum/stats/   → statistiques pour la page forum
+# ─────────────────────────────────────────────────────────────────
+class StatsForumView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        total     = QuestionForum.objects.count()
+        resolues  = QuestionForum.objects.filter(est_resolue=True).count()
+        lecons    = QuestionForum.objects.filter(source="lecon").count()
+        exercices = QuestionForum.objects.filter(source="exercice").count()
+        devoirs   = QuestionForum.objects.filter(source="devoir").count()
+
+        return Response({
+            "total":     total,
+            "resolues":  resolues,
+            "lecons":    lecons,
+            "exercices": exercices,
+            "devoirs":   devoirs,
+        })
 
 
 # ---------------------------

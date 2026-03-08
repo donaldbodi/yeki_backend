@@ -698,3 +698,88 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.avatar.url)
             return obj.avatar.url
         return None
+    
+
+class ReponseSerializer(serializers.ModelSerializer):
+    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    nb_likes        = serializers.SerializerMethodField()
+    mon_like        = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = ReponseQuestion
+        fields = [
+            "id", "contenu", "cree_le", "est_solution",
+            "auteur_nom", "auteur_username",
+            "nb_likes", "mon_like",
+        ]
+
+    def get_nb_likes(self, obj):
+        return obj.likes.count()
+
+    def get_mon_like(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(utilisateur=request.user).exists()
+        return False
+
+
+class QuestionForumListSerializer(serializers.ModelSerializer):
+    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    nb_reponses     = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model  = QuestionForum
+        fields = [
+            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
+            "nb_reponses",
+            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
+            "exercice_id", "exercice_titre",
+            "devoir_id", "devoir_titre",
+            "auteur_nom", "auteur_username",
+        ]
+
+
+class QuestionForumDetailSerializer(serializers.ModelSerializer):
+    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    nb_reponses     = serializers.IntegerField(read_only=True)
+    reponses        = ReponseSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = QuestionForum
+        fields = [
+            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
+            "nb_reponses", "reponses",
+            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
+            "exercice_id", "exercice_titre",
+            "devoir_id", "devoir_titre",
+            "auteur_nom", "auteur_username",
+        ]
+
+
+class QuestionForumCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = QuestionForum
+        fields = [
+            "contenu", "source",
+            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
+            "exercice_id", "exercice_titre",
+            "devoir_id", "devoir_titre",
+        ]
+
+    def create(self, validated_data):
+        validated_data["auteur"] = self.context["request"].user
+        return super().create(validated_data)
+
+
+class ReponseCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = ReponseQuestion
+        fields = ["contenu"]
+
+    def create(self, validated_data):
+        validated_data["auteur"]   = self.context["request"].user
+        validated_data["question"] = self.context["question"]
+        return super().create(validated_data)

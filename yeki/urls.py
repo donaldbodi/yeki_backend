@@ -63,6 +63,8 @@ urlpatterns = [
     path("exercices/<int:exercice_id>/", ExerciceDetailView.as_view()),
     path("exercices/<int:exercice_id>/demarrer/", DemarrerExerciceView.as_view()),
     path("devoirs/",                       ListeDevoirsView.as_view(),    name="liste-devoirs"),
+    path("cours/<int:cours_id>/devoirs/", DevoirsCoursView.as_view()),
+    #devoirs d'un cours
 
     # GET  /api/devoirs/<id>/
     path("devoirs/<int:devoir_id>/",       DetailDevoirView.as_view(),    name="detail-devoir"),
@@ -118,6 +120,19 @@ urlpatterns = [
     path('profil/delete/',   ProfilDeleteView.as_view(),  name='profil-delete'),
     path('profil/stats/',    ProfilStatsView.as_view(),   name='profil-stats'),
     path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
+
+    # Questions
+    path("forum/questions/",                    ListeQuestionsView.as_view()),
+    path("forum/questions/<int:pk>/",           DetailQuestionView.as_view()),
+    path("forum/questions/<int:pk>/resoudre/",  ResoudreQuestionView.as_view()),
+    path("forum/questions/<int:pk>/repondre/",  RepondreQuestionView.as_view()),
+
+    # Réponses
+    path("forum/reponses/<int:pk>/liker/",      LikerReponseView.as_view()),
+    path("forum/reponses/<int:pk>/solution/",   MarquerSolutionView.as_view()),
+
+    # Stats
+    path("forum/stats/",                        StatsForumView.as_view()),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
