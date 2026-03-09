@@ -414,249 +414,31 @@ class EvaluationSerializer(serializers.ModelSerializer):
         fields = ["id", "titre", "etoiles", "score", "total", "date"]
 
 
-# ============================================================
-#  serializers_devoirs.py 
-# ============================================================
-
-# ─────────────────────────────────────────────────────────────────
-# CHOIX / QUESTIONS
-# ─────────────────────────────────────────────────────────────────
-
-class ChoixReponseSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = ChoixReponse
-        fields = ["id", "texte"]  # ⚠️ ne jamais exposer est_correct à l'apprenant !
-
-
-class ChoixReponseAdminSerializer(serializers.ModelSerializer):
-    """Version enseignant — expose la bonne réponse."""
-    class Meta:
-        model  = ChoixReponse
-        fields = ["id", "texte", "est_correct"]
-
-
-class QuestionDevoirSerializer(serializers.ModelSerializer):
-    choix = ChoixReponseSerializer(many=True, read_only=True)
+class DevoirSerializer(serializers.ModelSerializer):
+    statut = serializers.SerializerMethodField()
 
     class Meta:
-        model  = QuestionDevoir
-        fields = ["id", "texte", "type_question", "points", "ordre", "choix"]
-
-
-class QuestionDevoirAdminSerializer(serializers.ModelSerializer):
-    choix = ChoixReponseAdminSerializer(many=True, read_only=True)
-
-    class Meta:
-        model  = QuestionDevoir
-        fields = ["id", "texte", "type_question", "points", "ordre", "choix"]
-
-
-# ─────────────────────────────────────────────────────────────────
-# DEVOIR  (list, detail apprenant, detail admin)
-# ─────────────────────────────────────────────────────────────────
-
-class DevoirListSerializer(serializers.ModelSerializer):
-    """Utilisé dans les listes — inclut le statut dynamique de l'apprenant."""
-    statut_apprenant  = serializers.SerializerMethodField()
-    note_apprenant    = serializers.SerializerMethodField()
-    temps_restant_jours = serializers.SerializerMethodField()
-    est_ouvert        = serializers.BooleanField(read_only=True)
-    est_expire        = serializers.BooleanField(read_only=True)
-
-    class Meta:
-        model  = Devoir
+        model = Devoir
         fields = [
-            "id", "titre", "description", "type_devoir", "matiere",
-            "niveau", "date_debut", "date_limite", "duree_minutes",
-            "note_sur", "coefficient", "concours_lie", "formation_liee",
-            "est_publie", "est_ouvert", "est_expire",
-            "statut_apprenant", "note_apprenant", "temps_restant_jours",
-        ]
-
-    def get_statut_apprenant(self, obj):
-        user = self.context["request"].user
-        soum = SoumissionDevoir.objects.filter(utilisateur=user, devoir=obj).first()
-        if not soum:
-            return "non_commence"
-        return soum.statut
-
-    def get_note_apprenant(self, obj):
-        user = self.context["request"].user
-        soum = SoumissionDevoir.objects.filter(utilisateur=user, devoir=obj).first()
-        if soum and soum.note is not None:
-            return soum.note
-        return None
-
-    def get_temps_restant_jours(self, obj):
-        delta = obj.date_limite - timezone.now()
-        return max(0, delta.days)
-
-
-class DevoirDetailSerializer(serializers.ModelSerializer):
-    """Détail pour l'apprenant — questions sans bonnes réponses."""
-    questions = QuestionDevoirSerializer(many=True, read_only=True)
-
-    class Meta:
-        model  = Devoir
-        fields = [
-            "id", "titre", "description", "type_devoir", "matiere",
-            "niveau", "enonce", "date_debut", "date_limite", "duree_minutes",
-            "note_sur", "coefficient", "tentatives_max",
-            "concours_lie", "formation_liee", "questions",
-        ]
-
-
-class DevoirCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = Devoir
-        fields = [
-            "titre", "description", "type_devoir", "matiere", "niveau",
-            "enonce", "date_debut", "date_limite", "duree_minutes",
-            "note_sur", "coefficient", "tentatives_max",
-            "concours_lie", "formation_liee", "cours_lie",
-            "est_publie", "acces_restreint",
-        ]
-
-    def validate(self, data):
-        if data.get("date_limite") and data.get("date_debut"):
-            if data["date_limite"] <= data["date_debut"]:
-                raise serializers.ValidationError(
-                    "La date limite doit être postérieure à la date de début."
-                )
-        return data
-
-
-# ─────────────────────────────────────────────────────────────────
-# SOUMISSION
-# ─────────────────────────────────────────────────────────────────
-
-class ReponseSubmitSerializer(serializers.Serializer):
-    """Reçu du Flutter : {question_id: réponse, ...}"""
-    reponses = serializers.DictField(
-        child=serializers.CharField(allow_blank=True)
-    )
-
-
-class SoumissionDetailSerializer(serializers.ModelSerializer):
-    devoir_titre = serializers.CharField(source="devoir.titre", read_only=True)
-    temps_restant = serializers.SerializerMethodField()
-
-    class Meta:
-        model  = SoumissionDevoir
-        fields = [
-            "id", "devoir", "devoir_titre", "statut",
-            "debut", "soumis_le", "note", "commentaire",
-            "temps_restant", "nb_focus_perdu", "est_suspecte",
-        ]
-
-    def get_temps_restant(self, obj):
-        return obj.temps_restant_secondes()
-
-
-# ─────────────────────────────────────────────────────────────────
-# OLYMPIADE
-# ─────────────────────────────────────────────────────────────────
-
-class OlympiadeListSerializer(serializers.ModelSerializer):
-    statut              = serializers.SerializerMethodField()
-    est_inscrit         = serializers.SerializerMethodField()
-    nb_inscrits         = serializers.SerializerMethodField()
-    inscription_ouverte = serializers.SerializerMethodField()
-
-    class Meta:
-        model  = Olympiade
-        fields = [
-            "id", "titre", "description", "matiere", "niveau", "edition",
-            "date_ouverture_inscription", "date_cloture_inscription",
-            "date_debut_olympiade", "date_fin_olympiade",
-            "duree_minutes", "nb_questions", "note_sur",
-            "prix_1er", "prix_2eme", "prix_3eme",
-            "statut", "est_inscrit", "nb_inscrits", "inscription_ouverte",
+            "id",
+            "titre",
+            "matiere",
+            "niveau",
+            "date_limite",
+            "is_concours",
+            "concours",
+            "statut",
         ]
 
     def get_statut(self, obj):
-        return obj.statut_auto
-
-    def get_est_inscrit(self, obj):
         user = self.context["request"].user
-        return InscriptionOlympiade.objects.filter(
-            olympiade=obj, apprenant=user
-        ).exists()
-
-    def get_nb_inscrits(self, obj):
-        return obj.inscriptions.count()
-
-    def get_inscription_ouverte(self, obj):
-        now = timezone.now()
-        return obj.date_ouverture_inscription <= now <= obj.date_cloture_inscription
-
-
-class OlympiadeDetailSerializer(OlympiadeListSerializer):
-    """Inclut les questions seulement si l'olympiade est EN COURS pour l'apprenant inscrit."""
-    questions = serializers.SerializerMethodField()
-
-    class Meta(OlympiadeListSerializer.Meta):
-        fields = OlympiadeListSerializer.Meta.fields + ["questions"]
-
-    def get_questions(self, obj):
-        user = self.context["request"].user
-        inscription = InscriptionOlympiade.objects.filter(
-            olympiade=obj, apprenant=user, soumis=False
+        soum = SoumissionDevoir.objects.filter(
+            utilisateur=user, devoir=obj
         ).first()
 
-        # Questions visibles uniquement si l'olympiade est en cours ET l'apprenant a démarré
-        if not inscription or not inscription.session_demarree:
-            return []
-        if obj.statut_auto != "en_cours":
-            return []
-
-        questions = obj.devoir.questions.all() if obj.devoir else []
-        data = QuestionDevoirSerializer(questions, many=True).data
-
-        # Mélange côté serveur si activé
-        if obj.melanger_questions:
-            import random
-            data_list = list(data)
-            random.seed(str(user.id) + str(obj.id))  # seed déterministe par participant
-            random.shuffle(data_list)
-            return data_list
-        return data
-
-
-class InscriptionOlympiadeSerializer(serializers.ModelSerializer):
-    olympiade_titre = serializers.CharField(source="olympiade.titre", read_only=True)
-    statut_olympiade = serializers.SerializerMethodField()
-    temps_restant   = serializers.SerializerMethodField()
-
-    class Meta:
-        model  = InscriptionOlympiade
-        fields = [
-            "id", "olympiade", "olympiade_titre", "statut",
-            "inscrit_le", "session_demarree", "heure_debut_compo",
-            "soumis", "soumis_automatique", "note", "classement",
-            "nb_focus_perdu", "est_suspecte",
-            "statut_olympiade", "temps_restant",
-        ]
-
-    def get_statut_olympiade(self, obj):
-        return obj.olympiade.statut_auto
-
-    def get_temps_restant(self, obj):
-        return obj.temps_restant_secondes()
-
-
-class ClassementOlympiadeSerializer(serializers.ModelSerializer):
-    nom_complet = serializers.SerializerMethodField()
-    username    = serializers.CharField(source="apprenant.username", read_only=True)
-
-    class Meta:
-        model  = ClassementOlympiade
-        fields = ["rang", "nom_complet", "username", "note", "mention"]
-
-    def get_nom_complet(self, obj):
-        u = obj.apprenant
-        full = f"{u.first_name} {u.last_name}".strip()
-        return full or u.username
+        if not soum:
+            return "En attente"
+        return "Corrigé" if soum.corrige else "Soumis"
 
 
 class ForumMessageSerializer(serializers.ModelSerializer):
@@ -698,88 +480,3 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.avatar.url)
             return obj.avatar.url
         return None
-    
-
-class ReponseSerializer(serializers.ModelSerializer):
-    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
-    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
-    nb_likes        = serializers.SerializerMethodField()
-    mon_like        = serializers.SerializerMethodField()
-
-    class Meta:
-        model  = ReponseQuestion
-        fields = [
-            "id", "contenu", "cree_le", "est_solution",
-            "auteur_nom", "auteur_username",
-            "nb_likes", "mon_like",
-        ]
-
-    def get_nb_likes(self, obj):
-        return obj.likes.count()
-
-    def get_mon_like(self, obj):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            return obj.likes.filter(utilisateur=request.user).exists()
-        return False
-
-
-class QuestionForumListSerializer(serializers.ModelSerializer):
-    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
-    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
-    nb_reponses     = serializers.IntegerField(read_only=True)
-
-    class Meta:
-        model  = QuestionForum
-        fields = [
-            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
-            "nb_reponses",
-            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
-            "exercice_id", "exercice_titre",
-            "devoir_id", "devoir_titre",
-            "auteur_nom", "auteur_username",
-        ]
-
-
-class QuestionForumDetailSerializer(serializers.ModelSerializer):
-    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
-    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
-    nb_reponses     = serializers.IntegerField(read_only=True)
-    reponses        = ReponseSerializer(many=True, read_only=True)
-
-    class Meta:
-        model  = QuestionForum
-        fields = [
-            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
-            "nb_reponses", "reponses",
-            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
-            "exercice_id", "exercice_titre",
-            "devoir_id", "devoir_titre",
-            "auteur_nom", "auteur_username",
-        ]
-
-
-class QuestionForumCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = QuestionForum
-        fields = [
-            "contenu", "source",
-            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
-            "exercice_id", "exercice_titre",
-            "devoir_id", "devoir_titre",
-        ]
-
-    def create(self, validated_data):
-        validated_data["auteur"] = self.context["request"].user
-        return super().create(validated_data)
-
-
-class ReponseCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = ReponseQuestion
-        fields = ["contenu"]
-
-    def create(self, validated_data):
-        validated_data["auteur"]   = self.context["request"].user
-        validated_data["question"] = self.context["question"]
-        return super().create(validated_data)
