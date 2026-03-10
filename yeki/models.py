@@ -16,7 +16,7 @@ class Profile(models.Model):
         ('enseignant', 'Enseignant'),
         ('apprenant', 'Apprenant'),
     )
-    user_type = models.CharField(max_length=20, choices=USER_TYPES, default='apprenant', blank=True, null=True)
+    user_type = models.CharField(max_length=20, choices=USER_TYPES, default='Apprenant', blank=True, null=True)
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     # Champs optionnels pour apprenant (pas utilisés ici)
     cursus = models.CharField(max_length=100, null=True, blank=True)

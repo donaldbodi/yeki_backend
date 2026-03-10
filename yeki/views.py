@@ -1615,6 +1615,457 @@ def liste_enseignants(request):
     serializer = EnseignantSerializer(qs, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
+
+# new
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BLOC À AJOUTER DANS views.py
+# Coller ces classes dans views.py (avant ou après les vues existantes)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Dashboard
+# GET /api/admin-general/dashboard/
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        parcours_qs = Parcours.objects.prefetch_related(
+            'departements__cours', 'admin__user'
+        ).all()
+
+        parcours_data = []
+        for p in parcours_qs:
+            depts = p.departements.all()
+            nb_depts = depts.count()
+            nb_app = sum(c.nb_apprenants for d in depts for c in d.cours.all())
+            nb_cours = sum(d.cours.count() for d in depts)
+
+            admin_data = None
+            if p.admin:
+                admin_data = {
+                    "id": p.admin.id,
+                    "nom": f"{p.admin.user.first_name} {p.admin.user.last_name}".strip()
+                          or p.admin.user.username,
+                    "username": p.admin.user.username,
+                    "email": p.admin.user.email,
+                }
+
+            parcours_data.append({
+                "id": p.id,
+                "nom": p.nom,
+                "nb_departements": nb_depts,
+                "nb_apprenants": nb_app,
+                "nb_cours": nb_cours,
+                "taux_moyen": 0,
+                "enseignant_admin": admin_data,
+            })
+
+        departements_qs = Departement.objects.select_related(
+            'parcours', 'cadre__user'
+        ).prefetch_related('cours').all()
+
+        depts_data = []
+        for d in departements_qs:
+            nb_cours = d.cours.count()
+            nb_app = sum(c.nb_apprenants for c in d.cours.all())
+            depts_data.append({
+                "id": d.id,
+                "nom": d.nom,
+                "parcours": d.parcours.nom if d.parcours else "",
+                "nb_cours": nb_cours,
+                "nb_apprenants": nb_app,
+                "taux_moyen": 0,
+            })
+
+        stats = {
+            "nb_parcours": Parcours.objects.count(),
+            "nb_departements": Departement.objects.count(),
+            "nb_cours": Cours.objects.count(),
+            "nb_apprenants": Profile.objects.filter(user_type='apprenant').count(),
+            "nb_enseignants": Profile.objects.filter(
+                user_type__in=[
+                    'enseignant_admin', 'enseignant_cadre',
+                    'enseignant_principal', 'enseignant'
+                ]
+            ).count(),
+            "nb_lecons": Lecon.objects.count(),
+        }
+
+        nom_complet = (
+            f"{profile.user.first_name} {profile.user.last_name}".strip()
+            or profile.user.username
+        )
+
+        return Response({
+            "nom": nom_complet,
+            "stats": stats,
+            "parcours": parcours_data,
+            "departements": depts_data,
+            "top_enseignants": [],
+        }, status=status.HTTP_200_OK)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Créer un parcours
+# POST /api/parcours/creer/
+# Body: { "nom": "Licence Informatique", "description": "..." }
+# ───────────────────────────────────────────────────────────────────────────
+class CreerParcoursView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        nom = request.data.get('nom', '').strip()
+        if not nom:
+            return Response(
+                {"detail": "Le nom du parcours est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        parcours = Parcours.objects.create(nom=nom)
+        return Response(
+            {"id": parcours.id, "nom": parcours.nom},
+            status=status.HTTP_201_CREATED
+        )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Nommer / changer l'enseignant admin d'un parcours
+# PATCH /api/parcours/<parcours_id>/nommer-admin/
+# Body: { "enseignant_admin_id": 5 }
+# ───────────────────────────────────────────────────────────────────────────
+class NommerAdminParcoursView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, parcours_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        parcours = get_object_or_404(Parcours, pk=parcours_id)
+
+        enseignant_id = request.data.get('enseignant_admin_id')
+        if not enseignant_id:
+            return Response(
+                {"detail": "enseignant_admin_id est requis."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        enseignant = get_object_or_404(Profile, pk=enseignant_id)
+        if enseignant.user_type != 'enseignant_admin':
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant administrateur."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        parcours.admin = enseignant
+        parcours.save()
+        return Response(
+            {"detail": "Enseignant administrateur mis à jour avec succès."},
+            status=status.HTTP_200_OK
+        )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# LISTE ENSEIGNANTS PAR RÔLE
+# GET /api/enseignants/liste/?role=admin   → enseignant_admin
+# GET /api/enseignants/liste/?role=cadre   → enseignant_cadre
+# GET /api/enseignants/liste/?role=principal → enseignant_principal
+# ───────────────────────────────────────────────────────────────────────────
+class ListeEnseignantsParRoleView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    ROLE_MAP = {
+        'admin':      'enseignant_admin',
+        'cadre':      'enseignant_cadre',
+        'principal':  'enseignant_principal',
+        'enseignant': 'enseignant',
+    }
+
+    def get(self, request):
+        role_param = request.query_params.get('role', '')
+        user_type = self.ROLE_MAP.get(role_param)
+
+        if not user_type:
+            return Response(
+                {"detail": f"Rôle invalide. Valeurs acceptées : {list(self.ROLE_MAP.keys())}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        profiles = Profile.objects.filter(
+            user_type=user_type, is_active=True
+        ).select_related('user')
+
+        data = [
+            {
+                "id": p.id,
+                "nom": f"{p.user.first_name} {p.user.last_name}".strip()
+                      or p.user.username,
+                "username": p.user.username,
+                "email": p.user.email,
+                "user_type": p.user_type,
+            }
+            for p in profiles
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ENSEIGNANT ADMIN — Dashboard
+# GET /api/enseignant/admin/dashboard/
+# ───────────────────────────────────────────────────────────────────────────
+class EnseignantAdminDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_admin':
+            return Response(
+                {"detail": "Accès réservé aux enseignants administrateurs."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        parcours_qs = Parcours.objects.filter(admin=profile).prefetch_related(
+            'departements__cours',
+            'departements__cadre__user'
+        )
+
+        departements_data = []
+        cadres_dict = {}
+
+        for parcours in parcours_qs:
+            for dept in parcours.departements.all():
+                nb_cours = dept.cours.count()
+                nb_app = sum(c.nb_apprenants for c in dept.cours.all())
+
+                cadre_data = None
+                if dept.cadre:
+                    cadre_data = {
+                        "id": dept.cadre.id,
+                        "nom": f"{dept.cadre.user.first_name} {dept.cadre.user.last_name}".strip()
+                              or dept.cadre.user.username,
+                        "username": dept.cadre.user.username,
+                    }
+                    if dept.cadre.id not in cadres_dict:
+                        cadres_dict[dept.cadre.id] = {
+                            "id": dept.cadre.id,
+                            "nom": cadre_data["nom"],
+                            "username": dept.cadre.user.username,
+                            "email": dept.cadre.user.email,
+                            "nb_cours": nb_cours,
+                            "nb_apprenants": nb_app,
+                            "taux_moyen": 0,
+                            "departement": {"id": dept.id, "nom": dept.nom},
+                        }
+
+                departements_data.append({
+                    "id": dept.id,
+                    "nom": dept.nom,
+                    "parcours": parcours.nom,
+                    "parcours_id": parcours.id,
+                    "nb_cours": nb_cours,
+                    "nb_apprenants": nb_app,
+                    "taux_moyen": 0,
+                    "cadre": cadre_data,
+                })
+
+        stats = {
+            "nb_departements": len(departements_data),
+            "nb_cours": sum(d["nb_cours"] for d in departements_data),
+            "nb_apprenants": sum(d["nb_apprenants"] for d in departements_data),
+            "nb_enseignants": len(cadres_dict),
+        }
+
+        nom_complet = (
+            f"{profile.user.first_name} {profile.user.last_name}".strip()
+            or profile.user.username
+        )
+
+        return Response({
+            "nom": nom_complet,
+            "stats": stats,
+            "departements": departements_data,
+            "cadres": list(cadres_dict.values()),
+        }, status=status.HTTP_200_OK)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ENSEIGNANT ADMIN — Créer un département
+# POST /api/departements/creer/
+# Body: { "nom": "Mathématiques", "description": "...", "parcours_id": 1 }
+#   → parcours_id est OPTIONNEL si l'enseignant admin n'a qu'un seul parcours
+# ───────────────────────────────────────────────────────────────────────────
+class CreerDepartementView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_admin':
+            return Response(
+                {"detail": "Accès réservé aux enseignants administrateurs."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        nom = request.data.get('nom', '').strip()
+        if not nom:
+            return Response(
+                {"detail": "Le nom du département est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Résolution du parcours
+        parcours_id = request.data.get('parcours_id')
+        if parcours_id:
+            # Vérifier que ce parcours appartient à cet enseignant admin
+            parcours = get_object_or_404(Parcours, pk=parcours_id, admin=profile)
+        else:
+            # Auto-déduction si un seul parcours assigné
+            parcours_qs = Parcours.objects.filter(admin=profile)
+            if not parcours_qs.exists():
+                return Response(
+                    {"detail": "Aucun parcours ne vous est assigné."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            if parcours_qs.count() > 1:
+                return Response(
+                    {
+                        "detail": "Vous gérez plusieurs parcours. "
+                                  "Veuillez spécifier 'parcours_id' dans la requête."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            parcours = parcours_qs.first()
+
+        departement = Departement.objects.create(nom=nom, parcours=parcours)
+        return Response(
+            {
+                "id": departement.id,
+                "nom": departement.nom,
+                "parcours": parcours.nom,
+                "parcours_id": parcours.id,
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ENSEIGNANT ADMIN — Nommer / changer le cadre d'un département
+# PATCH /api/departements/<departement_id>/changer-cadre/
+# Body: { "cadre_id": 7 }
+# ───────────────────────────────────────────────────────────────────────────
+class ChangerCadreDepartementView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, departement_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_admin':
+            return Response(
+                {"detail": "Accès réservé aux enseignants administrateurs."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        departement = get_object_or_404(Departement, pk=departement_id)
+
+        # SÉCURITÉ : vérifier que ce département appartient à un parcours géré
+        if departement.parcours.admin != profile:
+            return Response(
+                {"detail": "Ce département n'appartient pas à votre parcours."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        cadre_id = request.data.get('cadre_id')
+        if not cadre_id:
+            return Response(
+                {"detail": "cadre_id est requis."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cadre = get_object_or_404(Profile, pk=cadre_id)
+        if cadre.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant cadre."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        departement.cadre = cadre
+        departement.save()
+        return Response(
+            {"detail": "Enseignant cadre mis à jour avec succès."},
+            status=status.HTTP_200_OK
+        )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Cours d'un département
+# GET /api/departements/<departement_id>/cours/
+# ───────────────────────────────────────────────────────────────────────────
+class CoursParDepartementView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, departement_id):
+        departement = get_object_or_404(Departement, pk=departement_id)
+        cours_qs = Cours.objects.filter(departement=departement).select_related(
+            'enseignant_principal__user'
+        )
+        data = [
+            {
+                "id": c.id,
+                "titre": c.titre,
+                "niveau": c.niveau,
+                "nb_apprenants": c.nb_apprenants,
+                "taux_completion": 0,
+                "color_code": c.color_code,
+                "icon_name": c.icon_name,
+            }
+            for c in cours_qs
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+
+
 # ---------------------------
 # Départements par parcours
 # ---------------------------
