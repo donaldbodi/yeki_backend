@@ -1860,7 +1860,7 @@ class EnseignantAdminDashboardView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        parcours_qs = Parcours.objects.get(admin=profile).prefetch_related(
+        parcours_qs = Parcours.objects.get(admin=profile)(
             'departements__cours',
             'departements__cadre__user'
         )
