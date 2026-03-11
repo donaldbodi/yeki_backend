@@ -1918,6 +1918,8 @@ class EnseignantAdminDashboardView(APIView):
         return Response({
             "nom": nom_complet,
             "stats": stats,
+            "nom_parcours": parcours_qs.nom,
+            "id_parcours": parcours_qs.id,
             "departements": departements_data,
             "cadres": list(cadres_dict.values()),
         }, status=status.HTTP_200_OK)
