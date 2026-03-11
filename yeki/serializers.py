@@ -196,48 +196,76 @@ class CoursSerializer(serializers.ModelSerializer):
 
 
 class CoursCreateSerializer(serializers.ModelSerializer):
+    # departement envoyé comme id (multipart ou json)
+    departement = serializers.PrimaryKeyRelatedField(
+        queryset=Departement.objects.all()
+    )
+
+    # enseignant_principal optionnel
+    enseignant_principal = serializers.PrimaryKeyRelatedField(
+        queryset=Profile.objects.filter(user_type='enseignant_principal'),
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
-        model = Cours
+        model  = Cours
         fields = [
             'titre',
             'niveau',
-            'departement',
-
-            # UI
+            'matiere',
+            'concours',
             'description_brief',
             'color_code',
             'icon_name',
-
-            # pédagogique
+            'departement',
             'enseignant_principal',
         ]
+        extra_kwargs = {
+            'titre':             {'required': True},
+            'niveau':            {'required': True},
+            'matiere':           {'required': False, 'allow_blank': True},
+            'concours':          {'required': False, 'allow_blank': True},
+            'description_brief': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'color_code':        {'required': False},
+            'icon_name':         {'required': False},
+        }
 
-    def validate_color_code(self, value):
-        if value and (not value.startswith('#') or len(value) != 7):
+    # ── Validation du département ────────────────────────────────
+    def validate_departement(self, departement):
+        request = self.context.get('request')
+        if not request:
+            return departement
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            raise serializers.ValidationError("Profil introuvable.")
+
+        # Un cadre ne peut créer que dans SON département
+        if profile.user_type == 'enseignant_cadre':
+            if departement.cadre != profile:
+                raise serializers.ValidationError(
+                    "Vous ne pouvez créer un cours que dans votre propre département."
+                )
+        return departement
+
+    # ── Validation de l'enseignant principal ─────────────────────
+    def validate_enseignant_principal(self, ep):
+        if ep is not None and ep.user_type != 'enseignant_principal':
             raise serializers.ValidationError(
-                "Le code couleur doit être au format #RRGGBB"
+                "Cet utilisateur n'est pas un enseignant principal."
             )
-        return value
+        return ep
+
+    # ── Validation globale ───────────────────────────────────────
+    def validate(self, attrs):
+        color = attrs.get('color_code', '#008080')
+        if color and not color.startswith('#'):
+            attrs['color_code'] = f'#{color}'
+        return attrs
 
     def create(self, validated_data):
-        request = self.context['request']
-        user = request.user
-
-        return Cours.create_cours(
-            user=user,
-            departement=validated_data['departement'],
-            titre=validated_data['titre'],
-            niveau=validated_data['niveau'],
-
-            # UI
-            color_code=validated_data.get('color_code'),
-            icon_name=validated_data.get('icon_name'),
-
-            # 👇 ENSEIGNANT PRINCIPAL
-            enseignant_principal=validated_data.get('enseignant_principal', None),
-            description_brief=validated_data.get('description_brief'),
-        )
+        return Cours.objects.create(**validated_data)
 
 
 class CoursListSerializer(serializers.ModelSerializer):
