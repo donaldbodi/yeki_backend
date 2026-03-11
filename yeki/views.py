@@ -1860,7 +1860,7 @@ class EnseignantAdminDashboardView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        parcours_qs = Parcours.objects.filter(admin=profile).prefetch_related(
+        parcours_qs = Parcours.objects.get(admin=profile).prefetch_related(
             'departements__cours',
             'departements__cadre__user'
         )
@@ -1868,41 +1868,40 @@ class EnseignantAdminDashboardView(APIView):
         departements_data = []
         cadres_dict = {}
 
-        for parcours in parcours_qs:
-            for dept in parcours.departements.all():
-                nb_cours = dept.cours.count()
-                nb_app = sum(c.nb_apprenants for c in dept.cours.all())
+        for dept in parcours_qs.departements.all():
+            nb_cours = dept.cours.count()
+            nb_app = sum(c.nb_apprenants for c in dept.cours.all())
 
-                cadre_data = None
-                if dept.cadre:
-                    cadre_data = {
+            cadre_data = None
+            if dept.cadre:
+                cadre_data = {
+                    "id": dept.cadre.id,
+                    "nom": f"{dept.cadre.user.first_name} {dept.cadre.user.last_name}".strip()
+                          or dept.cadre.user.username,
+                    "username": dept.cadre.user.username,
+                }
+                if dept.cadre.id not in cadres_dict:
+                    cadres_dict[dept.cadre.id] = {
                         "id": dept.cadre.id,
-                        "nom": f"{dept.cadre.user.first_name} {dept.cadre.user.last_name}".strip()
-                              or dept.cadre.user.username,
+                        "nom": cadre_data["nom"],
                         "username": dept.cadre.user.username,
+                        "email": dept.cadre.user.email,
+                        "nb_cours": nb_cours,
+                        "nb_apprenants": nb_app,
+                        "taux_moyen": 0,
+                        "departement": {"id": dept.id, "nom": dept.nom},
                     }
-                    if dept.cadre.id not in cadres_dict:
-                        cadres_dict[dept.cadre.id] = {
-                            "id": dept.cadre.id,
-                            "nom": cadre_data["nom"],
-                            "username": dept.cadre.user.username,
-                            "email": dept.cadre.user.email,
-                            "nb_cours": nb_cours,
-                            "nb_apprenants": nb_app,
-                            "taux_moyen": 0,
-                            "departement": {"id": dept.id, "nom": dept.nom},
-                        }
 
-                departements_data.append({
-                    "id": dept.id,
-                    "nom": dept.nom,
-                    "parcours": parcours.nom,
-                    "parcours_id": parcours.id,
-                    "nb_cours": nb_cours,
-                    "nb_apprenants": nb_app,
-                    "taux_moyen": 0,
-                    "cadre": cadre_data,
-                })
+            departements_data.append({
+                "id": dept.id,
+                "nom": dept.nom,
+                "parcours": parcours_qs.nom,
+                "parcours_id": parcours_qs.id,
+                "nb_cours": nb_cours,
+                "nb_apprenants": nb_app,
+                "taux_moyen": 0,
+                "cadre": cadre_data,
+            })
 
         stats = {
             "nb_departements": len(departements_data),

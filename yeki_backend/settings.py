@@ -31,7 +31,7 @@ ALLOWED_HOSTS = ['yeki.pythonanywhere.com']
 
 CORS_ALLOWED_ORIGINS = [
     "https://yeki.pythonanywhere.com",
-    "http://localhost:59020",
+    "http://localhost:63898",
 ]
 
 # Application definition
