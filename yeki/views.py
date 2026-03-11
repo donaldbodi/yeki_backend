@@ -1585,6 +1585,220 @@ class StatsForumView(APIView):
         })
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# ENDPOINT 1 : GET /api/enseignant/cadre/dashboard/
+#
+# Retourne tout ce dont la page CadreDashboardPage a besoin :
+#   - nom          : prénom + nom du cadre connecté
+#   - departement  : { id, nom, description, parcours, nb_cours, nb_apprenants }
+#   - cours        : liste des cours du département
+#   - enseignants_principaux : EP distincts dans ces cours + leurs stats
+#   - stats        : { nb_cours, nb_apprenants, nb_enseignants, taux_moyen }
+# ───────────────────────────────────────────────────────────────────────────
+class EnseignantCadreDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # ── Département unique du cadre ───────────────────────────
+        departement = Departement.objects.filter(
+            cadre=profile
+        ).select_related('parcours').first()
+
+        if departement is None:
+            # Cadre non encore affecté à un département
+            nom_complet = (
+                f"{profile.user.first_name} {profile.user.last_name}".strip()
+                or profile.user.username
+            )
+            return Response({
+                "nom":                   nom_complet,
+                "departement":           {},
+                "cours":                 [],
+                "enseignants_principaux": [],
+                "stats": {
+                    "nb_cours":       0,
+                    "nb_apprenants":  0,
+                    "nb_enseignants": 0,
+                    "taux_moyen":     0,
+                },
+            }, status=status.HTTP_200_OK)
+
+        # ── Cours du département ──────────────────────────────────
+        cours_qs = Cours.objects.filter(
+            departement=departement
+        ).select_related('enseignant_principal__user')
+
+        cours_data = []
+        for c in cours_qs:
+            ep_data = None
+            if c.enseignant_principal:
+                ep = c.enseignant_principal
+                ep_data = {
+                    "id":       ep.id,
+                    "nom":      f"{ep.user.first_name} {ep.user.last_name}".strip()
+                                or ep.user.username,
+                    "username": ep.user.username,
+                    "photo":    request.build_absolute_uri(ep.avatar.url)
+                                if ep.avatar else None,
+                }
+            cours_data.append({
+                "id":               c.id,
+                "titre":            c.titre,
+                "niveau":           c.niveau,
+                "nb_apprenants":    c.nb_apprenants,
+                "taux_completion":  0,          # calculer si tu as le modèle de progression
+                "color_code":       c.color_code,
+                "icon_name":        c.icon_name,
+                "enseignant_principal": ep_data,
+            })
+
+        # ── Enseignants principaux distincts + leurs stats ────────
+        ep_ids_vus = set()
+        enseignants_principaux = []
+
+        for c in cours_qs:
+            if c.enseignant_principal is None:
+                continue
+            ep = c.enseignant_principal
+            if ep.id in ep_ids_vus:
+                continue
+            ep_ids_vus.add(ep.id)
+
+            nb_cours_ep   = Cours.objects.filter(
+                enseignant_principal=ep,
+                departement=departement
+            ).count()
+            nb_app_ep     = sum(
+                co.nb_apprenants
+                for co in Cours.objects.filter(
+                    enseignant_principal=ep,
+                    departement=departement
+                )
+            )
+
+            # Score moyen à partir des évaluations d'exercices
+            from django.db.models import Avg
+            avg = EvaluationExercice.objects.filter(
+                exercice__cours__enseignant_principal=ep,
+                exercice__cours__departement=departement
+            ).aggregate(moy=Avg('score'))['moy']
+
+            score_moyen = round((avg or 0) / 20 * 20, 1)   # ramener sur 20
+
+            enseignants_principaux.append({
+                "id":          ep.id,
+                "nom":         f"{ep.user.first_name} {ep.user.last_name}".strip()
+                               or ep.user.username,
+                "username":    ep.user.username,
+                "email":       ep.user.email,
+                "photo":       request.build_absolute_uri(ep.avatar.url)
+                               if ep.avatar else None,
+                "nb_cours":    nb_cours_ep,
+                "nb_apprenants": nb_app_ep,
+                "score_moyen": score_moyen,
+            })
+
+        # ── Stats globales du département ─────────────────────────
+        nb_cours      = len(cours_data)
+        nb_apprenants = sum(c["nb_apprenants"] for c in cours_data)
+        nb_enseignants = len(enseignants_principaux)
+        taux_moyen    = (
+            sum(c["taux_completion"] for c in cours_data) / nb_cours
+            if nb_cours > 0 else 0
+        )
+
+        # ── Infos département ─────────────────────────────────────
+        dept_data = {
+            "id":          departement.id,
+            "nom":         departement.nom,
+            "description": getattr(departement, 'description', ''),
+            "parcours":    departement.parcours.nom if departement.parcours else "",
+            "parcours_id": departement.parcours.id  if departement.parcours else None,
+        }
+
+        nom_complet = (
+            f"{profile.user.first_name} {profile.user.last_name}".strip()
+            or profile.user.username
+        )
+
+        return Response({
+            "nom":                   nom_complet,
+            "departement":           dept_data,
+            "cours":                 cours_data,
+            "enseignants_principaux": enseignants_principaux,
+            "stats": {
+                "nb_cours":       nb_cours,
+                "nb_apprenants":  nb_apprenants,
+                "nb_enseignants": nb_enseignants,
+                "taux_moyen":     round(taux_moyen, 1),
+            },
+        }, status=status.HTTP_200_OK)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ENDPOINT 2 : PATCH /api/cours/<cours_id>/changer-enseignant-principal/
+#
+# Body  : { "enseignant_principal_id": <int> }
+# Accès : enseignant_cadre du département auquel appartient le cours
+# ───────────────────────────────────────────────────────────────────────────
+class ChangerEnseignantPrincipalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, cours_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        cours = get_object_or_404(Cours, pk=cours_id)
+
+        # Sécurité : le cadre ne peut modifier que les cours de son département
+        if cours.departement.cadre != profile:
+            return Response(
+                {"detail": "Ce cours n'appartient pas à votre département."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        ep_id = request.data.get('enseignant_principal_id')
+        if not ep_id:
+            return Response(
+                {"detail": "enseignant_principal_id est requis."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ep = get_object_or_404(Profile, pk=ep_id)
+        if ep.user_type != 'enseignant_principal':
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant principal."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cours.enseignant_principal = ep
+        cours.save(update_fields=['enseignant_principal'])
+
+        return Response(
+            {"detail": "Enseignant principal mis à jour avec succès."},
+            status=status.HTTP_200_OK
+        )
+
+
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------

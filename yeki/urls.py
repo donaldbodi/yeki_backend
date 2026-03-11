@@ -42,6 +42,10 @@ urlpatterns = [
     # GET /api/enseignant/admin/dashboard/
     path('enseignant/admin/dashboard/', EnseignantAdminDashboardView.as_view(), name='enseignant-admin-dashboard'),
 
+    # Dashboard enseignant cadre
+    path('cours/<int:cours_id>/changer-enseignant-principal/', ChangerEnseignantPrincipalView.as_view(), name='changer-ep'),
+    path('enseignant/cadre/dashboard/', EnseignantCadreDashboardView.as_view(), name='enseignant-cadre-dashboard'),
+    
     # ── STATISTIQUES ──────────────────────────────────────────────
     path('statistiques-globales/',              statistiques_globales,              name='statistiques-globales'),
     path('stats/enseignant-admin/<int:pk>/',    EnseignantAdminStatsView.as_view(), name='enseignant-admin-stats'),
