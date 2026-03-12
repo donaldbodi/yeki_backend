@@ -656,6 +656,67 @@ class AjouterExerciceView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 
+class AjouterQuestionView(APIView):
+    """
+    POST /api/exercices/<exercice_id>/questions/ajouter/
+    Réservé à l'enseignant principal du cours lié à l'exercice.
+
+    Body JSON :
+    {
+        "text":           "Quelle est la capitale de la France ?",
+        "type_question":  "qcm",          // "qcm" | "texte"
+        "points":         2,
+        "bonne_reponse":  "Paris",
+        "choix": [                        // requis si type_question == "qcm"
+            {"texte": "Paris"},
+            {"texte": "Lyon"},
+            {"texte": "Marseille"}
+        ]
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, exercice_id):
+        exercice = get_object_or_404(Exercice, pk=exercice_id)
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if exercice.cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut ajouter des questions."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = QuestionCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            question = serializer.save(exercice=exercice)
+            return Response(
+                QuestionSerializer(question).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ListeQuestionsExerciceView(APIView):
+    """
+    GET /api/exercices/<exercice_id>/questions/
+    Retourne toutes les questions d'un exercice avec leurs choix.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, exercice_id):
+        exercice  = get_object_or_404(Exercice, pk=exercice_id)
+        questions = Question.objects.filter(
+            exercice=exercice
+        ).prefetch_related('choix')
+        return Response(
+            QuestionSerializer(questions, many=True).data
+        )
+    
+
 # ─────────────────────────────────────────────────────
 # ENDPOINT 1 : GET /api/profil/me/
 # Retourne le profil complet de l'utilisateur connecté

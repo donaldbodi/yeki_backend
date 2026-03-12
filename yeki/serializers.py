@@ -504,6 +504,54 @@ class QuestionSerializer(serializers.ModelSerializer):
         return []
 
 
+class ChoixCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Choix
+        fields = ['texte']
+
+
+class QuestionCreateSerializer(serializers.ModelSerializer):
+    """
+    Crée une Question avec ses Choix imbriqués.
+    Les choix sont passés dans 'choix' : [{"texte": "..."}, ...]
+    La bonne réponse est passée dans 'bonne_reponse' (texte exact d'un choix).
+    """
+    choix = ChoixCreateSerializer(many=True, required=False, default=[])
+
+    class Meta:
+        model  = Question
+        fields = ['text', 'type_question', 'points', 'bonne_reponse', 'choix']
+        extra_kwargs = {
+            'points':        {'required': False, 'default': 1},
+            'bonne_reponse': {'required': True},
+        }
+
+    def validate(self, attrs):
+        type_q = attrs.get('type_question', 'texte')
+        choix  = attrs.get('choix', [])
+
+        if type_q == 'qcm' and len(choix) < 2:
+            raise serializers.ValidationError(
+                "Un QCM doit avoir au moins 2 choix."
+            )
+
+        bonne = attrs.get('bonne_reponse', '').strip()
+        if type_q == 'qcm' and choix:
+            textes = [c['texte'].strip() for c in choix]
+            if bonne not in textes:
+                raise serializers.ValidationError(
+                    "La bonne réponse doit correspondre exactement au texte d'un choix."
+                )
+        return attrs
+
+    def create(self, validated_data):
+        choix_data = validated_data.pop('choix', [])
+        question   = Question.objects.create(**validated_data)
+        for c in choix_data:
+            Choix.objects.create(question=question, texte=c['texte'])
+        return question
+
+
 class ExerciceSerializer(serializers.ModelSerializer):
     questions = QuestionSerializer(many=True, read_only=True)
 

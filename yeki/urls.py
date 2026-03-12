@@ -124,6 +124,15 @@ urlpatterns = [
     path('cours/<int:cours_id>/exercices/ajouter/',
      views.AjouterExerciceView.as_view(),
      name='exercice-ajouter'),
+     
+    # ── QUESTIONS ─────────────────────────────────────────────────
+     path('exercices/<int:exercice_id>/questions/',
+     views.ListeQuestionsExerciceView.as_view(),
+     name='question-liste'),
+
+    path('exercices/<int:exercice_id>/questions/ajouter/',
+     views.AjouterQuestionView.as_view(),
+     name='question-ajouter'),
 
     # ── DEVOIRS ───────────────────────────────────────────────────
     path('devoirs/',                           ListeDevoirsView.as_view(),     name='liste-devoirs'),
