@@ -90,10 +90,30 @@ urlpatterns = [
 
     # ── LEÇONS ────────────────────────────────────────────────────
     path('cours/<int:cours_id>/lecons/', AjouterLeconView.as_view(), name='ajouter-lecon'),
+    path(
+        'lecons/<int:lecon_id>/modifier/',
+        views.LeconUpdateView.as_view(),
+        name='lecon-modifier',
+    ),
+    path(
+        'lecons/<int:lecon_id>/supprimer/',
+        views.LeconDeleteView.as_view(),
+        name='lecon-supprimer',
+    ),
 
     # ── MODULES ───────────────────────────────────────────────────
     path('cours/<int:cours_id>/modules/',       ModuleCreateView.as_view(),       name='module-create'),
     path('cours/<int:cours_id>/liste-modules/', ModuleListByCoursView.as_view(),  name='cours-modules'),
+    path(
+        'modules/<int:module_id>/modifier/',
+        views.ModuleUpdateView.as_view(),
+        name='module-modifier',
+    ),
+    path(
+        'modules/<int:module_id>/supprimer/',
+        views.ModuleDeleteView.as_view(),
+        name='module-supprimer',
+    ),
 
     # ── EXERCICES ─────────────────────────────────────────────────
     path('cours/<int:cours_id>/exercices/',         ListeExercicesCoursView.as_view()),

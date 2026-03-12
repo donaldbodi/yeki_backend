@@ -394,6 +394,96 @@ class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
         ]
 
 
+# ═══════════════════════════════════════════════════════════════
+#  À ajouter à la fin de serializers.py
+# ═══════════════════════════════════════════════════════════════
+
+class ModuleUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer pour la MODIFICATION partielle d'un module.
+    Gère le conflit d'ordre : si l'ordre choisi est déjà pris
+    dans le même cours, on décale les autres modules.
+    """
+    class Meta:
+        model  = Module
+        fields = ['titre', 'description', 'ordre']
+        extra_kwargs = {
+            'titre':       {'required': False},
+            'description': {'required': False},
+            'ordre':       {'required': False},
+        }
+
+    def validate_ordre(self, value):
+        if value < 1:
+            raise serializers.ValidationError("L'ordre doit être supérieur ou égal à 1.")
+        return value
+
+    def update(self, instance, validated_data):
+        nouvel_ordre = validated_data.get('ordre')
+
+        # Si l'ordre change ET qu'un autre module occupe déjà cette position
+        if nouvel_ordre and nouvel_ordre != instance.ordre:
+            conflit = Module.objects.filter(
+                cours=instance.cours,
+                ordre=nouvel_ordre
+            ).exclude(pk=instance.pk).first()
+
+            if conflit:
+                # Échange des positions
+                conflit.ordre = instance.ordre
+                conflit.save(update_fields=['ordre'])
+
+        return super().update(instance, validated_data)
+
+
+class LeconUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer pour la MODIFICATION partielle d'une leçon.
+    Tous les champs sont optionnels (PATCH).
+    Valide que le module cible appartient bien au même cours.
+    """
+    class Meta:
+        model  = Lecon
+        fields = [
+            'titre',
+            'description',
+            'module',
+            'fichier_pdf',
+            'video',
+        ]
+        extra_kwargs = {
+            'titre':       {'required': False},
+            'description': {'required': False},
+            'module':      {'required': False, 'allow_null': True},
+            'fichier_pdf': {'required': False, 'allow_null': True},
+            'video':       {'required': False, 'allow_null': True},
+        }
+
+    def validate_fichier_pdf(self, value):
+        if value and not value.name.lower().endswith('.pdf'):
+            raise serializers.ValidationError("Seuls les fichiers PDF sont autorisés.")
+        return value
+
+    def validate_video(self, value):
+        ALLOWED = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
+        if value and not any(value.name.lower().endswith(ext) for ext in ALLOWED):
+            raise serializers.ValidationError(
+                f"Format vidéo non supporté. Formats acceptés : {', '.join(ALLOWED)}"
+            )
+        return value
+
+    def validate_module(self, module):
+        """Le module cible doit appartenir au même cours que la leçon."""
+        if module is None:
+            return module
+        lecon = self.instance
+        if lecon and module.cours_id != lecon.cours_id:
+            raise serializers.ValidationError(
+                "Le module cible doit appartenir au même cours que cette leçon."
+            )
+        return module
+
+
 class ChoixSerializer(serializers.ModelSerializer):
     class Meta:
         model = Choix

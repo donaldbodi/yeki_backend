@@ -340,6 +340,152 @@ class ModuleCreateView(APIView):
             },
             status=status.HTTP_201_CREATED
         )
+    
+# ═══════════════════════════════════════════════════════════════
+#  MODULE — Modifier et Supprimer
+# ═══════════════════════════════════════════════════════════════
+
+class ModuleUpdateView(APIView):
+    """
+    PATCH /api/modules/<module_id>/modifier/
+    Modifie le titre, la description et/ou l'ordre d'un module.
+    Réservé à l'enseignant principal du cours lié.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, module_id):
+        module = get_object_or_404(Module, pk=module_id)
+        cours  = module.cours
+
+        # 🔐 Seul l'enseignant principal peut modifier
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut modifier un module."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ModuleUpdateSerializer(module, data=request.data, partial=True)
+        if serializer.is_valid():
+            updated = serializer.save()
+            return Response(
+                ModuleAvecLeconsSerializer(updated, context={"request": request}).data,
+                status=status.HTTP_200_OK,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ModuleDeleteView(APIView):
+    """
+    DELETE /api/modules/<module_id>/supprimer/
+    Supprime un module et toutes ses leçons (cascade Django).
+    Réservé à l'enseignant principal du cours lié.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def delete(self, request, module_id):
+        module = get_object_or_404(Module, pk=module_id)
+        cours  = module.cours
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut supprimer un module."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Décrémenter nb_lecons du cours
+        nb_lecons_module = module.lecons.count()
+        module.delete()
+
+        if nb_lecons_module > 0:
+            cours.nb_lecons = max(0, cours.nb_lecons - nb_lecons_module)
+            cours.save(update_fields=["nb_lecons"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  LEÇON — Modifier et Supprimer
+# ═══════════════════════════════════════════════════════════════
+
+class LeconUpdateView(APIView):
+    """
+    PATCH /api/lecons/<lecon_id>/modifier/
+    Modifie une leçon (titre, description, module, fichier_pdf, video).
+    Réservé à l'enseignant principal du cours OU au créateur de la leçon.
+    Accepte multipart/form-data pour les fichiers.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    @transaction.atomic
+    def patch(self, request, lecon_id):
+        lecon = get_object_or_404(Lecon, pk=lecon_id)
+        cours = lecon.cours
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        # 🔐 Enseignant principal OU créateur de la leçon
+        if cours.enseignant_principal != profile and lecon.created_by != profile:
+            return Response(
+                {"detail": "Vous n'avez pas la permission de modifier cette leçon."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = LeconUpdateSerializer(lecon, data=request.data, partial=True)
+        if serializer.is_valid():
+            updated = serializer.save()
+            return Response(
+                LeconSerializer(updated, context={"request": request}).data,
+                status=status.HTTP_200_OK,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LeconDeleteView(APIView):
+    """
+    DELETE /api/lecons/<lecon_id>/supprimer/
+    Supprime une leçon.
+    Réservé à l'enseignant principal du cours OU au créateur.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def delete(self, request, lecon_id):
+        lecon = get_object_or_404(Lecon, pk=lecon_id)
+        cours = lecon.cours
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if cours.enseignant_principal != profile and lecon.created_by != profile:
+            return Response(
+                {"detail": "Vous n'avez pas la permission de supprimer cette leçon."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        lecon.delete()
+
+        cours.nb_lecons = max(0, cours.nb_lecons - 1)
+        cours.save(update_fields=["nb_lecons"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ListeExercicesCoursView(APIView):
