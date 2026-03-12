@@ -121,6 +121,9 @@ urlpatterns = [
     path('evaluations/historique/',                 HistoriqueEvaluationsView.as_view()),
     path('exercices/<int:exercice_id>/',            ExerciceDetailView.as_view()),
     path('exercices/<int:exercice_id>/demarrer/',   DemarrerExerciceView.as_view()),
+    path('cours/<int:cours_id>/exercices/ajouter/',
+     views.AjouterExerciceView.as_view(),
+     name='exercice-ajouter'),
 
     # ── DEVOIRS ───────────────────────────────────────────────────
     path('devoirs/',                           ListeDevoirsView.as_view(),     name='liste-devoirs'),

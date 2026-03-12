@@ -512,6 +512,17 @@ class ExerciceSerializer(serializers.ModelSerializer):
         fields = ["id", "titre", "enonce", "etoiles", "questions"]
 
 
+class ExerciceCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Exercice
+        fields = ['titre', 'enonce', 'etoiles', 'duree_minutes', 'tentatives_max']
+        extra_kwargs = {
+            'etoiles':        {'min_value': 1, 'max_value': 5},
+            'duree_minutes':  {'min_value': 1},
+            'tentatives_max': {'min_value': 1},
+        }
+
+
 class SessionSerializer(serializers.ModelSerializer):
     temps_restant = serializers.SerializerMethodField()
 

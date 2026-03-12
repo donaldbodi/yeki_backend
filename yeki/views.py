@@ -621,6 +621,39 @@ class ExerciceDetailView(APIView):
             data["temps_restant"] = exercice.duree
 
         return Response(data, status=status.HTTP_200_OK)
+
+
+class AjouterExerciceView(APIView):
+    """
+    POST /api/cours/<cours_id>/exercices/ajouter/
+    Réservé à l'enseignant principal du cours.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut ajouter un exercice."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ExerciceCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            exercice = serializer.save(cours=cours)
+            cours.nb_devoirs += 1
+            cours.save(update_fields=['nb_devoirs'])
+            return Response(
+                ExerciceSerializer(exercice).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 
 # ─────────────────────────────────────────────────────
