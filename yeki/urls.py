@@ -83,8 +83,8 @@ urlpatterns = [
     path('departements/<int:departement_id>/cours/', CoursParDepartementView.as_view(), name='departements-cours'),
 
     # ── COURS ─────────────────────────────────────────────────────
-    path('cours/create/',                         CoursCreateView.as_view(),               name='cours-create'),
-    path('apprenant/cursus/',                     ApprenantCursusAPIView.as_view(),         name='apprenant-cursus'),
+    path('cours/create/', CoursCreateView.as_view(), name='cours-create'),
+    path('apprenant/cursus/', ApprenantCursusAPIView.as_view(), name='apprenant-cursus'),
     path('cours/<int:cours_id>/add-enseignant/',  AddEnseignantSecondaireView.as_view(),    name='add-enseignant-secondaire'),
     path('cours/<int:cours_id>/remove-enseignant/', RemoveEnseignantSecondaireView.as_view(), name='remove-enseignant-secondaire'),
 
