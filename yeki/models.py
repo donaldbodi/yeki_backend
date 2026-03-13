@@ -476,7 +476,7 @@ class SoumissionDevoir(models.Model):
         upload_to='soumissions_devoirs/',
         null=True,
         blank=True,
-        help_text='Fichier PDF soumis par l\\'apprenant (correction manuelle)',
+        help_text='Fichier PDF soumis par l\'apprenant (correction manuelle)',
     )
 
     # ── Anti-triche ──────────────────────────────────────────────
