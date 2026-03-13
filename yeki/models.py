@@ -374,6 +374,16 @@ class Devoir(models.Model):
                             "Cours", on_delete=models.SET_NULL,
                             null=True, blank=True, related_name="devoirs"
                           )
+    TYPE_CORRECTION_CHOICES = [
+        ('auto',   'Correction automatique'),
+        ('manuel', 'Correction manuelle'),
+    ]
+    type_correction = models.CharField(
+        max_length=10,
+        choices=TYPE_CORRECTION_CHOICES,
+        default='auto',
+        help_text='auto = QCM/texte exact corrigé auto ; manuel = enseignant corrige',
+    )
 
     # ── Auteur ───────────────────────────────────────────────────
     cree_par = models.ForeignKey(
@@ -461,6 +471,13 @@ class SoumissionDevoir(models.Model):
                         null=True, blank=True, related_name="corrections"
                       )
     corrige_le      = models.DateTimeField(null=True, blank=True)
+
+    fichier_soumis = models.FileField(
+        upload_to='soumissions_devoirs/',
+        null=True,
+        blank=True,
+        help_text='Fichier PDF soumis par l\\'apprenant (correction manuelle)',
+    )
 
     # ── Anti-triche ──────────────────────────────────────────────
     nb_focus_perdu  = models.PositiveIntegerField(default=0,

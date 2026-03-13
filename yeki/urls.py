@@ -143,6 +143,51 @@ urlpatterns = [
     path('devoirs/<int:devoir_id>/focus-perdu/', SignalerFocusDevoirView.as_view(), name='focus-devoir'),
     path('devoirs/mes-soumissions/',           MesSoumissionsView.as_view(),   name='mes-soumissions'),
     path('devoirs/<int:devoir_id>/resultat/',  ResultatDevoirView.as_view(),   name='resultat-devoir'),
+    path(
+        'cours/<int:cours_id>/devoirs/creer/',
+        CreerDevoirCoursView.as_view(),
+        name='devoir-creer',
+    ),
+    path(
+        'devoirs/<int:devoir_id>/modifier/',
+        ModifierDevoirView.as_view(),
+        name='devoir-modifier',
+    ),
+    path(
+        'devoirs/<int:devoir_id>/questions/',
+        ListeQuestionsDevoirView.as_view(),
+        name='devoir-questions-liste',
+    ),
+    path(
+        'devoirs/<int:devoir_id>/questions/ajouter/',
+        AjouterQuestionDevoirView.as_view(),
+        name='devoir-question-ajouter',
+    ),
+    path(
+        'devoirs/<int:devoir_id>/soumissions/',
+        SoumissionsDevoirEnseignantView.as_view(),
+        name='devoir-soumissions',
+    ),
+    path(
+        'soumissions/<int:soumission_id>/detail/',
+        DetailSoumissionEnseignantView.as_view(),
+        name='soumission-detail',
+    ),
+    path(
+        'soumissions/<int:soumission_id>/corriger/',
+        CorrigerSoumissionView.as_view(),
+        name='soumission-corriger',
+    ),
+    path(
+        'devoirs/<int:devoir_id>/soumettre-fichier/',
+        SoumettreDevoirFichierView.as_view(),
+        name='devoir-soumettre-fichier',
+    ),
+    path(
+        'devoirs/<int:devoir_id>/stats/',
+        StatsDevoirEnseignantView.as_view(),
+        name='devoir-stats',
+    ),
 
     # ── OLYMPIADES ────────────────────────────────────────────────
     path('olympiades/',                                        ListeOlympiadesView.as_view(),       name='liste-olympiades'),
