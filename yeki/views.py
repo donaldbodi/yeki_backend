@@ -98,6 +98,18 @@ class AddEnseignantSecondaireView(APIView):
         # 7️⃣ Ajout via la logique métier
         cours.enseignants.add(enseignant)
 
+        enregistrer_activite(
+       user=request.user,
+       action='secondary_added',
+       description=f"{enseignant.user.get_full_name() or enseignant.user.username} ajouté comme enseignant secondaire dans « {cours.titre} »",
+       data={
+           'enseignant': enseignant.user.get_full_name() or enseignant.user.username,
+           'cours':      cours.titre,
+       },
+       objet_id=cours.id,
+       objet_type='Cours',
+   )
+
         return Response(
             CoursSerializer(cours).data,
             status=status.HTTP_200_OK
@@ -133,22 +145,64 @@ class ApprenantCursusAPIView(APIView):
     def get(self, request):
         profile = request.user.profile
 
-        # 🔐 SÉCURITÉ : apprenant seulement
-        if profile.user_type != "apprenant":
+        if profile.user_type != 'apprenant':
             return Response(
                 {"detail": "Accès réservé aux apprenants"},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         if not profile.cursus:
             return Response([], status=status.HTTP_200_OK)
 
-        cours = Cours.objects.filter(
+        cours_qs = Cours.objects.filter(
             departement__parcours__nom=profile.cursus
-        ).select_related("enseignant_principal")
+        ).select_related('enseignant_principal__user')
 
-        serializer = CursusApprenantSerializer(cours, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Récupérer les progressions de cet apprenant en une seule requête
+        try:
+            from .models import ProgressionLecon
+            progressions = ProgressionLecon.objects.filter(
+                apprenant=request.user,
+                cours__in=cours_qs,
+            ).values('cours_id', 'terminee')
+
+            # Calculer le taux de complétion par cours
+            from django.db.models import Count, Q
+            prog_map = {}
+            for c in cours_qs:
+                total_lecons = c.nb_lecons or Lecon.objects.filter(cours=c).count()
+                if total_lecons == 0:
+                    prog_map[c.id] = 0.0
+                    continue
+                terminees = sum(
+                    1 for p in progressions
+                    if p['cours_id'] == c.id and p['terminee']
+                )
+                prog_map[c.id] = round((terminees / total_lecons) * 100, 1)
+        except Exception:
+            prog_map = {}
+
+        result = []
+        for c in cours_qs:
+            ep_nom = '—'
+            if c.enseignant_principal:
+                ep = c.enseignant_principal
+                ep_nom = f"{ep.user.first_name} {ep.user.last_name}".strip() \
+                         or ep.user.username
+
+            result.append({
+                'id':                   c.id,
+                'title':                c.titre,
+                'description':          c.description_brief or '',
+                'enseignant_principal': ep_nom,
+                'lessons':              c.nb_lecons,
+                'assignments':          c.nb_devoirs,
+                'icon':                 c.icon_name or 'school',
+                'color':                c.color_code or '#2884A0',
+                'progression':          prog_map.get(c.id, 0.0),
+            })
+
+        return Response(result, status=status.HTTP_200_OK)
 
 
 # ---------------------------
@@ -163,6 +217,19 @@ class CoursCreateView(APIView):
         serializer = CoursCreateSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             cours = serializer.save()
+            from .models import enregistrer_activite
+            enregistrer_activite(
+                user=request.user,
+                action='course_created',
+                description=f"Cours « {cours.titre} » créé dans le département {cours.departement.nom}",
+                data={
+                    'titre':       cours.titre,
+                    'niveau':      cours.niveau,
+                    'departement': cours.departement.nom,
+                },
+                objet_id=cours.id,
+                objet_type='Cours',
+            )
             return Response(CoursSerializer(cours).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -305,6 +372,15 @@ class AjouterLeconView(APIView):
                 cours=cours,
                 created_by=request.user.profile
             )
+            lecon = serializer.instance
+            enregistrer_activite(
+       user=request.user,
+       action='lesson_created',
+       description=f"Leçon « {lecon.titre} » ajoutée au cours « {cours.titre} »",
+       data={'lecon': lecon.titre, 'cours': cours.titre},
+       objet_id=lecon.id,
+       objet_type='Lecon',
+   )
 
             cours.nb_lecons += 1
             cours.save(update_fields=['nb_lecons'])
@@ -312,6 +388,102 @@ class AjouterLeconView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class LecturesRecentesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            limit = min(int(request.query_params.get('limit', 5)), 10)
+        except (TypeError, ValueError):
+            limit = 5
+
+        # ── Avec le modèle ProgressionLecon ──────────────────────
+        try:
+            from .models import ProgressionLecon
+            progressions = ProgressionLecon.objects.filter(
+                apprenant=request.user,
+                terminee=False,   # Seulement les leçons non terminées
+            ).select_related(
+                'lecon__cours__enseignant_principal__user',
+                'lecon__module',
+            ).order_by('-derniere_vue')[:limit]
+
+            result = []
+            for p in progressions:
+                lecon = p.lecon
+                cours = lecon.cours
+                module_titre = lecon.module.titre if lecon.module else ''
+
+                # Estimer le temps restant (supposons ~5 min par leçon)
+                mins_total = 5
+                mins_restants = max(1, round(mins_total * (1 - p.pourcentage / 100)))
+
+                result.append({
+                    'lecon_id':       lecon.id,
+                    'lecon_titre':    lecon.titre,
+                    'cours_id':       cours.id,
+                    'cours_titre':    cours.titre,
+                    'cours_color':    cours.color_code or '#2884A0',
+                    'cours_icon':     cours.icon_name or 'school',
+                    'module_titre':   module_titre,
+                    'pourcentage':    p.pourcentage,
+                    'derniere_vue':   p.derniere_vue.isoformat(),
+                    'mins_restants':  mins_restants,
+                })
+
+            return Response(result, status=status.HTTP_200_OK)
+
+        except Exception:
+            # Si ProgressionLecon n'existe pas encore, retourner vide
+            return Response([], status=status.HTTP_200_OK)
+
+
+class MarquerLeconVueView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        lecon_id    = request.data.get('lecon_id')
+        pourcentage = request.data.get('pourcentage', 0)
+
+        if not lecon_id:
+            return Response(
+                {"detail": "lecon_id est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            pourcentage = max(0, min(100, int(pourcentage)))
+        except (TypeError, ValueError):
+            pourcentage = 0
+
+        lecon = get_object_or_404(Lecon, pk=lecon_id)
+
+        try:
+            from .models import ProgressionLecon
+            prog, created = ProgressionLecon.objects.update_or_create(
+                apprenant=request.user,
+                lecon=lecon,
+                defaults={
+                    'cours':       lecon.cours,
+                    'pourcentage': pourcentage,
+                    'terminee':    pourcentage >= 90,
+                },
+            )
+
+            return Response({
+                'lecon_id':    lecon.id,
+                'pourcentage': prog.pourcentage,
+                'terminee':    prog.terminee,
+                'created':     created,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {"detail": f"Erreur : {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class ModuleCreateView(APIView):
@@ -330,6 +502,14 @@ class ModuleCreateView(APIView):
         serializer.is_valid(raise_exception=True)
 
         module = serializer.save(cours=cours)
+        enregistrer_activite(
+       user=request.user,
+       action='module_created',
+       description=f"Module « {module.titre} » créé dans le cours « {cours.titre} »",
+       data={'module': module.titre, 'cours': cours.titre, 'ordre': module.ordre},
+       objet_id=module.id,
+       objet_type='Module',
+   )
 
         return Response(
             {
@@ -340,10 +520,7 @@ class ModuleCreateView(APIView):
             },
             status=status.HTTP_201_CREATED
         )
-    
-# ═══════════════════════════════════════════════════════════════
-#  MODULE — Modifier et Supprimer
-# ═══════════════════════════════════════════════════════════════
+
 
 class ModuleUpdateView(APIView):
     """
@@ -373,6 +550,14 @@ class ModuleUpdateView(APIView):
         serializer = ModuleUpdateSerializer(module, data=request.data, partial=True)
         if serializer.is_valid():
             updated = serializer.save()
+            enregistrer_activite(
+       user=request.user,
+       action='module_modified',
+       description=f"Module « {updated.titre} » modifié",
+       data={'module': updated.titre, 'cours': updated.cours.titre},
+       objet_id=updated.id,
+       objet_type='Module',
+   )
             return Response(
                 ModuleAvecLeconsSerializer(updated, context={"request": request}).data,
                 status=status.HTTP_200_OK,
@@ -406,6 +591,13 @@ class ModuleDeleteView(APIView):
 
         # Décrémenter nb_lecons du cours
         nb_lecons_module = module.lecons.count()
+        enregistrer_activite(
+       user=request.user,
+       action='module_deleted',
+       description=f"Module « {module.titre} » supprimé du cours « {cours.titre} »",
+       data={'module': module.titre, 'cours': cours.titre},
+       objet_type='Module',
+   )
         module.delete()
 
         if nb_lecons_module > 0:
@@ -479,7 +671,13 @@ class LeconDeleteView(APIView):
                 {"detail": "Vous n'avez pas la permission de supprimer cette leçon."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-
+        enregistrer_activite(
+       user=request.user,
+       action='lesson_deleted',
+       description=f"Leçon « {lecon.titre} » supprimée du cours « {cours.titre} »",
+       data={'lecon': lecon.titre, 'cours': cours.titre},
+       objet_type='Lecon',
+   )
         lecon.delete()
 
         cours.nb_lecons = max(0, cours.nb_lecons - 1)
@@ -624,10 +822,7 @@ class ExerciceDetailView(APIView):
 
 
 class AjouterExerciceView(APIView):
-    """
-    POST /api/cours/<cours_id>/exercices/ajouter/
-    Réservé à l'enseignant principal du cours.
-    """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, cours_id):
@@ -647,6 +842,14 @@ class AjouterExerciceView(APIView):
         serializer = ExerciceCreateSerializer(data=request.data)
         if serializer.is_valid():
             exercice = serializer.save(cours=cours)
+            enregistrer_activite(
+       user=request.user,
+       action='exercise_created',
+       description=f"Exercice « {exercice.titre} » ajouté au cours « {cours.titre} »",
+       data={'exercice': exercice.titre, 'cours': cours.titre, 'etoiles': exercice.etoiles},
+       objet_id=exercice.id,
+       objet_type='Exercice',
+   )
             cours.nb_devoirs += 1
             cours.save(update_fields=['nb_devoirs'])
             return Response(
@@ -657,23 +860,7 @@ class AjouterExerciceView(APIView):
     
 
 class AjouterQuestionView(APIView):
-    """
-    POST /api/exercices/<exercice_id>/questions/ajouter/
-    Réservé à l'enseignant principal du cours lié à l'exercice.
 
-    Body JSON :
-    {
-        "text":           "Quelle est la capitale de la France ?",
-        "type_question":  "qcm",          // "qcm" | "texte"
-        "points":         2,
-        "bonne_reponse":  "Paris",
-        "choix": [                        // requis si type_question == "qcm"
-            {"texte": "Paris"},
-            {"texte": "Lyon"},
-            {"texte": "Marseille"}
-        ]
-    }
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, exercice_id):
@@ -1288,6 +1475,19 @@ class CreerDevoirCoursView(APIView):
         serializer = DevoirCreateSerializer(data=data)
         if serializer.is_valid():
             devoir = serializer.save()
+            enregistrer_activite(
+       user=request.user,
+       action='homework_created',
+       description=f"Devoir « {devoir.titre} » créé pour le cours « {cours.titre} »",
+       data={
+           'devoir':       devoir.titre,
+           'cours':        cours.titre,
+           'date_limite':  devoir.date_limite.strftime('%d/%m/%Y') if devoir.date_limite else '',
+           'nb_questions': devoir.questions.count(),
+       },
+       objet_id=devoir.id,
+       objet_type='Devoir',
+   )
 
             # Stocker type_correction (si champ existe dans le modèle)
             if hasattr(devoir, 'type_correction'):
@@ -1557,6 +1757,19 @@ class CorrigerSoumissionView(APIView):
         soum.commentaire = request.data.get('commentaire', '')
         soum.corrige_le  = timezone.now()
         soum.save(update_fields=['note', 'statut', 'commentaire', 'corrige_le'])
+        enregistrer_activite(
+       user=request.user,
+       action='submission_graded',
+       description=f"Soumission de {soum.utilisateur.get_full_name() or soum.utilisateur.username} corrigée — note: {soum.note}/{soum.devoir.note_sur}",
+       data={
+           'apprenant': soum.utilisateur.get_full_name() or soum.utilisateur.username,
+           'devoir':    soum.devoir.titre,
+           'note':      str(soum.note),
+           'note_sur':  str(soum.devoir.note_sur),
+       },
+       objet_id=soum.id,
+       objet_type='Soumission',
+   )
 
         return Response({
             "id":          soum.id,
@@ -2115,6 +2328,17 @@ class CalculerClassementView(APIView):
             )
             insc.classement = rang
             insc.save(update_fields=["classement"])
+        enregistrer_activite(
+       user=request.user,
+       action='ranking_computed',
+       description=f"Classement calculé pour l'olympiade « {olympiade.titre} » ({inscriptions.count()} participants)",
+       data={
+           'olympiade':    olympiade.titre,
+           'participants': inscriptions.count(),
+       },
+       objet_id=olympiade.id,
+       objet_type='Olympiade',
+   )
 
         return Response({
             "detail": f"Classement calculé pour {inscriptions.count()} participants.",
@@ -2571,11 +2795,367 @@ class ChangerEnseignantPrincipalView(APIView):
 
         cours.enseignant_principal = ep
         cours.save(update_fields=['enseignant_principal'])
+        enregistrer_activite(
+        user=request.user,
+        action='teacher_changed',
+        description=f"Enseignant principal de « {cours.titre} » changé pour {ep.user.get_full_name() or ep.user.username}",
+        data={
+            'cours':       cours.titre,
+            'enseignant':  ep.user.get_full_name() or ep.user.username,
+            'departement': cours.departement.nom,
+        },
+        objet_id=cours.id,
+        objet_type='Cours',
+    )
 
         return Response(
             {"detail": "Enseignant principal mis à jour avec succès."},
             status=status.HTTP_200_OK
         )
+
+
+class ModifierCoursParCadreView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, cours_id):
+        # ── Récupérer le profil ──────────────────────────────────
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        # ── Vérifier le rôle ─────────────────────────────────────
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Récupérer le cours ───────────────────────────────────
+        cours = get_object_or_404(Cours, pk=cours_id)
+
+        # ── Sécurité : le cours doit appartenir au département du cadre ──
+        if cours.departement.cadre != profile:
+            return Response(
+                {"detail": "Ce cours n'appartient pas à votre département."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data
+
+        # ── Titre ────────────────────────────────────────────────
+        if 'titre' in data:
+            titre = data['titre'].strip()
+            if not titre:
+                return Response(
+                    {"detail": "Le titre ne peut pas être vide."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            cours.titre = titre
+
+        # ── Niveau ───────────────────────────────────────────────
+        if 'niveau' in data:
+            niveau = data['niveau'].strip()
+            if not niveau:
+                return Response(
+                    {"detail": "Le niveau ne peut pas être vide."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            cours.niveau = niveau
+
+        # ── Description courte ───────────────────────────────────
+        if 'description_brief' in data:
+            cours.description_brief = (data['description_brief'] or '').strip()
+
+        # ── Couleur ──────────────────────────────────────────────
+        if 'color_code' in data:
+            color = data['color_code'].strip()
+            if color and not color.startswith('#'):
+                color = f'#{color}'
+            if len(color) not in [4, 7]:   # #RGB ou #RRGGBB
+                return Response(
+                    {"detail": "Format de couleur invalide. Utilisez #RRGGBB."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            cours.color_code = color
+
+        # ── Icône ─────────────────────────────────────────────────
+        if 'icon_name' in data:
+            cours.icon_name = (data['icon_name'] or 'school').strip()
+
+        cours.save()
+
+        enregistrer_activite(
+        user=request.user,
+        action='course_modified',
+        description=f"Cours « {cours.titre} » modifié",
+        data={'titre': cours.titre, 'niveau': cours.niveau, 'color_code': cours.color_code},
+        objet_id=cours.id,
+        objet_type='Cours',
+    )
+
+        # ── Réponse ───────────────────────────────────────────────
+        ep_data = None
+        if cours.enseignant_principal:
+            ep = cours.enseignant_principal
+            ep_data = {
+                "id":       ep.id,
+                "nom":      f"{ep.user.first_name} {ep.user.last_name}".strip()
+                            or ep.user.username,
+                "username": ep.user.username,
+            }
+
+        return Response({
+            "id":               cours.id,
+            "titre":            cours.titre,
+            "niveau":           cours.niveau,
+            "description_brief": cours.description_brief,
+            "color_code":       cours.color_code,
+            "icon_name":        cours.icon_name,
+            "nb_apprenants":    cours.nb_apprenants,
+            "nb_lecons":        cours.nb_lecons,
+            "nb_devoirs":       cours.nb_devoirs,
+            "enseignant_principal": ep_data,
+            "detail":           "Cours modifié avec succès.",
+        }, status=status.HTTP_200_OK)
+
+
+class CreerOlympiadeParCadreView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        # ── Récupérer le profil ──────────────────────────────────
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        # ── Vérifier le rôle ─────────────────────────────────────
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Seuls les enseignants cadres peuvent créer des olympiades."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data
+
+        # ── Validation des champs obligatoires ───────────────────
+        titre = (data.get('titre') or '').strip()
+        if not titre:
+            return Response(
+                {"detail": "Le titre est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        matiere = (data.get('matiere') or '').strip()
+        if not matiere:
+            return Response(
+                {"detail": "La matière est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        niveau = (data.get('niveau') or '').strip()
+        if not niveau:
+            return Response(
+                {"detail": "Le niveau est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Validation du département ─────────────────────────────
+        departement_id = data.get('departement_id')
+        if not departement_id:
+            return Response(
+                {"detail": "departement_id est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        departement = get_object_or_404(Departement, pk=departement_id)
+
+        # Sécurité : le cadre ne peut créer que pour SON département
+        if departement.cadre != profile:
+            return Response(
+                {"detail": "Ce département ne vous appartient pas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Validation des dates ──────────────────────────────────
+        from django.utils.dateparse import parse_datetime
+
+        def _parse_date(field_name):
+            raw = data.get(field_name)
+            if not raw:
+                return None, f"Le champ '{field_name}' est obligatoire."
+            parsed = parse_datetime(str(raw))
+            if not parsed:
+                return None, f"Format de date invalide pour '{field_name}'. Utilisez ISO 8601."
+            # Rendre timezone-aware si nécessaire
+            from django.utils import timezone as tz
+            if tz.is_naive(parsed):
+                from django.conf import settings
+                import pytz
+                try:
+                    local_tz = pytz.timezone(settings.TIME_ZONE)
+                    parsed = local_tz.localize(parsed)
+                except Exception:
+                    parsed = tz.make_aware(parsed)
+            return parsed, None
+
+        date_ouv_insc, err = _parse_date('date_ouverture_inscription')
+        if err:
+            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+
+        date_clo_insc, err = _parse_date('date_cloture_inscription')
+        if err:
+            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+
+        date_debut, err = _parse_date('date_debut_olympiade')
+        if err:
+            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+
+        date_fin, err = _parse_date('date_fin_olympiade')
+        if err:
+            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Cohérence des dates ───────────────────────────────────
+        if date_clo_insc >= date_debut:
+            return Response(
+                {"detail": "La clôture des inscriptions doit être avant le début de l'olympiade."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if date_debut >= date_fin:
+            return Response(
+                {"detail": "Le début de l'olympiade doit être avant sa fin."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if date_ouv_insc >= date_clo_insc:
+            return Response(
+                {"detail": "L'ouverture des inscriptions doit être avant leur clôture."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Paramètres de composition ─────────────────────────────
+        try:
+            duree_minutes = int(data.get('duree_minutes', 120))
+            if duree_minutes < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "duree_minutes doit être un entier positif."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            nb_questions = int(data.get('nb_questions', 30))
+            if nb_questions < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "nb_questions doit être un entier positif."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            max_focus = int(data.get('max_focus_perdu', 3))
+            if max_focus < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "max_focus_perdu doit être un entier positif."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        melanger_questions = bool(data.get('melanger_questions', True))
+        melanger_choix     = bool(data.get('melanger_choix', True))
+        une_seule_session  = bool(data.get('une_seule_session', True))
+
+        # ── Création de l'olympiade ───────────────────────────────
+        olympiade = Olympiade.objects.create(
+            titre                      = titre,
+            description                = (data.get('description') or '').strip(),
+            edition                    = (data.get('edition') or '').strip(),
+            matiere                    = matiere,
+            niveau                     = niveau,
+            date_ouverture_inscription = date_ouv_insc,
+            date_cloture_inscription   = date_clo_insc,
+            date_debut_olympiade       = date_debut,
+            date_fin_olympiade         = date_fin,
+            duree_minutes              = duree_minutes,
+            nb_questions               = nb_questions,
+            max_focus_perdu            = max_focus,
+            melanger_questions         = melanger_questions,
+            melanger_choix             = melanger_choix,
+            une_seule_session          = une_seule_session,
+            prix_1er                   = (data.get('prix_1er') or '').strip(),
+            prix_2eme                  = (data.get('prix_2eme') or '').strip(),
+            prix_3eme                  = (data.get('prix_3eme') or '').strip(),
+            note_sur                   = 20,
+            organisateur               = profile,
+            cree_par                   = request.user,
+        )
+
+        # ── Créer automatiquement un Devoir lié (pour les questions) ──
+        # L'enseignant cadre pourra ensuite ajouter des questions via
+        # /api/devoirs/<devoir_id>/questions/ajouter/
+
+        devoir_lie = Devoir.objects.create(
+            titre        = f"[Olympiade] {titre}",
+            description  = f"Devoir lié à l'olympiade : {titre}",
+            type_devoir  = 'olympiade',
+            matiere      = matiere,
+            niveau       = niveau,
+            enonce       = f"Questions de l'olympiade {titre}",
+            date_debut   = date_debut,
+            date_limite  = date_fin,
+            duree_minutes= duree_minutes,
+            note_sur     = 20,
+            est_publie   = False,   # Géré par la logique olympiade
+            cree_par     = profile,
+        )
+        olympiade.devoir = devoir_lie
+        olympiade.save(update_fields=['devoir'])
+
+        enregistrer_activite(
+       user=request.user,
+       action='olympiad_created',
+       description=f"Olympiade « {olympiade.titre} » créée",
+       data={
+           'titre':   olympiade.titre,
+           'matiere': olympiade.matiere,
+           'niveau':  olympiade.niveau,
+           'edition': olympiade.edition,
+           'debut':   olympiade.date_debut_olympiade.strftime('%d/%m/%Y'),
+       },
+       objet_id=olympiade.id,
+       objet_type='Olympiade',
+   )
+
+        # ── Réponse ───────────────────────────────────────────────
+        return Response({
+            "id":                          olympiade.id,
+            "titre":                       olympiade.titre,
+            "edition":                     olympiade.edition,
+            "matiere":                     olympiade.matiere,
+            "niveau":                      olympiade.niveau,
+            "statut":                      olympiade.statut_auto,
+            "date_ouverture_inscription":  olympiade.date_ouverture_inscription.isoformat(),
+            "date_cloture_inscription":    olympiade.date_cloture_inscription.isoformat(),
+            "date_debut_olympiade":        olympiade.date_debut_olympiade.isoformat(),
+            "date_fin_olympiade":          olympiade.date_fin_olympiade.isoformat(),
+            "duree_minutes":               olympiade.duree_minutes,
+            "nb_questions":                olympiade.nb_questions,
+            "devoir_id":                   devoir_lie.id,
+            "prix_1er":                    olympiade.prix_1er,
+            "prix_2eme":                   olympiade.prix_2eme,
+            "prix_3eme":                   olympiade.prix_3eme,
+            "detail": (
+                "Olympiade créée avec succès. "
+                f"Ajoutez les questions via /api/devoirs/{devoir_lie.id}/questions/ajouter/"
+            ),
+        }, status=status.HTTP_201_CREATED)
 
 
 # ---------------------------
@@ -3026,6 +3606,18 @@ class ChangerCadreDepartementView(APIView):
 
         departement.cadre = cadre
         departement.save()
+        enregistrer_activite(
+       user=request.user,
+       action='cadre_assigned',
+       description=f"{cadre.user.get_full_name() or cadre.user.username} nommé cadre du département « {departement.nom} »",
+       data={
+           'cadre':        cadre.user.get_full_name() or cadre.user.username,
+           'departement':  departement.nom,
+           'parcours':     departement.parcours.nom if departement.parcours else '',
+       },
+       objet_id=departement.id,
+       objet_type='Departement',
+   )
         return Response(
             {"detail": "Enseignant cadre mis à jour avec succès."},
             status=status.HTTP_200_OK
@@ -3207,6 +3799,106 @@ class EnseignantAdminStatsView(APIView):
         return Response(stats, status=status.HTTP_200_OK)
 
 
+class HistoriqueActiviteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    CATEGORIES = {
+        'cours':        ['course_created', 'course_modified', 'course_deleted'],
+        'modules':      ['module_created', 'module_modified', 'module_deleted'],
+        'lecons':       ['lesson_created', 'lesson_modified', 'lesson_deleted'],
+        'devoirs':      ['homework_created', 'homework_modified', 'homework_graded'],
+        'exercices':    ['exercise_created', 'question_added'],
+        'olympiades':   ['olympiad_created', 'olympiad_closed', 'ranking_computed'],
+        'enseignants':  ['teacher_assigned', 'teacher_changed', 'secondary_added', 'secondary_removed'],
+        'departements': ['department_created', 'cadre_assigned'],
+        'corrections':  ['submission_graded', 'homework_graded'],
+    }
+
+    def get(self, request):
+        qs = HistoriqueActivite.objects.filter(
+            user=request.user
+        ).order_by('-timestamp')
+
+        action_param = request.query_params.get('action')
+        if action_param:
+            qs = qs.filter(action=action_param)
+
+        category_param = request.query_params.get('category', '').lower()
+        if category_param and category_param in self.CATEGORIES:
+            from django.db.models import Q
+            q = Q()
+            for a in self.CATEGORIES[category_param]:
+                q |= Q(action=a)
+            qs = qs.filter(q)
+
+        depuis_param = request.query_params.get('depuis')
+        if depuis_param:
+            try:
+                from datetime import datetime
+                depuis_dt = datetime.strptime(depuis_param, '%Y-%m-%d')
+                qs = qs.filter(timestamp__date__gte=depuis_dt.date())
+            except ValueError:
+                pass
+
+        try:
+            limit = min(int(request.query_params.get('limit', 100)), 200)
+        except (TypeError, ValueError):
+            limit = 100
+
+        qs = qs[:limit]
+        serializer = HistoriqueActiviteSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class HistoriqueStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        now = timezone.now()
+        total = HistoriqueActivite.objects.filter(user=request.user).count()
+
+        semaine_debut = now - timedelta(days=7)
+        cette_semaine = HistoriqueActivite.objects.filter(
+            user=request.user, timestamp__gte=semaine_debut
+        ).count()
+
+        mois_debut = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        ce_mois = HistoriqueActivite.objects.filter(
+            user=request.user, timestamp__gte=mois_debut
+        ).count()
+
+        category_map = {
+            'cours':        ['course_created', 'course_modified', 'course_deleted'],
+            'modules':      ['module_created', 'module_modified', 'module_deleted'],
+            'lecons':       ['lesson_created', 'lesson_modified', 'lesson_deleted'],
+            'devoirs':      ['homework_created', 'homework_modified', 'homework_graded'],
+            'exercices':    ['exercise_created', 'question_added'],
+            'olympiades':   ['olympiad_created', 'olympiad_closed', 'ranking_computed'],
+            'enseignants':  ['teacher_assigned', 'teacher_changed', 'secondary_added', 'secondary_removed'],
+            'corrections':  ['submission_graded', 'homework_graded'],
+        }
+        categories_count = {}
+        for cat, actions in category_map.items():
+            categories_count[cat] = HistoriqueActivite.objects.filter(
+                user=request.user, action__in=actions
+            ).count()
+
+        derniere = HistoriqueActivite.objects.filter(
+            user=request.user
+        ).order_by('-timestamp').first()
+
+        return Response({
+            'total':             total,
+            'cette_semaine':     cette_semaine,
+            'ce_mois':           ce_mois,
+            'categories':        categories_count,
+            'derniere_activite': derniere.timestamp.isoformat() if derniere else None,
+        }, status=status.HTTP_200_OK)
+
+
 # ---------------------------
 # Dashboard selon rôle
 # ---------------------------
@@ -3303,6 +3995,345 @@ class LoginView(APIView):
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ADDITIONS À views.py — Gestion complète du mot de passe oublié
+#  Coller à la fin de votre views.py existant
+#
+#  3 endpoints :
+#    POST /api/auth/forgot-password/         → envoie le code OTP par email
+#    POST /api/auth/verify-otp/              → vérifie le code OTP
+#    POST /api/auth/reset-password/          → définit le nouveau mot de passe
+# ═══════════════════════════════════════════════════════════════════════════
+
+from django.core.mail import send_mail
+from django.conf import settings
+from .models import PasswordResetOTP
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ÉTAPE 1 : Demander un code OTP
+# POST /api/auth/forgot-password/
+# Body : { "email": "utilisateur@example.com" }
+#
+# Répond toujours 200 même si l'email n'existe pas (sécurité anti-enumération)
+# ───────────────────────────────────────────────────────────────────────────
+class ForgotPasswordView(APIView):
+    permission_classes = []   # public
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip().lower()
+
+        if not email:
+            return Response(
+                {"detail": "L'adresse email est requise."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Réponse générique pour ne pas révéler si l'email existe
+        generic_response = Response(
+            {"detail": "Si cet email est enregistré, vous recevrez un code de vérification."},
+            status=status.HTTP_200_OK,
+        )
+
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return generic_response
+
+        # Invalider tous les OTP précédents non utilisés de cet utilisateur
+        PasswordResetOTP.objects.filter(user=user, used=False).update(used=True)
+
+        # Créer un nouvel OTP (le code est généré dans le save())
+        otp = PasswordResetOTP.objects.create(user=user)
+
+        # ── Envoyer l'email ───────────────────────────────────────
+        try:
+            _envoyer_email_otp(user, otp.code)
+        except Exception as e:
+            # Ne pas bloquer si l'email échoue — log l'erreur
+            import logging
+            logging.getLogger(__name__).error(f"Erreur envoi OTP email: {e}")
+            # En développement, renvoyer le code dans la réponse pour tests
+            if settings.DEBUG:
+                return Response(
+                    {
+                        "detail": "Email non envoyé (mode DEBUG). Code OTP pour test :",
+                        "debug_code": otp.code,
+                        "expires_in_minutes": 10,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        return generic_response
+
+
+def _envoyer_email_otp(user, code):
+    """Envoie l'email contenant le code OTP."""
+    nom = f"{user.first_name} {user.last_name}".strip() or user.username
+
+    sujet = "🔐 Votre code de vérification Yéki"
+
+    message_texte = f"""
+Bonjour {nom},
+
+Vous avez demandé la réinitialisation de votre mot de passe sur Yéki.
+
+Votre code de vérification est : {code}
+
+Ce code est valable pendant 10 minutes.
+Si vous n'avez pas fait cette demande, ignorez cet email.
+
+— L'équipe Yéki
+"""
+
+    message_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }}
+    .container {{ max-width: 480px; margin: 40px auto; background: white;
+                  border-radius: 16px; overflow: hidden;
+                  box-shadow: 0 4px 20px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #2884A9, #2A657D);
+               padding: 32px 24px; text-align: center; }}
+    .header h1 {{ color: white; margin: 0; font-size: 22px; }}
+    .header p  {{ color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px; }}
+    .body   {{ padding: 32px 24px; text-align: center; }}
+    .greeting {{ color: #1E293B; font-size: 15px; margin-bottom: 24px; }}
+    .code-box {{ background: #F1F5F9; border: 2px dashed #2884A9;
+                 border-radius: 12px; padding: 20px; margin: 0 auto;
+                 display: inline-block; min-width: 200px; }}
+    .code {{ font-size: 38px; font-weight: bold; letter-spacing: 10px;
+             color: #2884A9; font-family: monospace; }}
+    .validity {{ color: #64748B; font-size: 12px; margin-top: 8px; }}
+    .note  {{ color: #94A3B8; font-size: 11px; margin-top: 28px;
+               border-top: 1px solid #E2E8F0; padding-top: 16px; }}
+    .footer {{ background: #F8FAFC; padding: 16px; text-align: center;
+               color: #94A3B8; font-size: 11px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔐 Code de vérification</h1>
+      <p>Réinitialisation de mot de passe</p>
+    </div>
+    <div class="body">
+      <p class="greeting">Bonjour <strong>{nom}</strong>,<br>
+      Voici votre code pour réinitialiser votre mot de passe.</p>
+
+      <div class="code-box">
+        <div class="code">{code}</div>
+        <div class="validity">⏱ Valable 10 minutes</div>
+      </div>
+
+      <p class="note">
+        Si vous n'avez pas demandé la réinitialisation de votre mot de passe,
+        ignorez cet email. Votre compte reste sécurisé.
+      </p>
+    </div>
+    <div class="footer">© Yeki — Plateforme éducative</div>
+  </div>
+</body>
+</html>
+"""
+
+    send_mail(
+        subject      = sujet,
+        message      = message_texte,
+        from_email   = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@yeki.app'),
+        recipient_list = [user.email],
+        html_message = message_html,
+        fail_silently = False,
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ÉTAPE 2 : Vérifier le code OTP
+# POST /api/auth/verify-otp/
+# Body : { "email": "...", "code": "123456" }
+#
+# Retourne un token temporaire si le code est correct.
+# Ce token sera envoyé avec la requête de reset.
+# ───────────────────────────────────────────────────────────────────────────
+class VerifyOTPView(APIView):
+    permission_classes = []   # public
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip().lower()
+        code  = (request.data.get('code')  or '').strip()
+
+        if not email or not code:
+            return Response(
+                {"detail": "Email et code sont requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Récupérer l'utilisateur
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": "Code invalide ou expiré."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Récupérer le dernier OTP actif
+        otp = PasswordResetOTP.objects.filter(
+            user=user, used=False
+        ).order_by('-created_at').first()
+
+        if otp is None:
+            return Response(
+                {"detail": "Aucun code en attente. Faites une nouvelle demande."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Vérifier expiration
+        if not otp.is_valid:
+            if otp.attempts >= 5:
+                return Response(
+                    {"detail": "Trop de tentatives. Demandez un nouveau code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"detail": "Ce code a expiré. Demandez un nouveau code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Incrémenter les tentatives
+        otp.attempts += 1
+        otp.save(update_fields=['attempts'])
+
+        # Vérifier le code
+        if otp.code != code:
+            remaining = 5 - otp.attempts
+            if remaining <= 0:
+                otp.used = True
+                otp.save(update_fields=['used'])
+                return Response(
+                    {"detail": "Code incorrect. Trop de tentatives. Demandez un nouveau code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"detail": f"Code incorrect. {remaining} tentative(s) restante(s)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Code correct → générer un reset_token temporaire ─────
+        import secrets
+        reset_token = secrets.token_urlsafe(32)
+
+        # Stocker le token dans l'OTP (on réutilise le champ code)
+        otp.code = f"VERIFIED:{reset_token}"
+        otp.save(update_fields=['code'])
+
+        return Response({
+            "detail": "Code vérifié avec succès.",
+            "reset_token": reset_token,
+        }, status=status.HTTP_200_OK)
+
+
+class ResetPasswordView(APIView):
+    permission_classes = []   # public
+
+    def post(self, request):
+        email           = (request.data.get('email')           or '').strip().lower()
+        reset_token     = (request.data.get('reset_token')     or '').strip()
+        new_password    = (request.data.get('new_password')    or '').strip()
+        confirm_password= (request.data.get('confirm_password') or '').strip()
+
+        # ── Validation des champs ─────────────────────────────────
+        if not all([email, reset_token, new_password, confirm_password]):
+            return Response(
+                {"detail": "Tous les champs sont requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {"detail": "Les mots de passe ne correspondent pas."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {"detail": "Le mot de passe doit contenir au moins 8 caractères."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Vérification de la complexité ────────────────────────
+        has_digit = any(c.isdigit() for c in new_password)
+        has_alpha = any(c.isalpha() for c in new_password)
+        if not (has_digit and has_alpha):
+            return Response(
+                {"detail": "Le mot de passe doit contenir au moins une lettre et un chiffre."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Récupérer l'utilisateur ───────────────────────────────
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": "Lien de réinitialisation invalide."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Vérifier le reset_token ───────────────────────────────
+        otp = PasswordResetOTP.objects.filter(
+            user=user,
+            used=False,
+            code=f"VERIFIED:{reset_token}",
+        ).order_by('-created_at').first()
+
+        if otp is None or not otp.is_valid:
+            return Response(
+                {"detail": "Lien de réinitialisation invalide ou expiré. Recommencez."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Mettre à jour le mot de passe ─────────────────────────
+        user.set_password(new_password)
+        user.save()
+
+        # Invalider l'OTP
+        otp.used = True
+        otp.save(update_fields=['used'])
+
+        # Supprimer tous les anciens tokens d'auth → force une nouvelle connexion
+        from rest_framework.authtoken.models import Token as AuthToken
+        AuthToken.objects.filter(user=user).delete()
+
+        # ── Email de confirmation ─────────────────────────────────
+        try:
+            _envoyer_email_confirmation(user)
+        except Exception:
+            pass   # Ne pas bloquer si l'email de confirmation échoue
+
+        return Response(
+            {"detail": "Mot de passe réinitialisé avec succès. Connectez-vous avec votre nouveau mot de passe."},
+            status=status.HTTP_200_OK,
+        )
+
+
+def _envoyer_email_confirmation(user):
+    """Email de confirmation après changement réussi."""
+    nom = f"{user.first_name} {user.last_name}".strip() or user.username
+    from django.utils import timezone
+    now_str = timezone.now().strftime('%d/%m/%Y à %H:%M')
+
+    send_mail(
+        subject  = "✅ Mot de passe modifié — Yeki",
+        message  = f"Bonjour {nom},\n\nVotre mot de passe a été modifié le {now_str}.\nSi ce n'est pas vous, contactez-nous immédiatement.\n\n— L'équipe Yeki",
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@yeki.app'),
+        recipient_list = [user.email],
+        fail_silently  = True,
+    )
 
 
 # ---------------------------

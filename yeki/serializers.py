@@ -394,10 +394,6 @@ class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
         ]
 
 
-# ═══════════════════════════════════════════════════════════════
-#  À ajouter à la fin de serializers.py
-# ═══════════════════════════════════════════════════════════════
-
 class ModuleUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer pour la MODIFICATION partielle d'un module.
@@ -960,3 +956,20 @@ class ReponseCreateSerializer(serializers.ModelSerializer):
         validated_data["auteur"]   = self.context["request"].user
         validated_data["question"] = self.context["question"]
         return super().create(validated_data)
+
+
+class HistoriqueActiviteSerializer(serializers.ModelSerializer):
+    action_label = serializers.CharField(source='get_action_display', read_only=True)
+    user_nom     = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = HistoriqueActivite
+        fields = [
+            'id', 'action', 'action_label', 'description',
+            'data', 'timestamp', 'objet_id', 'objet_type', 'user_nom',
+        ]
+
+    def get_user_nom(self, obj):
+        u = obj.user
+        return f"{u.first_name} {u.last_name}".strip() or u.username
+    

@@ -31,7 +31,7 @@ ALLOWED_HOSTS = ['yeki.pythonanywhere.com']
 
 CORS_ALLOWED_ORIGINS = [
     "https://yeki.pythonanywhere.com",
-    "http://localhost:63889",
+    "http://localhost:64024",
 ]
 
 # Application definition
@@ -148,3 +148,20 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+
+# ── Email (Gmail SMTP exemple) ─────────────────────────────────────────────
+EMAIL_BACKEND       = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST          = 'smtp.gmail.com'
+EMAIL_PORT          = 587
+EMAIL_USE_TLS       = True
+EMAIL_HOST_USER     = 'mdonabodi99@gmail.com'       # ← votre email Gmail
+EMAIL_HOST_PASSWORD = 'Moment4lives'           # ← mot de passe d'application Gmail
+DEFAULT_FROM_EMAIL  = 'Yéki <mdonabodi99@gmail.com>'
+
+# ── Pour les tests (affiche les emails dans la console) ────────────────────
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# ── Sur PythonAnywhere (variables d'environnement recommandées) ────────────
+
+EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')

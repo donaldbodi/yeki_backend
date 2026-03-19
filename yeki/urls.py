@@ -14,6 +14,9 @@ urlpatterns = [
     path('auth/register/',        RegisterView.as_view(),       name='register'),
     path('auth/login/',           LoginView.as_view(),          name='login'),
     path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
+    path('auth/forgot-password/',  ForgotPasswordView.as_view(),  name='forgot-password'),
+    path('auth/verify-otp/',       VerifyOTPView.as_view(),       name='verify-otp'),
+    path('auth/reset-password/',   ResetPasswordView.as_view(),   name='reset-password'),
 
     # ── PROFIL ────────────────────────────────────────────────────
     path('profil/me/',     ProfilMeView.as_view(),     name='profil-me'),
@@ -87,9 +90,12 @@ urlpatterns = [
     path('apprenant/cursus/', ApprenantCursusAPIView.as_view(), name='apprenant-cursus'),
     path('cours/<int:cours_id>/add-enseignant/',  AddEnseignantSecondaireView.as_view(),    name='add-enseignant-secondaire'),
     path('cours/<int:cours_id>/remove-enseignant/', RemoveEnseignantSecondaireView.as_view(), name='remove-enseignant-secondaire'),
+    path('cours/<int:cours_id>/update/', ModifierCoursParCadreView.as_view(), name='cours-modifier-cadre'),
 
     # ── LEÇONS ────────────────────────────────────────────────────
     path('cours/<int:cours_id>/lecons/', AjouterLeconView.as_view(), name='ajouter-lecon'),
+    path('apprenant/lectures-recentes/', LecturesRecentesView.as_view(),  name='lectures-recentes'),
+    path('apprenant/marquer-lecon/',     MarquerLeconVueView.as_view(),   name='marquer-lecon'),
     path(
         'lecons/<int:lecon_id>/modifier/',
         views.LeconUpdateView.as_view(),
@@ -190,6 +196,7 @@ urlpatterns = [
     ),
 
     # ── OLYMPIADES ────────────────────────────────────────────────
+    path('olympiades/cadre/creer/', CreerOlympiadeParCadreView.as_view(), name='olympiade-creer-cadre'),
     path('olympiades/',                                        ListeOlympiadesView.as_view(),       name='liste-olympiades'),
     path('olympiades/<int:olympiade_id>/',                     DetailOlympiadeView.as_view(),       name='detail-olympiade'),
     path('olympiades/<int:olympiade_id>/inscrire/',            SInscrireOlympiadeView.as_view(),    name='inscrire-olympiade'),
@@ -210,5 +217,9 @@ urlpatterns = [
     path('forum/reponses/<int:pk>/liker/',     LikerReponseView.as_view()),
     path('forum/reponses/<int:pk>/solution/',  MarquerSolutionView.as_view()),
     path('forum/stats/',                       StatsForumView.as_view()),
+
+    # ── HISTORIQUE ─────────────────────────────────────────────────────
+    path('historique/',       HistoriqueActiviteView.as_view(), name='historique'),
+    path('historique/stats/', HistoriqueStatsView.as_view(),    name='historique-stats'),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

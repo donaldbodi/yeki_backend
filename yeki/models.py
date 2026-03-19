@@ -5,6 +5,9 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from datetime import timedelta
+import random
+import string
 
 
 class Profile(models.Model):
@@ -33,6 +36,49 @@ class Profile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} ({self.user_type})"
+    
+
+class PasswordResetOTP(models.Model):
+    """
+    Code OTP à 6 chiffres envoyé par email pour réinitialiser le mot de passe.
+    - Expire après 10 minutes
+    - Invalidé après utilisation
+    - Maximum 5 tentatives de validation
+    """
+    user       = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='reset_otps',
+    )
+    code       = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used       = models.BooleanField(default=False)
+    attempts   = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'OTP Réinitialisation'
+
+    def save(self, *args, **kwargs):
+        if not self.pk:
+            # Génère un code à 6 chiffres
+            self.code = ''.join(random.choices(string.digits, k=6))
+            # Expire dans 10 minutes
+            self.expires_at = timezone.now() + timedelta(minutes=10)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_valid(self):
+        return (
+            not self.used
+            and self.attempts < 5
+            and timezone.now() < self.expires_at
+        )
+
+    def __str__(self):
+        return f"OTP {self.code} → {self.user.username} ({'✓' if self.used else '⏳'})"
+
 
 
 # --- NIVEAU 1 ---
@@ -228,6 +274,26 @@ class Lecon(models.Model):
 
     def __str__(self):
         return f"{self.titre} ({self.cours.titre})"
+    
+
+class ProgressionLecon(models.Model):
+      apprenant    = models.ForeignKey(User, on_delete=models.CASCADE,
+                                       related_name='progressions')
+      lecon        = models.ForeignKey(Lecon, on_delete=models.CASCADE,
+                                       related_name='progressions')
+      cours        = models.ForeignKey(Cours, on_delete=models.CASCADE,
+                                       related_name='progressions')
+      pourcentage  = models.PositiveSmallIntegerField(default=0)
+                     # 0-100
+      derniere_vue = models.DateTimeField(auto_now=True)
+      terminee     = models.BooleanField(default=False)
+
+      class Meta:
+          unique_together = ('apprenant', 'lecon')
+          ordering = ['-derniere_vue']
+
+      def __str__(self):
+          return f"{self.apprenant.username} → {self.lecon.titre} ({self.pourcentage}%)"
 
 
 class Exercice(models.Model):
@@ -780,3 +846,128 @@ def convertir_docx_en_html(sender, instance, **kwargs):
             instance.contenu_html = html
             instance.save()'''
 
+
+# ─────────────────────────────────────────────────────────────────
+# HISTORIQUE DES ACTIVITÉS
+# Enregistre toutes les actions importantes des enseignants
+# ─────────────────────────────────────────────────────────────────
+
+class HistoriqueActivite(models.Model):
+    """
+    Journal des actions importantes réalisées par les utilisateurs.
+    Créé automatiquement via des signals ou manuellement via le helper
+    `enregistrer_activite(...)`.
+    """
+
+    ACTION_CHOICES = [
+        # ── Cours ───────────────────────────────────────────────
+        ('course_created',       'Cours créé'),
+        ('course_modified',      'Cours modifié'),
+        ('course_deleted',       'Cours supprimé'),
+
+        # ── Enseignants ─────────────────────────────────────────
+        ('teacher_assigned',     'Enseignant principal assigné'),
+        ('teacher_changed',      'Enseignant principal changé'),
+        ('secondary_added',      'Enseignant secondaire ajouté'),
+        ('secondary_removed',    'Enseignant secondaire retiré'),
+
+        # ── Modules ─────────────────────────────────────────────
+        ('module_created',       'Module créé'),
+        ('module_modified',      'Module modifié'),
+        ('module_deleted',       'Module supprimé'),
+
+        # ── Leçons ──────────────────────────────────────────────
+        ('lesson_created',       'Leçon créée'),
+        ('lesson_modified',      'Leçon modifiée'),
+        ('lesson_deleted',       'Leçon supprimée'),
+
+        # ── Devoirs ─────────────────────────────────────────────
+        ('homework_created',     'Devoir créé'),
+        ('homework_modified',    'Devoir modifié'),
+        ('homework_graded',      'Devoir corrigé'),
+
+        # ── Exercices ────────────────────────────────────────────
+        ('exercise_created',     'Exercice créé'),
+        ('question_added',       'Question ajoutée'),
+
+        # ── Olympiades ───────────────────────────────────────────
+        ('olympiad_created',     'Olympiade créée'),
+        ('olympiad_closed',      'Olympiade clôturée'),
+        ('ranking_computed',     'Classement calculé'),
+
+        # ── Département / Parcours ───────────────────────────────
+        ('department_created',   'Département créé'),
+        ('cadre_assigned',       'Cadre assigné'),
+
+        # ── Soumissions ──────────────────────────────────────────
+        ('submission_graded',    'Soumission corrigée'),
+
+        # ── Connexion ────────────────────────────────────────────
+        ('login',                'Connexion'),
+        ('logout',               'Déconnexion'),
+    ]
+
+    user        = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='historique_activites',
+    )
+    action      = models.CharField(max_length=50, choices=ACTION_CHOICES)
+    description = models.TextField(blank=True)
+
+    # Données contextuelles JSON (titre du cours, nom de l'enseignant, etc.)
+    data        = models.JSONField(default=dict, blank=True)
+
+    timestamp   = models.DateTimeField(auto_now_add=True)
+
+    # Référence optionnelle vers l'objet concerné
+    objet_id    = models.PositiveIntegerField(null=True, blank=True)
+    objet_type  = models.CharField(max_length=50, blank=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = 'Activité'
+        verbose_name_plural = 'Historique des activités'
+
+    def __str__(self):
+        return f"[{self.user.username}] {self.get_action_display()} — {self.timestamp:%d/%m/%Y %H:%M}"
+
+
+# ─────────────────────────────────────────────────────────────────
+# HELPER : enregistrer une activité facilement depuis n'importe
+#          quelle view
+# ─────────────────────────────────────────────────────────────────
+
+def enregistrer_activite(
+    user,
+    action: str,
+    description: str = '',
+    data: dict = None,
+    objet_id: int = None,
+    objet_type: str = '',
+):
+    """
+    Crée une entrée HistoriqueActivite.
+
+    Usage dans une view :
+        from .models import enregistrer_activite
+        enregistrer_activite(
+            user=request.user,
+            action='course_created',
+            description=f"Cours '{cours.titre}' créé",
+            data={'titre': cours.titre, 'niveau': cours.niveau},
+            objet_id=cours.id,
+            objet_type='Cours',
+        )
+    """
+    try:
+        HistoriqueActivite.objects.create(
+            user        = user,
+            action      = action,
+            description = description,
+            data        = data or {},
+            objet_id    = objet_id,
+            objet_type  = objet_type,
+        )
+    except Exception:
+        pass   # Ne jamais bloquer une view à cause du journal
