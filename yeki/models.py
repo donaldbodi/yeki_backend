@@ -971,3 +971,231 @@ def enregistrer_activite(
         )
     except Exception:
         pass   # Ne jamais bloquer une view à cause du journal
+
+class Paiement(models.Model):
+    """
+    Registre centralisé de tous les paiements Yeki.
+    Couvre : abonnements, prépa concours (accès au dept), olympiades payantes.
+    Commission Yeki : 15% sur tout paiement lié à un département payant.
+    """
+    TYPE_CHOICES = [
+        ('abonnement_mensuel',  'Abonnement mensuel cursus'),
+        ('abonnement_annuel',   'Abonnement annuel cursus'),
+        ('acces_departement',   'Accès département (concours/formation)'),
+        ('olympiade',           'Participation olympiade'),
+    ]
+    MOYEN_CHOICES = [
+        ('mtn_momo',  'MTN Mobile Money'),
+        ('orange_om', 'Orange Money'),
+        ('carte',     'Carte bancaire'),
+    ]
+    STATUT_CHOICES = [
+        ('en_attente', 'En attente'),
+        ('succes',     'Succès'),
+        ('echec',      'Échec'),
+        ('rembourse',  'Remboursé'),
+    ]
+
+    utilisateur    = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='paiements')
+    type_paiement  = models.CharField(max_length=25, choices=TYPE_CHOICES)
+    moyen          = models.CharField(max_length=15, choices=MOYEN_CHOICES)
+    montant        = models.PositiveIntegerField(help_text="Montant en FCFA")
+    statut         = models.CharField(
+        max_length=15, choices=STATUT_CHOICES, default='en_attente')
+    reference      = models.CharField(max_length=100, unique=True, blank=True)
+    date           = models.DateTimeField(auto_now_add=True)
+    transaction_id = models.CharField(
+        max_length=200, blank=True, help_text="ID transaction opérateur")
+
+    # Lien optionnel vers olympiade (pour participation payante)
+    olympiade_liee = models.ForeignKey(
+        Olympiade, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='paiements')
+
+    # Commission Yeki prélevée (15% si paiement > 0 pour département)
+    commission_yeki = models.PositiveIntegerField(
+        default=0, help_text="Part Yeki en FCFA")
+
+    class Meta:
+        ordering = ['-date']
+        verbose_name = 'Paiement'
+
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = f"YEKI-{uuid.uuid4().hex[:10].upper()}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.reference} – {self.utilisateur.username} – {self.montant} FCFA [{self.statut}]"
+
+
+# ══════════════════════════════════════════════════════════════════
+# ABONNEMENT PREMIUM
+# ══════════════════════════════════════════════════════════════════
+
+class AbonnementPremium(models.Model):
+    """
+    Abonnement premium d'un apprenant au cursus.
+    1 500 FCFA/mois ou 13 000 FCFA/an.
+    Donne accès aux vidéos, exercices, devoirs, forum et Yeki IA.
+    """
+    TYPE_CHOICES = [
+        ('mensuel', 'Mensuel – 1 500 FCFA'),
+        ('annuel',  'Annuel – 13 000 FCFA'),
+    ]
+    TARIFS = {'mensuel': 1500, 'annuel': 13000}
+
+    utilisateur     = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name='abonnement')
+    type_abonnement = models.CharField(max_length=10, choices=TYPE_CHOICES)
+    actif           = models.BooleanField(default=True)
+    debut           = models.DateTimeField(auto_now_add=True)
+    fin             = models.DateTimeField()
+    paiement        = models.ForeignKey(
+        Paiement, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-debut']
+        verbose_name = 'Abonnement Premium'
+
+    def __str__(self):
+        return (f"{self.utilisateur.username} – "
+                f"{self.type_abonnement} (expire {self.fin:%d/%m/%Y})")
+
+    @property
+    def est_actif(self):
+        return self.actif and timezone.now() < self.fin
+
+    def renouveler(self, type_abonnement: str):
+        self.type_abonnement = type_abonnement
+        jours = 30 if type_abonnement == 'mensuel' else 365
+        self.fin = timezone.now() + timedelta(days=jours)
+        self.actif = True
+        self.save()
+
+
+# ══════════════════════════════════════════════════════════════════
+# YEKI IA — PERSONNALITÉ PAR CONTEXTE
+# ══════════════════════════════════════════════════════════════════
+
+class YekiIAPersonalite(models.Model):
+    """
+    Personnalité de Yeki IA pour un contexte donné.
+    Contexte = parcours (nom), cours, ou niveau.
+    Pas de FK vers des modèles inexistants.
+    """
+    CONTEXTE_CHOICES = [
+        ('cursus_niveau',  'Niveau dans le cursus'),
+        ('parcours',       'Parcours complet (Prépa Concours, Formations…)'),
+        ('cours',          'Cours spécifique'),
+        ('olympiade',      'Olympiade'),
+    ]
+    STYLE_CHOICES = [
+        ('pedagogique',   'Pédagogique (explications détaillées)'),
+        ('socratique',    'Socratique (questions pour guider)'),
+        ('direct',        'Direct (réponses concises)'),
+        ('encourageant',  'Encourageant (bienveillant et motivant)'),
+        ('academique',    'Académique (rigoureux et formel)'),
+        ('professionnel', 'Professionnel (orienté compétences)'),
+    ]
+    NIVEAU_DIFFICULTE_CHOICES = [
+        ('debutant',      'Débutant'),
+        ('intermediaire', 'Intermédiaire'),
+        ('avance',        'Avancé'),
+    ]
+
+    nom               = models.CharField(max_length=200)
+    contexte          = models.CharField(max_length=20, choices=CONTEXTE_CHOICES)
+    style             = models.CharField(
+        max_length=20, choices=STYLE_CHOICES, default='pedagogique')
+    niveau_difficulte = models.CharField(
+        max_length=15, choices=NIVEAU_DIFFICULTE_CHOICES, default='intermediaire')
+
+    # Liens optionnels — cours ou niveau texte
+    cours_lie     = models.ForeignKey(
+        Cours, on_delete=models.CASCADE,
+        null=True, blank=True, related_name='ia_personnalites')
+    # Pour les parcours : on stocke simplement le nom du parcours
+    nom_parcours  = models.CharField(
+        max_length=100, blank=True,
+        help_text="Nom du Parcours (ex: 'Prépa Concours', 'Formations')")
+    niveau_cursus = models.CharField(
+        max_length=50, blank=True,
+        help_text="Ex: Terminale, 3ème…")
+
+    # Prompt et cache
+    prompt_systeme       = models.TextField(blank=True)
+    contexte_cours_cache = models.TextField(blank=True)
+    cache_updated_at     = models.DateTimeField(null=True, blank=True)
+    created_at           = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Personnalité IA'
+        verbose_name_plural = 'Personnalités IA'
+
+    def __str__(self):
+        return f"[{self.get_contexte_display()}] {self.nom}"
+
+    def build_system_prompt(self) -> str:
+        style_desc = {
+            'pedagogique':   "Tu expliques chaque concept en détail avec des exemples concrets.",
+            'socratique':    "Tu guides par des questions plutôt que donner directement la réponse.",
+            'direct':        "Tu donnes des réponses concises et précises.",
+            'encourageant':  "Tu es très bienveillant et tu encourages l'apprenant.",
+            'academique':    "Tu utilises un vocabulaire rigoureux et académique.",
+            'professionnel': "Tu orientes vers les compétences pratiques et professionnelles.",
+        }
+        niveau_desc = {
+            'debutant':      "Utilise un langage simple, évite le jargon technique.",
+            'intermediaire': "Utilise un langage adapté à un niveau intermédiaire.",
+            'avance':        "Tu peux utiliser la terminologie experte du domaine.",
+        }
+        prompt = (
+            "Tu es Yéki IA, l'assistant pédagogique de la plateforme Yéki.\n"
+            "Tu réponds TOUJOURS en commençant par \"Yeki IA :\" suivi de ta réponse.\n"
+            "Tu t'exprimes en français.\n\n"
+            f"STYLE : {style_desc.get(self.style, '')}\n"
+            f"NIVEAU : {niveau_desc.get(self.niveau_difficulte, '')}\n"
+        )
+        if self.niveau_cursus:
+            prompt += f"\nTu t'adresses à des apprenants de niveau {self.niveau_cursus}.\n"
+        if self.nom_parcours:
+            prompt += f"\nContexte : parcours '{self.nom_parcours}'.\n"
+        if self.prompt_systeme:
+            prompt += f"\nINSTRUCTIONS SPÉCIFIQUES :\n{self.prompt_systeme}\n"
+        if self.contexte_cours_cache:
+            prompt += f"\nCONTEXTE :\n{self.contexte_cours_cache[:3000]}\n"
+        prompt += (
+            "\nRÈGLES : réponds uniquement aux questions liées à la formation/au cours. "
+            "N'invente jamais de faits. Pour les exercices, aide à comprendre sans donner "
+            "la réponse brute.\n"
+        )
+        return prompt
+
+
+class YekiIAMessage(models.Model):
+    """Trace d'une réponse Yeki IA dans le forum."""
+    question       = models.ForeignKey(
+        QuestionForum, on_delete=models.CASCADE,
+        related_name='ia_messages', null=True, blank=True)
+    reponse_parent = models.ForeignKey(
+        ReponseQuestion, on_delete=models.CASCADE,
+        related_name='ia_messages', null=True, blank=True)
+    personalite    = models.ForeignKey(
+        YekiIAPersonalite, on_delete=models.SET_NULL, null=True, blank=True)
+    contenu        = models.TextField()
+    tokens_utilises = models.PositiveIntegerField(default=0)
+    cree_le        = models.DateTimeField(auto_now_add=True)
+    erreur         = models.BooleanField(default=False)
+    erreur_detail  = models.TextField(blank=True)
+    reponse_forum  = models.OneToOneField(
+        ReponseQuestion, on_delete=models.CASCADE,
+        related_name='ia_detail', null=True, blank=True)
+
+    class Meta:
+        ordering = ['-cree_le']
+        verbose_name = 'Message Yeki IA'
+
+    def __str__(self):
+        return f"Yeki IA → Q{self.question_id} ({self.cree_le:%d/%m/%Y %H:%M})"

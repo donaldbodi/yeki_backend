@@ -48,6 +48,28 @@ class RegisterSerializer(serializers.Serializer):
     filiere = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     licence = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
+    def validate_username(self, value):
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("Ce nom d'utilisateur est déjà pris.")
+        return value
+
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Cette adresse email est déjà utilisée.")
+        return value
+
+    def validate_password(self, value):
+        if len(value) < 6:
+            raise serializers.ValidationError("Le mot de passe doit contenir au moins 6 caractères.")
+        return value
+
+    def validate_user_type(self, value):
+        allowed = ['apprenant', 'enseignant', 'enseignant_principal',
+                   'enseignant_cadre', 'enseignant_admin', 'admin']
+        if value not in allowed:
+            raise serializers.ValidationError(f"Type d'utilisateur invalide. Valeurs : {allowed}")
+        return value
+
     def create(self, validated_data):
         # Crée l'utilisateur Django
         user = User.objects.create(
@@ -96,6 +118,9 @@ class LoginSerializer(serializers.Serializer):
                 user = authenticate(username=user_obj.username, password=password)
             except User.DoesNotExist:
                 raise serializers.ValidationError("Identifiants incorrects.")
+
+        if user is None:
+            raise serializers.ValidationError("Identifiants incorrects.")
 
         if not user.profile.is_active:
             raise serializers.ValidationError("Compte non activé.")
@@ -735,6 +760,8 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
     est_inscrit         = serializers.SerializerMethodField()
     nb_inscrits         = serializers.SerializerMethodField()
     inscription_ouverte = serializers.SerializerMethodField()
+    devoir_id           = serializers.IntegerField(source='devoir.id', read_only=True, allow_null=True)
+    mon_inscription     = serializers.SerializerMethodField()
 
     class Meta:
         model  = Olympiade
@@ -745,6 +772,7 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
             "duree_minutes", "nb_questions", "note_sur",
             "prix_1er", "prix_2eme", "prix_3eme",
             "statut", "est_inscrit", "nb_inscrits", "inscription_ouverte",
+            "devoir_id", "mon_inscription",
         ]
 
     def get_statut(self, obj):
@@ -762,6 +790,21 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
     def get_inscription_ouverte(self, obj):
         now = timezone.now()
         return obj.date_ouverture_inscription <= now <= obj.date_cloture_inscription
+
+    def get_mon_inscription(self, obj):
+        user = self.context["request"].user
+        insc = InscriptionOlympiade.objects.filter(
+            olympiade=obj, apprenant=user
+        ).first()
+        if not insc:
+            return None
+        return {
+            "id":         insc.id,
+            "note":       float(insc.note) if insc.note is not None else None,
+            "classement": insc.classement,
+            "soumis":     insc.soumis,
+            "statut":     insc.statut,
+        }
 
 
 class OlympiadeDetailSerializer(OlympiadeListSerializer):

@@ -3,15 +3,21 @@ from django.shortcuts import render, get_object_or_404
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
-from rest_framework.parsers import MultiPartParser, FormParser
+from datetime import timedelta
+from django.core.mail import send_mail
+from django.conf import settings
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework import status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.contrib.auth.hashers import check_password
+import uuid
+import os
+import openai
+
 
 from django.contrib.auth import get_user_model
 from django.db.models import Sum, Avg
@@ -22,6 +28,69 @@ from .serializers import *
 User = get_user_model()
 
 
+openai.api_key = os.environ.get('OPENAI_API_KEY', '')
+YEKI_COMMISSION_RATE = 0.15  # 15% de commission sur les formations payantes
+
+# ── Helpers locaux ────────────────────────────────────────────────
+
+def _get_profile(user):
+    try:
+        return user.profile
+    except Profile.DoesNotExist:
+        return None
+
+
+def _is_premium(user):
+    try:
+        return user.abonnement.est_actif
+    except Exception:
+        return False
+
+
+def _nom_profil(profile):
+    n = f"{profile.user.first_name} {profile.user.last_name}".strip()
+    return n or profile.user.username
+
+
+def _progression_cours(user, cours_qs):
+    """Calcule le % de progression par cours pour cet apprenant."""
+    progressions = ProgressionLecon.objects.filter(
+        apprenant=user, cours__in=cours_qs,
+    ).values('cours_id', 'terminee')
+
+    prog_map = {}
+    for c in cours_qs:
+        total = c.nb_lecons or Lecon.objects.filter(cours=c).count()
+        if total == 0:
+            prog_map[c.id] = 0.0
+            continue
+        terminees = sum(1 for p in progressions if p['cours_id'] == c.id and p['terminee'])
+        prog_map[c.id] = round((terminees / total) * 100, 1)
+    return prog_map
+
+
+def _serialise_cours(c, prog_map):
+    """Sérialise un Cours au format attendu par Flutter."""
+    ep_nom = '—'
+    if c.enseignant_principal:
+        ep = c.enseignant_principal
+        ep_nom = f"{ep.user.first_name} {ep.user.last_name}".strip() or ep.user.username
+    dept = c.departement
+    return {
+        'id':                   c.id,
+        'title':                c.titre,
+        'description':          c.description_brief or '',
+        'enseignant_principal': ep_nom,
+        'lessons':              c.nb_lecons,
+        'assignments':          c.nb_devoirs,
+        'icon':                 c.icon_name or 'school',
+        'color':                c.color_code or '#2884A0',
+        'progression':          prog_map.get(c.id, 0.0),
+        # Infos département (= concours/formation)
+        'departement_id':       dept.id,
+        'departement_nom':      dept.nom,
+        'parcours_nom':         dept.parcours.nom if dept.parcours else '',
+    }
 
 # ---------------------------
 # Utilitaire : vérification de rôle
@@ -39,16 +108,6 @@ def check_role(user, allowed_roles):
 # ---------------------------
 # Ajout / retrait enseignant secondaire
 # ---------------------------
-from django.shortcuts import get_object_or_404
-from django.db import transaction
-from django.core.exceptions import PermissionDenied
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import status
-
-from .models import Cours, Profile
-from .serializers import CoursSerializer
 
 
 class AddEnseignantSecondaireView(APIView):
@@ -1106,10 +1165,10 @@ class DevoirsCoursView(APIView):
         # Import ici pour éviter les imports circulaires
         from .models import Devoir, SoumissionDevoir
 
-        # Devoirs liés à ce cours (type cursus, reliés au cours)
+        # Devoirs liés à ce cours via le bon champ FK cours_lie
         devoirs = Devoir.objects.filter(
-            cours_id=cours_id,      # Adaptez selon votre champ FK vers Cours
-            type_devoir='cursus',
+            cours_lie_id=cours_id,
+            est_publie=True,
         ).order_by('date_limite')
 
         result = []
@@ -1408,7 +1467,20 @@ class ResultatDevoirView(APIView):
             devoir_id=devoir_id,
             utilisateur=request.user
         )
-        if soum.statut not in ["corrige"]:
+        # "corrige"   → correction auto (QCM) ou manuelle faite
+        # "en_retard" → soumis hors délai, peut être auto-corrigé (QCM)
+        # "soumis"    → en attente de correction manuelle
+        if soum.statut == "en_cours":
+            return Response(
+                {"detail": "Devoir encore en cours de composition."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        if soum.statut == "soumis":
+            return Response(
+                {"detail": "Résultat en attente de correction par l'enseignant."},
+                status=status.HTTP_202_ACCEPTED
+            )
+        if soum.statut not in ["corrige", "en_retard"]:
             return Response(
                 {"detail": "Résultat pas encore disponible."},
                 status=status.HTTP_404_NOT_FOUND
@@ -2598,6 +2670,20 @@ class StatsForumView(APIView):
 #   - enseignants_principaux : EP distincts dans ces cours + leurs stats
 #   - stats        : { nb_cours, nb_apprenants, nb_enseignants, taux_moyen }
 # ───────────────────────────────────────────────────────────────────────────
+
+def _nb_apprenants_pour_parcours(nom_parcours: str) -> int:
+    """
+    Calcule dynamiquement le nombre d'apprenants inscrits dans un parcours.
+    Un apprenant est "dans" un parcours si profile.cursus == nom_parcours.
+    Beaucoup plus fiable que le compteur nb_apprenants (jamais mis à jour).
+    """
+    return Profile.objects.filter(
+        user_type='apprenant',
+        cursus=nom_parcours,
+        is_active=True,
+    ).count()
+
+
 class EnseignantCadreDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -2714,7 +2800,9 @@ class EnseignantCadreDashboardView(APIView):
 
         # ── Stats globales du département ─────────────────────────
         nb_cours      = len(cours_data)
-        nb_apprenants = sum(c["nb_apprenants"] for c in cours_data)
+        # Calcul dynamique : apprenants dont profile.cursus == nom du parcours
+        parcours_nom  = departement.parcours.nom if departement.parcours else ''
+        nb_apprenants = _nb_apprenants_pour_parcours(parcours_nom)
         nb_enseignants = len(enseignants_principaux)
         taux_moyen    = (
             sum(c["taux_completion"] for c in cours_data) / nb_cours
@@ -3899,6 +3987,1101 @@ class HistoriqueStatsView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+# ══════════════════════════════════════════════════════════════════
+# APPRENANT — PRÉPA CONCOURS
+# GET /api/apprenant/prepa-concours/
+#
+# Filtre par profile.sub_cursus, exactement comme ApprenantCursusAPIView
+# filtre par profile.cursus.
+# L'apprenant voit les départements (= concours) de son parcours Prépa,
+# groupés par département, avec les cours à l'intérieur.
+# ══════════════════════════════════════════════════════════════════
+
+class ApprenantPrepaConcoursAPIView(APIView):
+    """
+    GET /api/apprenant/prepa-concours/
+    Retourne les départements (concours) du parcours Prépa Concours
+    de l'apprenant, groupés par département avec leurs cours.
+
+    Filtre : profile.cursus == nom du Parcours (ex: "Prépa Concours")
+    Même logique que ApprenantCursusAPIView.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'apprenant':
+            return Response(
+                {"detail": "Accès réservé aux apprenants."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Filtre identique à ApprenantCursusAPIView : profile.cursus = nom du Parcours
+        if not profile.cursus:
+            return Response([], status=status.HTTP_200_OK)
+
+        cours_qs = Cours.objects.filter(
+            departement__parcours__nom=profile.cursus
+        ).select_related(
+            'enseignant_principal__user', 'departement__parcours'
+        ).order_by('departement__nom', 'titre')
+
+        if not cours_qs.exists():
+            return Response([], status=status.HTTP_200_OK)
+
+        prog_map = _progression_cours(request.user, cours_qs)
+
+        # Grouper par département (= concours)
+        departements = {}
+        for c in cours_qs:
+            dept = c.departement
+            if dept.id not in departements:
+                cadre_data = None
+                if dept.cadre:
+                    cadre_data = {
+                        "id":  dept.cadre.id,
+                        "nom": _nom_profil(dept.cadre),
+                    }
+                departements[dept.id] = {
+                    "id":       dept.id,
+                    "nom":      dept.nom,
+                    "cadre":    cadre_data,
+                    "cours":    [],
+                    "nb_cours": 0,
+                    "progression_moyenne": 0.0,
+                }
+            departements[dept.id]["cours"].append(_serialise_cours(c, prog_map))
+
+        # Calculer la progression moyenne par département
+        result = []
+        for dept_data in departements.values():
+            progs = [c["progression"] for c in dept_data["cours"]]
+            dept_data["progression_moyenne"] = round(
+                sum(progs) / len(progs), 1
+            ) if progs else 0.0
+            dept_data["nb_cours"] = len(dept_data["cours"])
+            result.append(dept_data)
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
+# ══════════════════════════════════════════════════════════════════
+# APPRENANT — FORMATIONS
+# GET /api/apprenant/formations/
+#
+# Même logique que Prépa Concours et ApprenantCursusAPIView.
+# Filtre par profile.cursus = nom du Parcours.
+# Paramètre optionnel ?parcours= pour charger un parcours spécifique
+# (ex: "Formations Classiques" ou "Formations Métiers").
+# ══════════════════════════════════════════════════════════════════
+
+class ApprenantFormationsAPIView(APIView):
+    """
+    Retourne les départements (formations) du parcours de l'apprenant,
+    groupés par département avec leurs cours.
+
+    Filtre : profile.cursus == nom du Parcours
+    Paramètre optionnel ?parcours=<nom> pour forcer un parcours spécifique.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'apprenant':
+            return Response(
+                {"detail": "Accès réservé aux apprenants."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Filtre identique à ApprenantCursusAPIView : profile.cursus = nom du Parcours
+        # Paramètre optionnel ?parcours= pour afficher un sous-parcours spécifique
+        nom_parcours = request.query_params.get('parcours', profile.cursus)
+
+        if not nom_parcours:
+            return Response([], status=status.HTTP_200_OK)
+
+        cours_qs = Cours.objects.filter(
+            departement__parcours__nom=nom_parcours
+        ).select_related(
+            'enseignant_principal__user', 'departement__parcours'
+        ).order_by('departement__nom', 'titre')
+
+        if not cours_qs.exists():
+            return Response([], status=status.HTTP_200_OK)
+
+        prog_map = _progression_cours(request.user, cours_qs)
+
+        departements = {}
+        for c in cours_qs:
+            dept = c.departement
+            if dept.id not in departements:
+                cadre_data = None
+                if dept.cadre:
+                    cadre_data = {
+                        "id":    dept.cadre.id,
+                        "nom":   _nom_profil(dept.cadre),
+                        "email": dept.cadre.user.email,
+                    }
+                departements[dept.id] = {
+                    "id":                 dept.id,
+                    "nom":                dept.nom,
+                    "parcours_nom":       dept.parcours.nom if dept.parcours else '',
+                    "cadre":              cadre_data,
+                    "cours":              [],
+                    "nb_cours":           0,
+                    "progression_moyenne": 0.0,
+                }
+            departements[dept.id]["cours"].append(_serialise_cours(c, prog_map))
+
+        result = []
+        for dept_data in departements.values():
+            progs = [c["progression"] for c in dept_data["cours"]]
+            dept_data["progression_moyenne"] = round(
+                sum(progs) / len(progs), 1
+            ) if progs else 0.0
+            dept_data["nb_cours"] = len(dept_data["cours"])
+            result.append(dept_data)
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
+# ══════════════════════════════════════════════════════════════════
+# APPRENANT — DÉTAIL D'UN DÉPARTEMENT
+# GET /api/apprenant/departement/<pk>/
+# ══════════════════════════════════════════════════════════════════
+
+class ApprenantDepartementDetailView(APIView):
+    """Détail d'un département (concours ou formation) avec ses cours."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        dept = get_object_or_404(Departement, pk=pk)
+        cours_qs = Cours.objects.filter(
+            departement=dept
+        ).select_related('enseignant_principal__user')
+
+        prog_map = _progression_cours(request.user, cours_qs)
+
+        cadre_data = None
+        if dept.cadre:
+            cadre_data = {
+                "id":  dept.cadre.id,
+                "nom": _nom_profil(dept.cadre),
+            }
+
+        return Response({
+            "id":          dept.id,
+            "nom":         dept.nom,
+            "parcours":    {"id": dept.parcours.id, "nom": dept.parcours.nom},
+            "cadre":       cadre_data,
+            "nb_cours":    cours_qs.count(),
+            "cours":       [_serialise_cours(c, prog_map) for c in cours_qs],
+        })
+
+
+# ══════════════════════════════════════════════════════════════════
+# OLYMPIADES — FILTRÉES POUR L'APPRENANT
+# GET /api/olympiades/pour-moi/
+#
+# Retourne les olympiades dont le cadre organisateur appartient
+# au même parcours que l'apprenant (via sub_cursus ou un parcours
+# "Olympiades" dédié).
+# Seules les olympiades avec Devoir.est_publie=True sont visibles.
+# ══════════════════════════════════════════════════════════════════
+
+class OlympiadesPourMoiView(APIView):
+    """
+    Olympiades filtrées pour l'apprenant connecté.
+
+    Logique de filtrage (par ordre de priorité) :
+    1. Si profile.cursus existe → parcours de l'olympiade == cursus
+    2. Sinon → toutes les olympiades validées (Devoir.est_publie=True)
+
+    Le lien parcours ↔ olympiade se fait via :
+      Olympiade.organisateur (Profile cadre)
+        → departements_cadre (Departement)
+          → parcours (Parcours)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = _get_profile(request.user)
+        if not profile:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        # Filtres URL
+        statut  = request.query_params.get('statut')
+        matiere = request.query_params.get('matiere')
+        niveau  = request.query_params.get('niveau')
+
+        # Base queryset — seulement les olympiades publiées
+        # (Devoir.est_publie=True signifie que l'admin a validé)
+        qs = Olympiade.objects.filter(
+            devoir__est_publie=True
+        ).select_related(
+            'organisateur__user', 'devoir'
+        ).order_by('-date_debut_olympiade')
+
+        # Filtre par parcours si l'apprenant a un cursus (même logique que ApprenantCursusAPIView)
+        if profile.cursus:
+            qs = qs.filter(
+                organisateur__departements_cadre__parcours__nom=profile.cursus
+            ).distinct()
+
+        if matiere:
+            qs = qs.filter(matiere=matiere)
+        if niveau:
+            qs = qs.filter(niveau=niveau)
+
+        serializer = OlympiadeListSerializer(
+            qs, many=True, context={"request": request}
+        )
+        data = serializer.data
+
+        if statut:
+            data = [d for d in data if d["statut"] == statut]
+
+        return Response(data)
+
+
+# ══════════════════════════════════════════════════════════════════
+# ENSEIGNANT ADMIN — OLYMPIADES À VALIDER
+# GET  /api/admin/olympiades/a-valider/
+# POST /api/admin/olympiades/<pk>/valider/
+#
+# L'admin ne voit et ne valide que les olympiades de SON parcours.
+# Seules les olympiades avec prix vides (gratuit) passent par la
+# validation admin. Les autres sont visibles directement.
+#
+# Mécanisme : Devoir.est_publie=False = en attente de validation.
+#             L'admin met est_publie=True → visible pour les apprenants.
+# ══════════════════════════════════════════════════════════════════
+
+class AdminOlympiadesAValiderView(APIView):
+    """
+    GET /api/admin/olympiades/a-valider/
+    Retourne les olympiades du parcours de l'admin qui attendent validation.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        # Récupérer le parcours de cet admin
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        # Olympiades du parcours, non encore publiées
+        olympiades = Olympiade.objects.filter(
+            organisateur__departements_cadre__parcours=parcours,
+            devoir__est_publie=False,
+        ).select_related(
+            'organisateur__user', 'devoir'
+        ).distinct().order_by('-date_debut_olympiade')
+
+        result = []
+        for o in olympiades:
+            cadre_nom = _nom_profil(o.organisateur) if o.organisateur else '—'
+            dept = (
+                o.organisateur.departements_cadre.filter(parcours=parcours).first()
+                if o.organisateur else None
+            )
+            result.append({
+                "id":             o.id,
+                "titre":          o.titre,
+                "matiere":        o.matiere,
+                "niveau":         o.niveau,
+                "edition":        o.edition,
+                "cadre":          cadre_nom,
+                "departement":    {"id": dept.id, "nom": dept.nom} if dept else None,
+                "date_debut":     o.date_debut_olympiade,
+                "date_fin":       o.date_fin_olympiade,
+                "nb_questions":   o.nb_questions,
+                "prix_1er":       o.prix_1er,
+                "prix_2eme":      o.prix_2eme,
+                "prix_3eme":      o.prix_3eme,
+                "est_gratuite":   not any([o.prix_1er, o.prix_2eme, o.prix_3eme]),
+                "devoir_id":      o.devoir.id if o.devoir else None,
+                "statut":         o.statut_auto,
+            })
+
+        return Response(result)
+
+
+class AdminValiderOlympiadeView(APIView):
+    """
+    POST /api/admin/olympiades/<pk>/valider/
+    Body optionnel : { "refuser": true, "motif": "..." }
+
+    Valide (publie) ou refuse une olympiade du parcours de l'admin.
+    Valider = mettre Devoir.est_publie = True
+    Refuser = supprimer l'olympiade et son devoir lié, ou juste notifier
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        # Vérifier que cette olympiade appartient bien au parcours de cet admin
+        olympiade = get_object_or_404(
+            Olympiade,
+            pk=pk,
+            organisateur__departements_cadre__parcours=parcours,
+        )
+
+        refuser = request.data.get('refuser', False)
+
+        if refuser:
+            motif = request.data.get('motif', 'Refusée par l\'administrateur.')
+            # On garde l'olympiade mais on la marque comme refusée
+            # en gardant est_publie=False — le cadre peut corriger et resoumettre
+            enregistrer_activite(
+                user=request.user,
+                action='olympiad_closed',
+                description=f"Olympiade « {olympiade.titre} » refusée : {motif}",
+                objet_id=olympiade.id,
+                objet_type='Olympiade',
+            )
+            return Response({
+                "detail": f"Olympiade refusée. Motif : {motif}",
+                "id": olympiade.id,
+                "statut": "refuse",
+            })
+
+        # Valider → publier le devoir lié
+        if not olympiade.devoir:
+            return Response(
+                {"detail": "Cette olympiade n'a pas de devoir lié. Impossible de valider."},
+                status=400,
+            )
+
+        olympiade.devoir.est_publie = True
+        olympiade.devoir.save(update_fields=['est_publie'])
+
+        enregistrer_activite(
+            user=request.user,
+            action='olympiad_created',
+            description=f"Olympiade « {olympiade.titre} » validée et publiée.",
+            objet_id=olympiade.id,
+            objet_type='Olympiade',
+        )
+
+        return Response({
+            "detail": "Olympiade validée et publiée avec succès.",
+            "id":     olympiade.id,
+            "titre":  olympiade.titre,
+            "statut": "validee",
+        })
+
+
+# ══════════════════════════════════════════════════════════════════
+# ENSEIGNANT ADMIN — DÉPARTEMENTS À VALIDER (formations/concours)
+# GET  /api/admin/departements/a-valider/
+# POST /api/admin/departements/<pk>/valider/
+#
+# L'enseignant_admin peut voir les départements récemment créés dans
+# son parcours, activer ou désactiver un département.
+# Un département "non validé" signifie que ses cours ne sont pas
+# encore accessibles aux apprenants.
+# On s'appuie sur le fait qu'un cours non publié (Devoir.est_publie=False)
+# ou un département sans cours actif est considéré "en attente".
+#
+# Pour ne PAS modifier models.py, on utilise le champ :
+#   Departement.cadre = None  →  département sans cadre = en attente d'activation
+#   Valider = assigner un cadre + activer
+#   OU : pour les formations à prix=0, l'admin doit explicitement activer
+#        en publiant tous les devoirs du département.
+# ══════════════════════════════════════════════════════════════════
+
+class AdminDepartementsAValiderView(APIView):
+    """
+    GET /api/admin/departements/a-valider/
+    Retourne les départements du parcours sans cadre assigné
+    (= créés par l'admin mais pas encore activés) + ceux dont
+    les devoirs/cours sont en attente de publication.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        # Départements du parcours sans cadre assigné
+        deps_sans_cadre = Departement.objects.filter(
+            parcours=parcours, cadre__isnull=True
+        ).prefetch_related('cours')
+
+        # Départements dont certains devoirs ne sont pas encore publiés
+        deps_avec_devoirs_attente = Departement.objects.filter(
+            parcours=parcours,
+            cours__devoirs__est_publie=False,
+        ).distinct().prefetch_related('cours', 'cadre__user')
+
+        # Union des deux ensembles
+        all_ids = set(
+            list(deps_sans_cadre.values_list('id', flat=True)) +
+            list(deps_avec_devoirs_attente.values_list('id', flat=True))
+        )
+        departements = Departement.objects.filter(
+            id__in=all_ids
+        ).select_related('cadre__user', 'parcours')
+
+        result = []
+        for dept in departements:
+            nb_cours     = dept.cours.count()
+            nb_devoirs_attente = Devoir.objects.filter(
+                cours_lie__departement=dept, est_publie=False
+            ).count()
+            cadre_data = None
+            if dept.cadre:
+                cadre_data = {
+                    "id":    dept.cadre.id,
+                    "nom":   _nom_profil(dept.cadre),
+                    "email": dept.cadre.user.email,
+                }
+            result.append({
+                "id":                  dept.id,
+                "nom":                 dept.nom,
+                "cadre":               cadre_data,
+                "nb_cours":            nb_cours,
+                "nb_devoirs_attente":  nb_devoirs_attente,
+                "statut":              "sans_cadre" if not dept.cadre else "devoirs_en_attente",
+            })
+
+        return Response(result)
+
+
+class AdminValiderDepartementView(APIView):
+    """
+    POST /api/admin/departements/<pk>/valider/
+    Body : { "cadre_id": 12 }          → assigner un cadre au département
+           { "publier_devoirs": true }  → publier tous les devoirs du département
+           { "desactiver": true }       → retirer le cadre (désactiver)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        dept = get_object_or_404(Departement, pk=pk, parcours=parcours)
+
+        actions_effectuees = []
+
+        # 1. Assigner un cadre
+        cadre_id = request.data.get('cadre_id')
+        if cadre_id:
+            cadre = get_object_or_404(
+                Profile, pk=cadre_id, user_type='enseignant_cadre'
+            )
+            dept.cadre = cadre
+            dept.save(update_fields=['cadre'])
+            actions_effectuees.append(f"Cadre assigné : {_nom_profil(cadre)}")
+            enregistrer_activite(
+                user=request.user,
+                action='cadre_assigned',
+                description=f"Cadre « {_nom_profil(cadre)} » assigné au dept « {dept.nom} »",
+                objet_id=dept.id,
+                objet_type='Departement',
+            )
+
+        # 2. Publier tous les devoirs du département
+        if request.data.get('publier_devoirs'):
+            nb = Devoir.objects.filter(
+                cours_lie__departement=dept, est_publie=False
+            ).update(est_publie=True)
+            actions_effectuees.append(f"{nb} devoir(s) publié(s)")
+
+        # 3. Désactiver (retirer le cadre)
+        if request.data.get('desactiver'):
+            dept.cadre = None
+            dept.save(update_fields=['cadre'])
+            actions_effectuees.append("Département désactivé (cadre retiré)")
+
+        if not actions_effectuees:
+            return Response(
+                {"detail": "Aucune action spécifiée (cadre_id, publier_devoirs, desactiver)."},
+                status=400,
+            )
+
+        return Response({
+            "detail":   "Actions effectuées.",
+            "actions":  actions_effectuees,
+            "dept_id":  dept.id,
+            "dept_nom": dept.nom,
+        })
+
+
+# ══════════════════════════════════════════════════════════════════
+# PAIEMENT
+# POST /api/paiements/initier/
+# GET  /api/paiements/<reference>/verifier/
+# GET  /api/paiements/historique/
+# ══════════════════════════════════════════════════════════════════
+
+class InitierPaiementView(APIView):
+    """
+    POST /api/paiements/initier/
+    Body : {
+      "type_paiement": "abonnement_mensuel" | "abonnement_annuel" | "acces_departement" | "olympiade",
+      "moyen":         "mtn_momo" | "orange_om" | "carte",
+      "montant":       1500,
+      "telephone":     "6XXXXXXXX",        ← pour Mobile Money
+      "departement_id": 3,                 ← si type = acces_departement
+      "olympiade_id":  5                   ← si type = olympiade
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    # Montants attendus (vérification côté serveur)
+    MONTANTS_FIXES = {
+        'abonnement_mensuel': 1500,
+        'abonnement_annuel':  13000,
+    }
+
+    def post(self, request):
+        data            = request.data
+        type_paiement   = data.get('type_paiement', '').strip()
+        moyen           = data.get('moyen', '').strip()
+        montant_envoye  = data.get('montant')
+
+        # ── Validations ────────────────────────────────────────────
+        types_valides = [t[0] for t in Paiement.TYPE_CHOICES]
+        if type_paiement not in types_valides:
+            return Response(
+                {"detail": f"type_paiement invalide. Valeurs acceptées : {types_valides}"},
+                status=400,
+            )
+
+        moyens_valides = [m[0] for m in Paiement.MOYEN_CHOICES]
+        if moyen not in moyens_valides:
+            return Response(
+                {"detail": f"moyen invalide. Valeurs acceptées : {moyens_valides}"},
+                status=400,
+            )
+
+        # Vérifier le montant pour les abonnements
+        if type_paiement in self.MONTANTS_FIXES:
+            montant_attendu = self.MONTANTS_FIXES[type_paiement]
+            if int(montant_envoye or 0) != montant_attendu:
+                return Response(
+                    {"detail": f"Montant incorrect. Attendu : {montant_attendu} FCFA."},
+                    status=400,
+                )
+            montant = montant_attendu
+        else:
+            try:
+                montant = int(montant_envoye)
+                if montant <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return Response({"detail": "Montant invalide."}, status=400)
+
+        # ── Créer le paiement en attente ──────────────────────────
+        paiement_kwargs = {
+            "utilisateur":   request.user,
+            "type_paiement": type_paiement,
+            "moyen":         moyen,
+            "montant":       montant,
+            "statut":        "en_attente",
+        }
+
+        if type_paiement == 'olympiade':
+            olympiade_id = data.get('olympiade_id')
+            if not olympiade_id:
+                return Response({"detail": "olympiade_id requis."}, status=400)
+            olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+            paiement_kwargs["olympiade_liee"] = olympiade
+
+        if type_paiement == 'acces_departement':
+            dept_id = data.get('departement_id')
+            if not dept_id:
+                return Response({"detail": "departement_id requis."}, status=400)
+            # Vérifier que le département existe
+            get_object_or_404(Departement, pk=dept_id)
+            # Commission 15% pour accès département payant
+            paiement_kwargs["commission_yeki"] = round(montant * 0.15)
+
+        paiement = Paiement.objects.create(**paiement_kwargs)
+
+        # ── Simulation opérateur (à remplacer par SDK MTN/Orange) ─
+        # En production : appel API MTN MoMo ou Orange Money ici
+        # Pour l'instant, on simule un succès immédiat
+        # Accepte 'telephone' ET 'numero' (Flutter peut envoyer l'un ou l'autre)
+        telephone = data.get('telephone') or data.get('numero', '')
+        succes_simule = self._simuler_paiement(moyen, telephone)
+
+        if succes_simule:
+            paiement.statut       = 'succes'
+            paiement.transaction_id = f"SIM-{uuid.uuid4().hex[:12].upper()}"
+            paiement.save(update_fields=['statut', 'transaction_id'])
+
+            # Post-traitement selon le type
+            self._post_traitement(request.user, paiement, type_paiement)
+
+            return Response({
+                "reference":      paiement.reference,
+                "statut":         "succes",
+                "transaction_id": paiement.transaction_id,
+                "montant":        paiement.montant,
+                "detail":         "Paiement effectué avec succès.",
+            }, status=201)
+        else:
+            paiement.statut = 'echec'
+            paiement.save(update_fields=['statut'])
+            return Response({
+                "reference": paiement.reference,
+                "statut":    "echec",
+                "detail":    "Échec du paiement. Vérifiez votre solde.",
+            }, status=402)
+
+    def _simuler_paiement(self, moyen, telephone):
+        """
+        Simulation locale — uniquement en mode DEBUG.
+        En production, remplacer par l'appel SDK MTN MoMo / Orange Money.
+        """
+        from django.conf import settings
+        if not settings.DEBUG:
+            # En production : lever une erreur claire pour forcer l'intégration réelle
+            raise NotImplementedError(
+                "Intégration paiement MTN MoMo / Orange Money non configurée. "
+                "Veuillez implémenter _simuler_paiement() avec le SDK opérateur."
+            )
+        return bool(telephone)
+
+    @transaction.atomic
+    def _post_traitement(self, user, paiement, type_paiement):
+        """Actions après un paiement réussi."""
+        if type_paiement == 'abonnement_mensuel':
+            self._activer_abonnement(user, 'mensuel', paiement)
+        elif type_paiement == 'abonnement_annuel':
+            self._activer_abonnement(user, 'annuel', paiement)
+
+    def _activer_abonnement(self, user, type_abo, paiement):
+        jours = 30 if type_abo == 'mensuel' else 365
+        try:
+            abo = user.abonnement
+            abo.renouveler(type_abo)
+            abo.paiement = paiement
+            abo.save(update_fields=['paiement'])
+        except AbonnementPremium.DoesNotExist:
+            AbonnementPremium.objects.create(
+                utilisateur     = user,
+                type_abonnement = type_abo,
+                actif           = True,
+                fin             = timezone.now() + timedelta(days=jours),
+                paiement        = paiement,
+            )
+
+
+class VerifierPaiementView(APIView):
+    """GET /api/paiements/<reference>/verifier/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, reference):
+        paiement = get_object_or_404(
+            Paiement, reference=reference, utilisateur=request.user
+        )
+        return Response({
+            "reference":      paiement.reference,
+            "statut":         paiement.statut,
+            "type_paiement":  paiement.type_paiement,
+            "montant":        paiement.montant,
+            "moyen":          paiement.moyen,
+            "transaction_id": paiement.transaction_id,
+            "date":           paiement.date,
+        })
+
+
+class HistoriquePaiementsView(APIView):
+    """GET /api/paiements/historique/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        paiements = Paiement.objects.filter(
+            utilisateur=request.user
+        ).order_by('-date')[:50]
+
+        data = [{
+            "reference":     p.reference,
+            "type_paiement": p.get_type_paiement_display(),
+            "montant":       p.montant,
+            "moyen":         p.get_moyen_display(),
+            "statut":        p.statut,
+            "date":          p.date,
+        } for p in paiements]
+
+        return Response(data)
+
+
+# ══════════════════════════════════════════════════════════════════
+# ABONNEMENT PREMIUM
+# GET /api/abonnement/statut/
+# ══════════════════════════════════════════════════════════════════
+
+class StatutAbonnementView(APIView):
+    """
+    GET /api/abonnement/statut/
+    Retourne le statut de l'abonnement premium de l'apprenant.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            abo = request.user.abonnement
+            return Response({
+                "actif":            abo.est_actif,
+                "type_abonnement":  abo.type_abonnement,
+                "debut":            abo.debut,
+                "fin":              abo.fin,
+                "jours_restants":   max(0, (abo.fin - timezone.now()).days),
+            })
+        except AbonnementPremium.DoesNotExist:
+            return Response({
+                "actif":           False,
+                "type_abonnement": None,
+                "debut":           None,
+                "fin":             None,
+                "jours_restants":  0,
+            })
+
+
+# ══════════════════════════════════════════════════════════════════
+# YEKI IA — RÉPONSE AUTOMATIQUE DANS LE FORUM
+# POST /api/ia/forum/<question_id>/repondre/
+# POST /api/ia/cours/<cours_id>/chat/
+# ══════════════════════════════════════════════════════════════════
+
+def _get_ia_personnalite(cours=None, nom_parcours=None, niveau_cursus=None):
+    """Récupère ou crée la personnalité IA adaptée au contexte."""
+    qs = YekiIAPersonalite.objects.all()
+
+    if cours:
+        obj = qs.filter(cours_lie=cours).first()
+        if obj:
+            return obj
+        return YekiIAPersonalite.objects.create(
+            nom=f"IA – {cours.titre}",
+            contexte='cours',
+            style='pedagogique',
+            niveau_difficulte='intermediaire',
+            cours_lie=cours,
+            niveau_cursus=cours.niveau or '',
+        )
+
+    if nom_parcours:
+        obj = qs.filter(contexte='parcours', nom_parcours=nom_parcours).first()
+        if obj:
+            return obj
+        return YekiIAPersonalite.objects.create(
+            nom=f"IA – {nom_parcours}",
+            contexte='parcours',
+            style='academique',
+            niveau_difficulte='intermediaire',
+            nom_parcours=nom_parcours,
+        )
+
+    if niveau_cursus:
+        obj = qs.filter(contexte='cursus_niveau', niveau_cursus=niveau_cursus).first()
+        if obj:
+            return obj
+        style    = 'encourageant' if niveau_cursus in ['3ème', '2nde'] else 'pedagogique'
+        difficulte = 'debutant'   if niveau_cursus in ['3ème', '2nde'] else 'intermediaire'
+        return YekiIAPersonalite.objects.create(
+            nom=f"IA – Niveau {niveau_cursus}",
+            contexte='cursus_niveau',
+            style=style,
+            niveau_difficulte=difficulte,
+            niveau_cursus=niveau_cursus,
+        )
+
+    # Fallback générique
+    obj = qs.filter(contexte='cursus_niveau', niveau_cursus='').first()
+    if obj:
+        return obj
+    return YekiIAPersonalite.objects.create(
+        nom="IA – Générale",
+        contexte='cursus_niveau',
+        style='pedagogique',
+        niveau_difficulte='intermediaire',
+    )
+
+
+def _appeler_openai(system_prompt: str, question: str) -> tuple[str, int]:
+    """
+    Appelle l'API OpenAI et retourne (réponse_texte, tokens_utilisés).
+    En cas d'erreur ou si la clé est absente, retourne une réponse de secours.
+    """
+    import openai as _openai
+
+    api_key = os.environ.get('OPENAI_API_KEY', '')
+    if not api_key:
+        return (
+            "Yeki IA : Je suis temporairement indisponible. "
+            "Un enseignant répondra à votre question prochainement.",
+            0,
+        )
+
+    _openai.api_key = api_key
+    try:
+        response = _openai.chat.completions.create(
+            model="gpt-4o-mini",
+            max_tokens=800,
+            messages=[
+                {"role": "system",  "content": system_prompt},
+                {"role": "user",    "content": question},
+            ],
+        )
+        texte  = response.choices[0].message.content.strip()
+        tokens = response.usage.total_tokens
+        return texte, tokens
+    except Exception as e:
+        return (
+            "Yeki IA : Désolé, je rencontre une difficulté technique. "
+            "Veuillez réessayer ou contacter un enseignant.",
+            0,
+        )
+
+
+class YekiIARepondreForumView(APIView):
+    """
+    POST /api/ia/forum/<question_id>/repondre/
+    Déclenche une réponse de Yeki IA sur une question du forum.
+    Peut être appelé manuellement (bouton "@YekiIA") ou automatiquement.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, question_id):
+        question = get_object_or_404(QuestionForum, pk=question_id)
+
+        # Éviter les doublons IA sur la même question
+        if YekiIAMessage.objects.filter(question=question).exists():
+            return Response(
+                {"detail": "Yeki IA a déjà répondu à cette question."},
+                status=400,
+            )
+
+        # Déterminer le contexte de la personnalité IA
+        profile = _get_profile(request.user)
+        cours_lie = None
+        if question.cours_id:
+            try:
+                cours_lie = Cours.objects.get(pk=question.cours_id)
+            except Cours.DoesNotExist:
+                pass
+
+        nom_parcours = None
+        niveau_cursus = None
+        if profile:
+            nom_parcours  = profile.cursus or None
+            niveau_cursus = profile.niveau or None
+
+        personnalite = _get_ia_personnalite(
+            cours=cours_lie,
+            nom_parcours=nom_parcours,
+            niveau_cursus=niveau_cursus,
+        )
+
+        system_prompt = personnalite.build_system_prompt()
+        texte_ia, tokens = _appeler_openai(system_prompt, question.contenu)
+
+        # S'assurer que la réponse commence par "Yeki IA :"
+        if not texte_ia.startswith("Yeki IA :"):
+            texte_ia = f"Yeki IA : {texte_ia}"
+
+        # Créer ou récupérer l'utilisateur YekiIA
+        yeki_user, _ = __import__(
+            'django.contrib.auth', fromlist=['get_user_model']
+        ).get_user_model().objects.get_or_create(
+            username='YekiIA',
+            defaults={'first_name': 'Yeki', 'last_name': 'IA'},
+        )
+
+        # Sauvegarder comme ReponseQuestion normale
+        with transaction.atomic():
+            reponse = ReponseQuestion.objects.create(
+                question   = question,
+                auteur     = yeki_user,
+                contenu    = texte_ia,
+                est_solution = False,
+            )
+
+            ia_msg = YekiIAMessage.objects.create(
+                question        = question,
+                personalite     = personnalite,
+                contenu         = texte_ia,
+                tokens_utilises = tokens,
+                erreur          = tokens == 0,
+                reponse_forum   = reponse,
+            )
+
+        return Response({
+            "id":        ia_msg.id,
+            "contenu":   texte_ia,
+            "tokens":    tokens,
+            "reponse_id": reponse.id,
+        }, status=201)
+
+
+class YekiIAChatView(APIView):
+    """
+    POST /api/ia/cours/<cours_id>/chat/
+    Body : { "message": "Explique-moi les dérivées" }
+
+    Chat direct avec Yeki IA dans le contexte d'un cours.
+    Retourne directement la réponse sans créer de ReponseQuestion.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+        message = (request.data.get('message') or '').strip()
+        if not message:
+            return Response({"detail": "message requis."}, status=400)
+
+        personnalite = _get_ia_personnalite(cours=cours)
+        system_prompt = personnalite.build_system_prompt()
+        texte_ia, tokens = _appeler_openai(system_prompt, message)
+
+        if not texte_ia.startswith("Yeki IA :"):
+            texte_ia = f"Yeki IA : {texte_ia}"
+
+        return Response({
+            "reponse": texte_ia,
+            "tokens":  tokens,
+            "cours":   {"id": cours.id, "titre": cours.titre},
+        })
+
+
+# ══════════════════════════════════════════════════════════════════
+# ENSEIGNANT ADMIN — DASHBOARD ENRICHI (avec olympiades + formations)
+# GET /api/enseignant/admin/dashboard/enrichi/
+#
+# Extension du dashboard existant (EnseignantAdminDashboardView)
+# qui ajoute les olympiades en attente et les stats de formations.
+# ══════════════════════════════════════════════════════════════════
+
+class EnseignantAdminDashboardEnrichiView(APIView):
+    """
+    GET /api/enseignant/admin/dashboard/enrichi/
+    Dashboard complet pour l'enseignant_admin incluant :
+    - Départements (= concours / formations) du parcours
+    - Olympiades en attente de validation
+    - Stats globales
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.prefetch_related(
+                'departements__cours',
+                'departements__cadre__user',
+            ).get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        # ── Départements ─────────────────────────────────────────
+        departements_data = []
+        cadres_dict = {}
+
+        for dept in parcours.departements.all():
+            nb_cours  = dept.cours.count()
+            nb_app    = sum(c.nb_apprenants for c in dept.cours.all())
+
+            # Olympiades de ce département
+            olympiades_dept = Olympiade.objects.filter(
+                organisateur__departements_cadre=dept
+            )
+            nb_olympiades_total    = olympiades_dept.count()
+            nb_olympiades_attente  = olympiades_dept.filter(
+                devoir__est_publie=False
+            ).count()
+
+            cadre_data = None
+            if dept.cadre:
+                cadre_data = {
+                    "id":    dept.cadre.id,
+                    "nom":   _nom_profil(dept.cadre),
+                    "email": dept.cadre.user.email,
+                }
+                if dept.cadre.id not in cadres_dict:
+                    cadres_dict[dept.cadre.id] = {
+                        "id":             dept.cadre.id,
+                        "nom":            cadre_data["nom"],
+                        "email":          dept.cadre.user.email,
+                        "nb_cours":       nb_cours,
+                        "nb_apprenants":  nb_app,
+                        "departement":    {"id": dept.id, "nom": dept.nom},
+                    }
+
+            departements_data.append({
+                "id":                     dept.id,
+                "nom":                    dept.nom,
+                "parcours":               parcours.nom,
+                "parcours_id":            parcours.id,
+                "nb_cours":               nb_cours,
+                "nb_apprenants":          nb_app,
+                "nb_olympiades":          nb_olympiades_total,
+                "nb_olympiades_attente":  nb_olympiades_attente,
+                "cadre":                  cadre_data,
+            })
+
+        # ── Olympiades en attente de validation ──────────────────
+        olympiades_attente = Olympiade.objects.filter(
+            organisateur__departements_cadre__parcours=parcours,
+            devoir__est_publie=False,
+        ).distinct().values('id', 'titre', 'matiere', 'date_debut_olympiade')
+
+        # ── Stats globales ───────────────────────────────────────
+        stats = {
+            "nb_departements":        len(departements_data),
+            "nb_cours":               sum(d["nb_cours"] for d in departements_data),
+            "nb_apprenants":          sum(d["nb_apprenants"] for d in departements_data),
+            "nb_enseignants":         len(cadres_dict),
+            "nb_olympiades_attente":  len(olympiades_attente),
+            "nb_deps_sans_cadre":     sum(
+                1 for d in departements_data if d["cadre"] is None
+            ),
+        }
+
+        return Response({
+            "nom":              _nom_profil(profile),
+            "nom_parcours":     parcours.nom,
+            "id_parcours":      parcours.id,
+            "stats":            stats,
+            "departements":     departements_data,
+            "cadres":           list(cadres_dict.values()),
+            "olympiades_a_valider": list(olympiades_attente),
+        })
+
+
 # ---------------------------
 # Dashboard selon rôle
 # ---------------------------
@@ -3947,7 +5130,7 @@ def landing(request):
 # Register
 # ---------------------------
 class RegisterView(APIView):
-    #permission_classes = [AllowAny]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -3974,7 +5157,7 @@ class RegisterView(APIView):
 # Login
 # ---------------------------
 class LoginView(APIView):
-    #permission_classes = [AllowAny]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -4006,10 +5189,6 @@ class LoginView(APIView):
 #    POST /api/auth/verify-otp/              → vérifie le code OTP
 #    POST /api/auth/reset-password/          → définit le nouveau mot de passe
 # ═══════════════════════════════════════════════════════════════════════════
-
-from django.core.mail import send_mail
-from django.conf import settings
-from .models import PasswordResetOTP
 
 
 # ───────────────────────────────────────────────────────────────────────────
