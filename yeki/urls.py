@@ -125,8 +125,6 @@ urlpatterns = [
     path('olympiades/<int:olympiade_id>/classement/', ClassementOlympiadeView.as_view(), name='classement-olympiade'),
     path('olympiades/<int:olympiade_id>/calculer-classement/', CalculerClassementView.as_view(), name='calculer-classement'),
     path('olympiades/<int:olympiade_id>/mon-inscription/', MonInscriptionOlympiadeView.as_view(), name='mon-inscription-olympiade'),
-    # NOUVEAU : validation olympiade par admin
-    path('olympiades/<int:pk>/valider/', ValiderOlympiadeView.as_view(), name='olympiade-valider'),
 
     # ── FORUM ─────────────────────────────────────────────────────
     path('forum/messages/', ForumMessagesListAPIView.as_view(), name='forum-messages-list'),
@@ -140,12 +138,12 @@ urlpatterns = [
     path('forum/stats/', StatsForumView.as_view()),
     # NOUVEAU : Yeki IA dans le forum
     path('forum/questions/<int:pk>/ia-repondre/', YekiIARepondreForumView.as_view(), name='forum-ia-repondre'),
-    path('forum/questions/<int:pk>/ia-discussion/', YekiIADiscussionView.as_view(), name='forum-ia-discussion'),
+    #path('forum/questions/<int:pk>/ia-discussion/', YekiIADiscussionView.as_view(), name='forum-ia-discussion'),
 
     # ── YEKI IA ───────────────────────────────────────────────────
-    path('ia/generer-exercices/', YekiIAGenererExercicesView.as_view(), name='ia-exercices'),
-    path('ia/corriger/', YekiIACorrigerTexteView.as_view(), name='ia-corriger'),
-    path('ia/creer-formation/', YekiIACreerFormationView.as_view(), name='ia-creer-formation'),
+    #path('ia/generer-exercices/', YekiIAGenererExercicesView.as_view(), name='ia-exercices'),
+    #path('ia/corriger/', YekiIACorrigerTexteView.as_view(), name='ia-corriger'),
+    #path('ia/creer-formation/', YekiIACreerFormationView.as_view(), name='ia-creer-formation'),
 
 
     # ── PAIEMENT ──────────────────────────────────────────────────
