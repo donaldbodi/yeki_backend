@@ -243,6 +243,19 @@ urlpatterns = [
         name='ia-cours-chat',
     ),
 
+
+    # ── YEKI IA — CHAT PRIVÉ AVEC HISTORIQUE ─────────────────────
+    path(
+        'ia/cours/<int:cours_id>/historique/',
+        YekiIAChatHistoriqueView.as_view(),
+        name='ia-chat-historique',
+    ),
+    path(
+        'ia/cours/<int:cours_id>/chat/',
+        YekiIAChatAvecHistoriqueView.as_view(),
+        name='ia-chat',
+    ),
+
     # ── ADMIN : Dashboard enrichi ─────────────────────────────────
     # Extension du dashboard existant avec olympiades + formations
     path(

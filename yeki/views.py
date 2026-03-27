@@ -3396,7 +3396,7 @@ class CreerParcoursView(APIView):
 
         if profile.user_type != 'admin':
             return Response(
-                {"detail": "Accès réservé à l'administrateur général."},
+                {"detail": "Acces reserve a l'administrateur general."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -3407,9 +3407,23 @@ class CreerParcoursView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        parcours = Parcours.objects.create(nom=nom)
+        type_parcours = request.data.get('type_parcours', 'autre')
+        valid_types = ['cursus', 'prepa', 'formation', 'autre']
+        if type_parcours not in valid_types:
+            type_parcours = 'autre'
+
+        parcours = Parcours.objects.create(
+            nom=nom,
+            type_parcours=type_parcours,
+            description=request.data.get('description', '').strip(),
+        )
         return Response(
-            {"id": parcours.id, "nom": parcours.nom},
+            {
+                "id": parcours.id,
+                "nom": parcours.nom,
+                "type_parcours": parcours.type_parcours,
+                "description": parcours.description,
+            },
             status=status.HTTP_201_CREATED
         )
 
@@ -3592,8 +3606,102 @@ class EnseignantAdminDashboardView(APIView):
 # Body: { "nom": "Mathématiques", "description": "...", "parcours_id": 1 }
 #   → parcours_id est OPTIONNEL si l'enseignant admin n'a qu'un seul parcours
 # ───────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPER : sérialise un Departement avec tous ses champs enrichis
+# ─────────────────────────────────────────────────────────────────────────────
+def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user=None):
+    """Sérialise un Departement avec tous les champs enrichis selon son type."""
+    from django.conf import settings
+    import os
+
+    cadre_data = None
+    if dept.cadre:
+        cadre_data = {
+            "id":    dept.cadre.id,
+            "nom":   _nom_profil(dept.cadre),
+            "email": dept.cadre.user.email,
+        }
+
+    image_url = None
+    if dept.image:
+        try:
+            image_url = settings.MEDIA_URL + str(dept.image)
+        except Exception:
+            image_url = None
+
+    base = {
+        "id":              dept.id,
+        "nom":             dept.nom,
+        "description":     dept.description,
+        "image_url":       image_url,
+        "couleur":         dept.couleur,
+        "prix":            dept.prix,
+        "est_actif":       dept.est_actif,
+        "type":            dept.type_departement,
+        "parcours_id":     dept.parcours_id,
+        "parcours_nom":    dept.parcours.nom if dept.parcours else '',
+        "parcours_type":   dept.parcours.type_parcours if dept.parcours else '',
+        "cadre":           cadre_data,
+        "created_at":      dept.created_at.isoformat() if dept.created_at else None,
+    }
+
+    # Champs prépa concours
+    if dept.est_prepa_concours:
+        base.update({
+            "est_prepa_concours":      True,
+            "nom_concours":            dept.nom_concours,
+            "organisme_concours":      dept.organisme_concours,
+            "date_limite_inscription": dept.date_limite_inscription.isoformat() if dept.date_limite_inscription else None,
+            "date_examen":             dept.date_examen.isoformat() if dept.date_examen else None,
+            "arrete_ministeriel":      dept.arrete_ministeriel,
+            "lien_officiel":           dept.lien_officiel,
+            "niveaux_cibles":          dept.niveaux_cibles,
+            "places_disponibles":      dept.places_disponibles,
+            "frais_dossier":           dept.frais_dossier,
+            "debouches":               dept.debouches,
+        })
+    else:
+        base["est_prepa_concours"] = False
+
+    # Champs formation
+    if dept.est_formation_metier or dept.est_formation_classique:
+        base.update({
+            "est_formation_metier":    dept.est_formation_metier,
+            "est_formation_classique": dept.est_formation_classique,
+            "duree_formation":         dept.duree_formation,
+            "mode_formation":          dept.mode_formation,
+            "certificat_delivre":      dept.certificat_delivre,
+            "prerequis":               dept.prerequis,
+            "objectifs":               dept.objectifs,
+            "domaine":                 dept.domaine,
+            "ville":                   dept.ville,
+            "est_certifiante":         dept.est_certifiante,
+        })
+    else:
+        base["est_formation_metier"] = False
+        base["est_formation_classique"] = False
+
+    if include_cours:
+        cours_qs = Cours.objects.filter(departement=dept).select_related('enseignant_principal__user')
+        pm = prog_map or (_progression_cours(user, cours_qs) if user else {})
+        base["cours"] = [_serialise_cours(c, pm) for c in cours_qs]
+        base["nb_cours"] = cours_qs.count()
+        progs = [_serialise_cours(c, pm)['progression'] for c in cours_qs]
+        base["progression_moyenne"] = round(sum(progs)/len(progs), 1) if progs else 0.0
+    else:
+        nb = Cours.objects.filter(departement=dept).count()
+        base["nb_cours"] = nb
+
+    return base
+
 class CreerDepartementView(APIView):
+    """
+    POST /api/departements/creer/
+    Cree un departement enrichi selon le type du parcours parent.
+    """
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request):
         try:
@@ -3603,48 +3711,91 @@ class CreerDepartementView(APIView):
 
         if profile.user_type != 'enseignant_admin':
             return Response(
-                {"detail": "Accès réservé aux enseignants administrateurs."},
+                {"detail": "Acces reserve aux enseignants administrateurs."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
         nom = request.data.get('nom', '').strip()
         if not nom:
             return Response(
-                {"detail": "Le nom du département est obligatoire."},
+                {"detail": "Le nom du departement est obligatoire."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Résolution du parcours
         parcours_id = request.data.get('parcours_id')
         if parcours_id:
-            # Vérifier que ce parcours appartient à cet enseignant admin
             parcours = get_object_or_404(Parcours, pk=parcours_id, admin=profile)
         else:
-            # Auto-déduction si un seul parcours assigné
             parcours_qs = Parcours.objects.filter(admin=profile)
             if not parcours_qs.exists():
-                return Response(
-                    {"detail": "Aucun parcours ne vous est assigné."},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+                return Response({"detail": "Aucun parcours ne vous est assigne."}, status=403)
             if parcours_qs.count() > 1:
-                return Response(
-                    {
-                        "detail": "Vous gérez plusieurs parcours. "
-                                  "Veuillez spécifier 'parcours_id' dans la requête."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response({"detail": "Specificer parcours_id."}, status=400)
             parcours = parcours_qs.first()
 
-        departement = Departement.objects.create(nom=nom, parcours=parcours)
+        def _b(key, default=False):
+            v = request.data.get(key, default)
+            if isinstance(v, str): return v.lower() in ('true', '1', 'yes')
+            return bool(v)
+
+        def _i(key, default=0):
+            try: return int(request.data.get(key, default) or default)
+            except (ValueError, TypeError): return default
+
+        kwargs = {
+            'nom':         nom,
+            'parcours':    parcours,
+            'description': request.data.get('description', '').strip(),
+            'couleur':     request.data.get('couleur', '#2884A0'),
+            'prix':        _i('prix'),
+            'est_actif':   _b('est_actif', True),
+        }
+        if request.FILES.get('image'):
+            kwargs['image'] = request.FILES['image']
+
+        type_parc = parcours.type_parcours
+        if type_parc == 'prepa' or _b('est_prepa_concours'):
+            kwargs.update({
+                'est_prepa_concours':      True,
+                'nom_concours':            request.data.get('nom_concours', ''),
+                'organisme_concours':      request.data.get('organisme_concours', ''),
+                'date_limite_inscription': request.data.get('date_limite_inscription') or None,
+                'date_examen':             request.data.get('date_examen') or None,
+                'arrete_ministeriel':      request.data.get('arrete_ministeriel', ''),
+                'lien_officiel':           request.data.get('lien_officiel', ''),
+                'niveaux_cibles':          request.data.get('niveaux_cibles', ''),
+                'places_disponibles':      _i('places_disponibles') or None,
+                'frais_dossier':           _i('frais_dossier'),
+                'debouches':               request.data.get('debouches', ''),
+            })
+
+        if type_parc == 'formation' or _b('est_formation_metier') or _b('est_formation_classique'):
+            kwargs.update({
+                'est_formation_metier':    _b('est_formation_metier'),
+                'est_formation_classique': _b('est_formation_classique'),
+                'duree_formation':         request.data.get('duree_formation', ''),
+                'mode_formation':          request.data.get('mode_formation', 'hybride'),
+                'certificat_delivre':      request.data.get('certificat_delivre', ''),
+                'prerequis':               request.data.get('prerequis', ''),
+                'objectifs':               request.data.get('objectifs', ''),
+                'domaine':                 request.data.get('domaine', ''),
+                'ville':                   request.data.get('ville', ''),
+                'est_certifiante':         _b('est_certifiante'),
+            })
+
+        departement = Departement.objects.create(**kwargs)
+
+        enregistrer_activite(
+            user=request.user,
+            action='department_created',
+            description=f"Departement {departement.nom} cree dans {parcours.nom}",
+            data={'departement': departement.nom, 'parcours': parcours.nom},
+            objet_id=departement.id,
+            objet_type='Departement',
+        )
+
         return Response(
-            {
-                "id": departement.id,
-                "nom": departement.nom,
-                "parcours": parcours.nom,
-                "parcours_id": parcours.id,
-            },
+            _serialise_departement_detail(departement),
             status=status.HTTP_201_CREATED
         )
 
@@ -4000,194 +4151,98 @@ class HistoriqueStatsView(APIView):
 class ApprenantPrepaConcoursAPIView(APIView):
     """
     GET /api/apprenant/prepa-concours/
-    Retourne les départements (concours) du parcours Prépa Concours
-    de l'apprenant, groupés par département avec leurs cours.
-
-    Filtre : profile.cursus == nom du Parcours (ex: "Prépa Concours")
-    Même logique que ApprenantCursusAPIView.
+    Retourne les departements (concours) du parcours Prepa Concours
+    avec tous les champs enrichis (arrete, dates, places, etc.).
+    Filtre : parcours.type_parcours = 'prepa' et parcours.nom = profile.cursus
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         profile = _get_profile(request.user)
         if not profile or profile.user_type != 'apprenant':
-            return Response(
-                {"detail": "Accès réservé aux apprenants."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"detail": "Acces reserve aux apprenants."}, status=403)
 
-        # Filtre identique à ApprenantCursusAPIView : profile.cursus = nom du Parcours
         if not profile.cursus:
-            return Response([], status=status.HTTP_200_OK)
+            return Response([], status=200)
 
-        cours_qs = Cours.objects.filter(
-            departement__parcours__nom=profile.cursus
-        ).select_related(
+        # Tous les departements du parcours dont le nom correspond au cursus ET type=prepa
+        # OU simplement le parcours dont le nom = profile.cursus
+        depts = Departement.objects.filter(
+            parcours__nom=profile.cursus,
+            est_actif=True,
+        ).select_related('parcours', 'cadre__user').order_by('nom')
+
+        if not depts.exists():
+            # Fallback: chercher n'importe quel parcours de type prepa
+            depts = Departement.objects.filter(
+                parcours__type_parcours='prepa',
+                est_actif=True,
+            ).select_related('parcours', 'cadre__user').order_by('nom')
+
+        cours_qs = Cours.objects.filter(departement__in=depts).select_related(
             'enseignant_principal__user', 'departement__parcours'
-        ).order_by('departement__nom', 'titre')
-
-        if not cours_qs.exists():
-            return Response([], status=status.HTTP_200_OK)
-
+        )
         prog_map = _progression_cours(request.user, cours_qs)
 
-        # Grouper par département (= concours)
-        departements = {}
-        for c in cours_qs:
-            dept = c.departement
-            if dept.id not in departements:
-                cadre_data = None
-                if dept.cadre:
-                    cadre_data = {
-                        "id":  dept.cadre.id,
-                        "nom": _nom_profil(dept.cadre),
-                    }
-                departements[dept.id] = {
-                    "id":       dept.id,
-                    "nom":      dept.nom,
-                    "cadre":    cadre_data,
-                    "cours":    [],
-                    "nb_cours": 0,
-                    "progression_moyenne": 0.0,
-                }
-            departements[dept.id]["cours"].append(_serialise_cours(c, prog_map))
-
-        # Calculer la progression moyenne par département
         result = []
-        for dept_data in departements.values():
-            progs = [c["progression"] for c in dept_data["cours"]]
-            dept_data["progression_moyenne"] = round(
-                sum(progs) / len(progs), 1
-            ) if progs else 0.0
-            dept_data["nb_cours"] = len(dept_data["cours"])
-            result.append(dept_data)
+        for dept in depts:
+            d = _serialise_departement_detail(dept, prog_map=prog_map, include_cours=True, user=request.user)
+            result.append(d)
 
-        return Response(result, status=status.HTTP_200_OK)
+        return Response(result, status=200)
 
-
-# ══════════════════════════════════════════════════════════════════
-# APPRENANT — FORMATIONS
-# GET /api/apprenant/formations/
-#
-# Même logique que Prépa Concours et ApprenantCursusAPIView.
-# Filtre par profile.cursus = nom du Parcours.
-# Paramètre optionnel ?parcours= pour charger un parcours spécifique
-# (ex: "Formations Classiques" ou "Formations Métiers").
-# ══════════════════════════════════════════════════════════════════
 
 class ApprenantFormationsAPIView(APIView):
     """
-    Retourne les départements (formations) du parcours de l'apprenant,
-    groupés par département avec leurs cours.
-
-    Filtre : profile.cursus == nom du Parcours
-    Paramètre optionnel ?parcours=<nom> pour forcer un parcours spécifique.
+    GET /api/apprenant/formations/
+    Retourne les departements (formations) avec champs enrichis.
+    Parametre optionnel: ?type=metier|classique|all
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         profile = _get_profile(request.user)
         if not profile or profile.user_type != 'apprenant':
-            return Response(
-                {"detail": "Accès réservé aux apprenants."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"detail": "Acces reserve aux apprenants."}, status=403)
 
-        # Filtre identique à ApprenantCursusAPIView : profile.cursus = nom du Parcours
-        # Paramètre optionnel ?parcours= pour afficher un sous-parcours spécifique
+        type_filter = request.query_params.get('type', 'all')
         nom_parcours = request.query_params.get('parcours', profile.cursus)
 
-        if not nom_parcours:
-            return Response([], status=status.HTTP_200_OK)
+        qs = Departement.objects.filter(est_actif=True).select_related('parcours', 'cadre__user')
 
-        cours_qs = Cours.objects.filter(
-            departement__parcours__nom=nom_parcours
-        ).select_related(
-            'enseignant_principal__user', 'departement__parcours'
-        ).order_by('departement__nom', 'titre')
+        if nom_parcours:
+            qs = qs.filter(parcours__nom=nom_parcours)
+        else:
+            # Tous les parcours de type formation
+            qs = qs.filter(parcours__type_parcours='formation')
 
-        if not cours_qs.exists():
-            return Response([], status=status.HTTP_200_OK)
+        if type_filter == 'metier':
+            qs = qs.filter(est_formation_metier=True)
+        elif type_filter == 'classique':
+            qs = qs.filter(est_formation_classique=True)
 
+        qs = qs.order_by('nom')
+
+        if not qs.exists():
+            return Response([], status=200)
+
+        cours_qs = Cours.objects.filter(departement__in=qs).select_related('enseignant_principal__user')
         prog_map = _progression_cours(request.user, cours_qs)
 
-        departements = {}
-        for c in cours_qs:
-            dept = c.departement
-            if dept.id not in departements:
-                cadre_data = None
-                if dept.cadre:
-                    cadre_data = {
-                        "id":    dept.cadre.id,
-                        "nom":   _nom_profil(dept.cadre),
-                        "email": dept.cadre.user.email,
-                    }
-                departements[dept.id] = {
-                    "id":                 dept.id,
-                    "nom":                dept.nom,
-                    "parcours_nom":       dept.parcours.nom if dept.parcours else '',
-                    "cadre":              cadre_data,
-                    "cours":              [],
-                    "nb_cours":           0,
-                    "progression_moyenne": 0.0,
-                }
-            departements[dept.id]["cours"].append(_serialise_cours(c, prog_map))
+        result = [_serialise_departement_detail(d, prog_map=prog_map, include_cours=True, user=request.user) for d in qs]
+        return Response(result, status=200)
 
-        result = []
-        for dept_data in departements.values():
-            progs = [c["progression"] for c in dept_data["cours"]]
-            dept_data["progression_moyenne"] = round(
-                sum(progs) / len(progs), 1
-            ) if progs else 0.0
-            dept_data["nb_cours"] = len(dept_data["cours"])
-            result.append(dept_data)
-
-        return Response(result, status=status.HTTP_200_OK)
-
-
-# ══════════════════════════════════════════════════════════════════
-# APPRENANT — DÉTAIL D'UN DÉPARTEMENT
-# GET /api/apprenant/departement/<pk>/
-# ══════════════════════════════════════════════════════════════════
 
 class ApprenantDepartementDetailView(APIView):
-    """Détail d'un département (concours ou formation) avec ses cours."""
+    """GET /api/apprenant/departement/<pk>/ — detail complet"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        dept = get_object_or_404(Departement, pk=pk)
-        cours_qs = Cours.objects.filter(
-            departement=dept
-        ).select_related('enseignant_principal__user')
-
+        dept = get_object_or_404(Departement, pk=pk, est_actif=True)
+        cours_qs = Cours.objects.filter(departement=dept).select_related('enseignant_principal__user')
         prog_map = _progression_cours(request.user, cours_qs)
+        return Response(_serialise_departement_detail(dept, prog_map=prog_map, include_cours=True, user=request.user))
 
-        cadre_data = None
-        if dept.cadre:
-            cadre_data = {
-                "id":  dept.cadre.id,
-                "nom": _nom_profil(dept.cadre),
-            }
-
-        return Response({
-            "id":          dept.id,
-            "nom":         dept.nom,
-            "parcours":    {"id": dept.parcours.id, "nom": dept.parcours.nom},
-            "cadre":       cadre_data,
-            "nb_cours":    cours_qs.count(),
-            "cours":       [_serialise_cours(c, prog_map) for c in cours_qs],
-        })
-
-
-# ══════════════════════════════════════════════════════════════════
-# OLYMPIADES — FILTRÉES POUR L'APPRENANT
-# GET /api/olympiades/pour-moi/
-#
-# Retourne les olympiades dont le cadre organisateur appartient
-# au même parcours que l'apprenant (via sub_cursus ou un parcours
-# "Olympiades" dédié).
-# Seules les olympiades avec Devoir.est_publie=True sont visibles.
-# ══════════════════════════════════════════════════════════════════
 
 class OlympiadesPourMoiView(APIView):
     """
@@ -4835,7 +4890,6 @@ def _appeler_openai(system_prompt: str, question: str) -> tuple[str, int]:
     Appelle l'API OpenAI et retourne (réponse_texte, tokens_utilisés).
     En cas d'erreur ou si la clé est absente, retourne une réponse de secours.
     """
-    import openai as _openai
 
     api_key = os.environ.get('OPENAI_API_KEY', '')
     if not api_key:
@@ -4845,9 +4899,9 @@ def _appeler_openai(system_prompt: str, question: str) -> tuple[str, int]:
             0,
         )
 
-    _openai.api_key = api_key
+    openai.api_key = api_key
     try:
-        response = _openai.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4o-mini",
             max_tokens=800,
             messages=[
@@ -4983,6 +5037,141 @@ class YekiIAChatView(APIView):
 # Extension du dashboard existant (EnseignantAdminDashboardView)
 # qui ajoute les olympiades en attente et les stats de formations.
 # ══════════════════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════════════════════════
+# YEKI IA — CHAT PRIVÉ AVEC HISTORIQUE
+# GET  /api/ia/cours/<cours_id>/historique/   → historique messages
+# POST /api/ia/cours/<cours_id>/chat/         → envoyer message + réponse IA
+# DELETE /api/ia/cours/<cours_id>/historique/ → effacer conversation
+# ══════════════════════════════════════════════════════════════════
+
+class YekiIAChatHistoriqueView(APIView):
+    """GET /api/ia/cours/<cours_id>/historique/ — historique de la conversation"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+        messages = YekiIAChatHistorique.objects.filter(
+            apprenant=request.user, cours=cours
+        ).order_by('cree_le')[:100]
+
+        from django.conf import settings
+        def img_url(img):
+            if not img: return None
+            try: return request.build_absolute_uri(settings.MEDIA_URL + str(img))
+            except: return None
+
+        return Response([{
+            'id':           m.id,
+            'role':         m.role,
+            'contenu':      m.contenu,
+            'source':       m.source,
+            'source_id':    m.source_id,
+            'source_titre': m.source_titre,
+            'image_url':    img_url(m.image),
+            'cree_le':      m.cree_le.isoformat(),
+        } for m in messages])
+
+    def delete(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+        YekiIAChatHistorique.objects.filter(
+            apprenant=request.user, cours=cours).delete()
+        return Response({'detail': 'Conversation effacee.'})
+
+
+class YekiIAChatAvecHistoriqueView(APIView):
+    """
+    POST /api/ia/cours/<cours_id>/chat/
+    Body: {
+      message: str,
+      source: 'lecon'|'exercice'|'devoir'|'libre',
+      source_id: int (optionnel),
+      source_titre: str (optionnel),
+    }
+    Multipart: image (optionnel)
+    Retourne: { reponse, message_id, assistant_id }
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+        message = (request.data.get('message') or '').strip()
+        if not message:
+            return Response({'detail': 'message requis.'}, status=400)
+
+        source       = request.data.get('source', 'libre')
+        source_id    = request.data.get('source_id')
+        source_titre = request.data.get('source_titre', '')
+        image_file   = request.FILES.get('image')
+
+        # Sauvegarder le message utilisateur
+        user_msg = YekiIAChatHistorique.objects.create(
+            apprenant    = request.user,
+            cours        = cours,
+            role         = 'user',
+            contenu      = message,
+            source       = source,
+            source_id    = source_id,
+            source_titre = source_titre,
+            image        = image_file,
+        )
+
+        # Construire l'historique pour l'IA (max 20 derniers messages)
+        historique = YekiIAChatHistorique.objects.filter(
+            apprenant=request.user, cours=cours
+        ).order_by('-cree_le')[:20]
+        historique_liste = list(reversed(historique))
+
+        # Personnalité IA
+        personnalite  = _get_ia_personnalite(cours=cours)
+        system_prompt = personnalite.build_system_prompt()
+
+        # Contexte source
+        if source != 'libre' and source_titre:
+            system_prompt += f"\n\nContexte : L'apprenant pose cette question depuis {source} : {source_titre}."
+
+        # Construire messages pour OpenAI
+        messages_openai = [{'role': 'system', 'content': system_prompt}]
+        for h in historique_liste[:-1]:  # tout sauf le dernier (qu'on vient d'ajouter)
+            messages_openai.append({'role': h.role, 'content': h.contenu})
+        messages_openai.append({'role': 'user', 'content': message})
+
+        # Appel OpenAI
+        try:
+            client = openai.OpenAI(api_key=os.environ.get('OPENAI_API_KEY', ''))
+            completion = client.chat.completions.create(
+                model='gpt-3.5-turbo',
+                messages=messages_openai,
+                max_tokens=600,
+                temperature=0.7,
+            )
+            texte_ia = completion.choices[0].message.content or ''
+            tokens   = completion.usage.total_tokens if completion.usage else 0
+        except Exception as e:
+            texte_ia = 'Yeki IA : Désolé, une erreur est survenue. Réessayez dans quelques instants.'
+            tokens   = 0
+
+        if not texte_ia.startswith('Yeki IA :'):
+            texte_ia = f'Yeki IA : {texte_ia}'
+
+        # Sauvegarder la réponse IA
+        assistant_msg = YekiIAChatHistorique.objects.create(
+            apprenant = request.user,
+            cours     = cours,
+            role      = 'assistant',
+            contenu   = texte_ia,
+            tokens    = tokens,
+        )
+
+        return Response({
+            'reponse':      texte_ia,
+            'message_id':   user_msg.id,
+            'assistant_id': assistant_msg.id,
+            'tokens':       tokens,
+        })
+
 
 class EnseignantAdminDashboardEnrichiView(APIView):
     """

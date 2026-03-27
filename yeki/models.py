@@ -84,8 +84,23 @@ class PasswordResetOTP(models.Model):
 # --- NIVEAU 1 ---
 
 class Parcours(models.Model):
-    nom = models.CharField(max_length=100)
-    admin = models.ForeignKey(
+    """
+    Parcours de haut niveau créé par l'admin général.
+    Exemples : "Cursus Universitaire", "Prépa Concours", "Formations", etc.
+    """
+    TYPE_CHOICES = [
+        ('cursus',      'Cursus scolaire / universitaire'),
+        ('prepa',       'Prépa Concours'),
+        ('formation',   'Formations professionnelles'),
+        ('autre',       'Autre'),
+    ]
+    nom         = models.CharField(max_length=100)
+    type_parcours = models.CharField(
+        max_length=20, choices=TYPE_CHOICES, default='autre',
+        help_text="Nature du parcours pour guider l'affichage"
+    )
+    description = models.TextField(blank=True)
+    admin       = models.ForeignKey(
         Profile,
         on_delete=models.SET_NULL,
         null=True,
@@ -93,26 +108,164 @@ class Parcours(models.Model):
         limit_choices_to={'user_type': 'enseignant_admin'},
         related_name='parcours_admin'
     )
+    created_at  = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.nom} ({self.admin})"
+        return f"{self.nom} ({self.get_type_parcours_display()})"
 
 
 # --- NIVEAU 2 ---
 class Departement(models.Model):
-    nom = models.CharField(max_length=100)
-    parcours = models.ForeignKey(Parcours, on_delete=models.CASCADE, related_name="departements")
-    cadre = models.ForeignKey(
+    """
+    Département / filière dans un Parcours.
+    Selon le type de parcours parent, des champs supplémentaires s'activent :
+      - Prépa Concours → date_limite_inscription, arrete_ministeriel, etc.
+      - Formation       → est_formation_metier, est_formation_classique, duree_formation, etc.
+      - Cursus          → champs de base uniquement
+    """
+
+    # ── Identité ──────────────────────────────────────────────────
+    nom       = models.CharField(max_length=200)
+    parcours  = models.ForeignKey(
+        Parcours, on_delete=models.CASCADE, related_name="departements"
+    )
+    cadre     = models.ForeignKey(
         Profile,
         on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
+        null=True, blank=True,
         limit_choices_to={'user_type': 'enseignant_cadre'},
         related_name='departements_cadre'
     )
 
+    # ── Présentation visuelle (tous les types) ────────────────────
+    description = models.TextField(blank=True, help_text="Description détaillée")
+    image       = models.ImageField(
+        upload_to='departements/images/',
+        null=True, blank=True,
+        help_text="Image de couverture du département"
+    )
+    couleur     = models.CharField(
+        max_length=7, default='#2884A0',
+        help_text="Couleur principale #RRGGBB"
+    )
+    est_actif   = models.BooleanField(
+        default=True,
+        help_text="Visible aux apprenants si True"
+    )
+    prix        = models.PositiveIntegerField(
+        default=0,
+        help_text="Prix d'accès en FCFA (0 = gratuit)"
+    )
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    # ── CHAMPS PRÉPA CONCOURS ──────────────────────────────────────
+    # Activés quand parcours.type_parcours == 'prepa'
+    est_prepa_concours      = models.BooleanField(
+        default=False,
+        help_text="True = ce département est un concours à préparer"
+    )
+    nom_concours            = models.CharField(
+        max_length=255, blank=True,
+        help_text="Nom officiel du concours (ex: ENS, Polytechnique, BEPC…)"
+    )
+    organisme_concours      = models.CharField(
+        max_length=255, blank=True,
+        help_text="Organisme/institution organisateur"
+    )
+    date_limite_inscription = models.DateField(
+        null=True, blank=True,
+        help_text="Date limite d'inscription au concours"
+    )
+    date_examen             = models.DateField(
+        null=True, blank=True,
+        help_text="Date prévue de l'examen / concours"
+    )
+    arrete_ministeriel      = models.CharField(
+        max_length=255, blank=True,
+        help_text="Référence de l'arrêté ministériel d'organisation"
+    )
+    lien_officiel           = models.URLField(
+        blank=True,
+        help_text="Site officiel du concours"
+    )
+    niveaux_cibles          = models.CharField(
+        max_length=255, blank=True,
+        help_text="Niveaux ciblés ex: Terminale, Licence 3, Master 1"
+    )
+    places_disponibles      = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Nombre de places au concours (null = non précisé)"
+    )
+    frais_dossier           = models.PositiveIntegerField(
+        default=0,
+        help_text="Frais de dossier officiels en FCFA"
+    )
+    debouches               = models.TextField(
+        blank=True,
+        help_text="Débouchés après réussite du concours"
+    )
+
+    # ── CHAMPS FORMATION ──────────────────────────────────────────
+    # Activés quand parcours.type_parcours == 'formation'
+    est_formation_metier    = models.BooleanField(
+        default=False,
+        help_text="True = formation orientée compétences métier"
+    )
+    est_formation_classique = models.BooleanField(
+        default=False,
+        help_text="True = formation académique classique (université, grande école…)"
+    )
+    duree_formation         = models.CharField(
+        max_length=100, blank=True,
+        help_text="Ex: 6 mois, 2 ans, 200 heures…"
+    )
+    mode_formation          = models.CharField(
+        max_length=20,
+        choices=[('presentiel','Présentiel'),('distance','À distance'),('hybride','Hybride')],
+        default='hybride', blank=True,
+        help_text="Mode de diffusion"
+    )
+    certificat_delivre      = models.CharField(
+        max_length=255, blank=True,
+        help_text="Certificat / diplôme délivré à la fin"
+    )
+    prerequis               = models.TextField(
+        blank=True,
+        help_text="Prérequis pour intégrer la formation"
+    )
+    objectifs               = models.TextField(
+        blank=True,
+        help_text="Objectifs pédagogiques de la formation"
+    )
+    domaine                 = models.CharField(
+        max_length=255, blank=True,
+        help_text="Domaine professionnel (Informatique, Gestion, Santé…)"
+    )
+    ville                   = models.CharField(
+        max_length=100, blank=True,
+        help_text="Ville principale où se déroule la formation"
+    )
+    est_certifiante         = models.BooleanField(
+        default=False,
+        help_text="True si la formation délivre un certificat reconnu"
+    )
+
+    class Meta:
+        ordering = ['parcours', 'nom']
+
     def __str__(self):
-        return f"{self.nom} ({self.parcours.nom}. cadre: {self.cadre})"
+        return f"{self.nom} ({self.parcours.nom} | cadre: {self.cadre})"
+
+    @property
+    def type_departement(self):
+        """Retourne le type logique du département."""
+        if self.est_prepa_concours:
+            return 'prepa_concours'
+        if self.est_formation_metier:
+            return 'formation_metier'
+        if self.est_formation_classique:
+            return 'formation_classique'
+        return 'cursus'
 
     # ✅ Seul un enseignant_admin peut créer un département
     @staticmethod
@@ -1172,6 +1325,52 @@ class YekiIAPersonalite(models.Model):
             "la réponse brute.\n"
         )
         return prompt
+
+
+
+
+# ══════════════════════════════════════════════════════════════════
+# YEKI IA — HISTORIQUE DES CONVERSATIONS PRIVÉES
+# Une conversation par (apprenant, cours)
+# ══════════════════════════════════════════════════════════════════
+
+class YekiIAChatHistorique(models.Model):
+    """
+    Message dans la conversation privée apprenant ↔ Yeki IA,
+    dans le contexte d'un cours.
+    """
+    ROLE_CHOICES = [('user', 'Apprenant'), ('assistant', 'Yeki IA')]
+
+    apprenant   = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='ia_chat_historique'
+    )
+    cours       = models.ForeignKey(
+        Cours, on_delete=models.CASCADE,
+        related_name='ia_chat_messages'
+    )
+    role        = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    contenu     = models.TextField()
+    # Source optionnelle (lecon, exercice, devoir)
+    source      = models.CharField(
+        max_length=20, blank=True,
+        help_text="lecon | exercice | devoir | libre"
+    )
+    source_id   = models.IntegerField(null=True, blank=True)
+    source_titre = models.CharField(max_length=255, blank=True)
+    # Image jointe (optionnel)
+    image       = models.ImageField(
+        upload_to='ia_chat_images/', null=True, blank=True
+    )
+    cree_le     = models.DateTimeField(auto_now_add=True)
+    tokens      = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['cree_le']
+        verbose_name = 'Message IA Chat'
+
+    def __str__(self):
+        return f"[{self.role}] {self.apprenant.username} — {self.cours.titre} — {self.cree_le:%d/%m %H:%M}"
 
 
 class YekiIAMessage(models.Model):
