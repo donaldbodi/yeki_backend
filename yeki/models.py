@@ -1386,7 +1386,7 @@ class YekiWallet(models.Model):
         )
         return True
 
-    @transaction.atomic
+    @translation.atomic
     def crediter(self, montant: int, description: str = '', reference: str = ''):
         self.solde          += montant
         self.total_recharge += montant
