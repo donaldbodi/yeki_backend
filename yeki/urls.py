@@ -256,6 +256,13 @@ urlpatterns = [
         name='ia-chat',
     ),
 
+
+    # ── WALLET — PORTEFEUILLE YEKI ────────────────────────────────
+    path('wallet/solde/',        WalletSoldeView.as_view(),     name='wallet-solde'),
+    path('wallet/recharger/',    WalletRechargerView.as_view(), name='wallet-recharger'),
+    path('wallet/payer/',        WalletPayerView.as_view(),     name='wallet-payer'),
+    path('wallet/verifier-iap/', WalletVerifierIAPView.as_view(), name='wallet-verifier-iap'),
+
     # ── ADMIN : Dashboard enrichi ─────────────────────────────────
     # Extension du dashboard existant avec olympiades + formations
     path(

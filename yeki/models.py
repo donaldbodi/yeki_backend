@@ -1,3 +1,5 @@
+from gettext import translation
+
 from django.db import models
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.auth.models import User
@@ -1333,6 +1335,120 @@ class YekiIAPersonalite(models.Model):
 # YEKI IA — HISTORIQUE DES CONVERSATIONS PRIVÉES
 # Une conversation par (apprenant, cours)
 # ══════════════════════════════════════════════════════════════════
+
+
+
+# ══════════════════════════════════════════════════════════════════
+# YEKI WALLET — PORTEFEUILLE UTILISATEUR
+# Chaque utilisateur possède un portefeuille rechargeable.
+# Sert à payer : IA (débit auto), cours, formations, olympiades.
+# La commission Yeki (IA) va dans le compte principal Yeki.
+# ══════════════════════════════════════════════════════════════════
+
+# Tarification IA Yeki
+TARIF_IA_PAR_TOKEN = 0.002          # 0.002 FCFA par token OpenAI (gpt-3.5-turbo)
+COMMISSION_YEKI_IA = 5              # 5 FCFA commission Yeki par requête IA
+TARIF_IA_MIN_PAR_REQUETE = 10       # minimum 10 FCFA par requête IA
+
+
+class YekiWallet(models.Model):
+    """Portefeuille rechargeable de l'utilisateur."""
+    utilisateur = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name='wallet'
+    )
+    solde       = models.PositiveIntegerField(
+        default=0, help_text="Solde en FCFA"
+    )
+    total_recharge  = models.PositiveIntegerField(default=0)
+    total_depense   = models.PositiveIntegerField(default=0)
+    cree_le         = models.DateTimeField(auto_now_add=True)
+    modifie_le      = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Portefeuille Yéki'
+
+    def __str__(self):
+        return f"{self.utilisateur.username} — {self.solde} FCFA"
+
+    def peut_debiter(self, montant: int) -> bool:
+        return self.solde >= montant
+
+    @translation.atomic
+    def debiter(self, montant: int, description: str = '') -> bool:
+        if not self.peut_debiter(montant):
+            return False
+        self.solde          -= montant
+        self.total_depense  += montant
+        self.save(update_fields=['solde', 'total_depense', 'modifie_le'])
+        WalletTransaction.objects.create(
+            wallet=self, type_transaction='debit',
+            montant=montant, description=description
+        )
+        return True
+
+    @transaction.atomic
+    def crediter(self, montant: int, description: str = '', reference: str = ''):
+        self.solde          += montant
+        self.total_recharge += montant
+        self.save(update_fields=['solde', 'total_recharge', 'modifie_le'])
+        WalletTransaction.objects.create(
+            wallet=self, type_transaction='credit',
+            montant=montant, description=description,
+            reference_paiement=reference,
+        )
+
+    @classmethod
+    def get_or_create_wallet(cls, user):
+        wallet, _ = cls.objects.get_or_create(utilisateur=user)
+        return wallet
+
+
+class WalletTransaction(models.Model):
+    """Historique des mouvements du portefeuille."""
+    TYPE_CHOICES = [
+        ('credit', 'Crédit (recharge)'),
+        ('debit',  'Débit (dépense)'),
+    ]
+    wallet             = models.ForeignKey(
+        YekiWallet, on_delete=models.CASCADE, related_name='transactions'
+    )
+    type_transaction   = models.CharField(max_length=10, choices=TYPE_CHOICES)
+    montant            = models.PositiveIntegerField()
+    description        = models.CharField(max_length=255, blank=True)
+    reference_paiement = models.CharField(max_length=100, blank=True)
+    cree_le            = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-cree_le']
+        verbose_name = 'Transaction Wallet'
+
+    def __str__(self):
+        sign = '+' if self.type_transaction == 'credit' else '-'
+        return f"{sign}{self.montant} FCFA — {self.description}"
+
+
+class YekiCompteIA(models.Model):
+    """
+    Compte central Yeki alimenté par les commissions sur l'IA.
+    Singleton (id=1). Consultation admin uniquement.
+    """
+    total_commissions = models.PositiveIntegerField(default=0)
+    nb_requetes_ia    = models.PositiveIntegerField(default=0)
+    modifie_le        = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Compte Central Yéki IA'
+
+    @classmethod
+    def crediter_commission(cls, montant: int):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        obj.total_commissions += montant
+        obj.nb_requetes_ia    += 1
+        obj.save(update_fields=['total_commissions', 'nb_requetes_ia', 'modifie_le'])
+
+    def __str__(self):
+        return f"Compte Yéki IA — {self.total_commissions} FCFA ({self.nb_requetes_ia} requêtes)"
+
 
 class YekiIAChatHistorique(models.Model):
     """

@@ -4890,6 +4890,7 @@ def _appeler_openai(system_prompt: str, question: str) -> tuple[str, int]:
     Appelle l'API OpenAI et retourne (réponse_texte, tokens_utilisés).
     En cas d'erreur ou si la clé est absente, retourne une réponse de secours.
     """
+    import openai as _openai
 
     api_key = os.environ.get('OPENAI_API_KEY', '')
     if not api_key:
@@ -4899,9 +4900,9 @@ def _appeler_openai(system_prompt: str, question: str) -> tuple[str, int]:
             0,
         )
 
-    openai.api_key = api_key
+    _openai.api_key = api_key
     try:
-        response = openai.chat.completions.create(
+        response = _openai.chat.completions.create(
             model="gpt-4o-mini",
             max_tokens=800,
             messages=[
@@ -5030,6 +5031,322 @@ class YekiIAChatView(APIView):
         })
 
 
+
+# ══════════════════════════════════════════════════════════════════
+# WALLET — PORTEFEUILLE YEKI
+# GET  /api/wallet/solde/            → solde + historique
+# POST /api/wallet/recharger/        → recharge via Google Play IAP ou Mobile Money
+# POST /api/wallet/payer/            → payer cours/formation/olympiade depuis wallet
+# POST /api/wallet/verifier-iap/     → webhook Google Play purchase verification
+# ══════════════════════════════════════════════════════════════════
+
+# Prix IA
+TARIF_IA_FCFA_PAR_1K_TOKENS = 2    # 2 FCFA par 1000 tokens
+COMMISSION_YEKI_IA_FCFA      = 5   # 5 FCFA commission fixe par requête
+TARIF_IA_MIN                 = 10  # minimum 10 FCFA par requête
+
+
+def _calculer_cout_ia(tokens: int) -> int:
+    """Calcule le coût d'une requête IA en FCFA."""
+    cout_tokens = max(1, round(tokens * TARIF_IA_FCFA_PAR_1K_TOKENS / 1000))
+    return max(TARIF_IA_MIN, cout_tokens + COMMISSION_YEKI_IA_FCFA)
+
+
+class WalletSoldeView(APIView):
+    """GET /api/wallet/solde/ — solde et historique des transactions"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        wallet = YekiWallet.get_or_create_wallet(request.user)
+        transactions = wallet.transactions.all()[:30]
+        return Response({
+            'solde':    wallet.solde,
+            'total_recharge': wallet.total_recharge,
+            'total_depense':  wallet.total_depense,
+            'transactions': [{
+                'id':          t.id,
+                'type':        t.type_transaction,
+                'montant':     t.montant,
+                'description': t.description,
+                'cree_le':     t.cree_le.isoformat(),
+            } for t in transactions],
+        })
+
+
+class WalletRechargerView(APIView):
+    """
+    POST /api/wallet/recharger/
+    Body: {
+      "moyen": "google_play" | "mtn_momo" | "orange_om",
+      "montant": 5000,                        ← pour Mobile Money
+      "purchase_token": "...",                 ← pour Google Play
+      "sku": "yeki_recharge_5000",             ← pour Google Play
+      "telephone": "6XXXXXXXX"                 ← pour Mobile Money
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser]
+
+    # SKUs Google Play → montants (FCFA)
+    GOOGLE_PLAY_SKUS = {
+        'yeki_recharge_1000':  1000,
+        'yeki_recharge_2000':  2000,
+        'yeki_recharge_5000':  5000,
+        'yeki_recharge_10000': 10000,
+        'yeki_recharge_20000': 20000,
+        'yeki_premium_1500':   1500,  # Abonnement mensuel
+        'yeki_premium_13000':  13000, # Abonnement annuel
+    }
+
+    def post(self, request):
+        moyen = request.data.get('moyen', '').strip()
+
+        if moyen == 'google_play':
+            return self._google_play(request)
+        elif moyen in ('mtn_momo', 'orange_om'):
+            return self._mobile_money(request, moyen)
+        else:
+            return Response({'detail': 'moyen invalide. Valeurs: google_play, mtn_momo, orange_om'}, status=400)
+
+    def _google_play(self, request):
+        """Vérification d'un achat Google Play et crédit du wallet."""
+        purchase_token = request.data.get('purchase_token', '').strip()
+        sku            = request.data.get('sku', '').strip()
+        package_name   = 'com.yeki.app'
+
+        if not purchase_token or not sku:
+            return Response({'detail': 'purchase_token et sku requis.'}, status=400)
+
+        if sku not in self.GOOGLE_PLAY_SKUS:
+            return Response({'detail': f'SKU inconnu: {sku}'}, status=400)
+
+        montant = self.GOOGLE_PLAY_SKUS[sku]
+
+        # ── Vérification Google Play Developer API ──────────────
+        try:
+            valide, message = self._verifier_google_play_purchase(
+                package_name, sku, purchase_token
+            )
+        except Exception as e:
+            return Response({'detail': f'Erreur vérification Google Play: {e}'}, status=500)
+
+        if not valide:
+            return Response({'detail': f'Achat Google Play invalide: {message}'}, status=402)
+
+        # Vérifier que ce token n'a pas déjà été utilisé (anti-replay)
+        if WalletTransaction.objects.filter(reference_paiement=purchase_token).exists():
+            return Response({'detail': 'Cet achat a déjà été enregistré.'}, status=400)
+
+        wallet = YekiWallet.get_or_create_wallet(request.user)
+
+        # SKU abonnement Premium → activer l'abonnement
+        if 'premium' in sku:
+            type_abo = 'mensuel' if '1500' in sku else 'annuel'
+            paiement = Paiement.objects.create(
+                utilisateur=request.user, type_paiement=f'abonnement_{type_abo}',
+                moyen='google_play', montant=montant, statut='succes',
+                transaction_id=purchase_token,
+            )
+            jours = 30 if type_abo == 'mensuel' else 365
+            try:
+                abo = request.user.abonnement
+                abo.renouveler(type_abo)
+                abo.paiement = paiement
+                abo.save()
+            except AbonnementPremium.DoesNotExist:
+                AbonnementPremium.objects.create(
+                    utilisateur=request.user, type_abonnement=type_abo,
+                    actif=True, fin=timezone.now() + timedelta(days=jours),
+                    paiement=paiement,
+                )
+            return Response({
+                'statut': 'succes',
+                'detail': f'Abonnement {type_abo} activé.',
+                'montant': montant,
+            })
+
+        # SKU recharge → créditer le wallet
+        wallet.crediter(
+            montant=montant,
+            description=f'Recharge Google Play ({sku})',
+            reference=purchase_token,
+        )
+
+        return Response({
+            'statut':       'succes',
+            'solde':        wallet.solde,
+            'montant':      montant,
+            'detail':       f'Wallet rechargé de {montant} FCFA.',
+            'sku':          sku,
+        })
+
+    def _verifier_google_play_purchase(self, package_name: str, sku: str, purchase_token: str):
+        """
+        Vérifie un achat via Google Play Developer API.
+        Nécessite : GOOGLE_SERVICE_ACCOUNT_JSON dans les settings.
+        """
+        from django.conf import settings
+        import json, requests
+
+        service_account_json = getattr(settings, 'GOOGLE_SERVICE_ACCOUNT_JSON', None)
+
+        # En mode DEBUG sans credentials → simuler succès
+        if settings.DEBUG and not service_account_json:
+            return True, "Mode DEBUG — achat simulé"
+
+        if not service_account_json:
+            raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON non configuré")
+
+        try:
+            from google.oauth2 import service_account
+            from googleapiclient.discovery import build
+
+            creds_dict = json.loads(service_account_json) if isinstance(service_account_json, str) else service_account_json
+            creds = service_account.Credentials.from_service_account_info(
+                creds_dict,
+                scopes=['https://www.googleapis.com/auth/androidpublisher']
+            )
+            service = build('androidpublisher', 'v3', credentials=creds)
+
+            # Pour un produit consommable (recharge)
+            result = service.purchases().products().get(
+                packageName=package_name,
+                productId=sku,
+                token=purchase_token,
+            ).execute()
+
+            # purchaseState: 0 = acheté, 1 = annulé
+            if result.get('purchaseState') == 0:
+                return True, "Achat valide"
+            else:
+                return False, f"État achat: {result.get('purchaseState')}"
+        except Exception as e:
+            return False, str(e)
+
+    def _mobile_money(self, request, moyen):
+        """Recharge via MTN MoMo ou Orange Money."""
+        from django.conf import settings
+        montant   = request.data.get('montant')
+        telephone = request.data.get('telephone', '').strip()
+
+        try:
+            montant = int(montant)
+            if montant < 500:
+                return Response({'detail': 'Montant minimum: 500 FCFA'}, status=400)
+        except (TypeError, ValueError):
+            return Response({'detail': 'Montant invalide'}, status=400)
+
+        if not telephone:
+            return Response({'detail': 'telephone requis'}, status=400)
+
+        # En mode DEBUG → simuler le succès
+        if settings.DEBUG:
+            wallet = YekiWallet.get_or_create_wallet(request.user)
+            ref = f"SIM-{uuid.uuid4().hex[:10].upper()}"
+            wallet.crediter(
+                montant=montant,
+                description=f'Recharge {moyen.upper()} (simulation)',
+                reference=ref,
+            )
+            return Response({
+                'statut': 'succes',
+                'solde':  wallet.solde,
+                'montant': montant,
+                'reference': ref,
+                'detail': f'Wallet rechargé de {montant} FCFA (simulation DEBUG).',
+            })
+
+        # En production → intégrer SDK MTN / Orange
+        return Response({
+            'detail': 'Intégration Mobile Money non configurée. Contactez le support.',
+        }, status=503)
+
+
+class WalletPayerView(APIView):
+    """
+    POST /api/wallet/payer/
+    Body: {
+      "type": "cours"|"formation"|"olympiade"|"ia",
+      "objet_id": 5,
+      "montant": 2000
+    }
+    Débite le wallet de l'utilisateur.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        type_achat = request.data.get('type', '').strip()
+        objet_id   = request.data.get('objet_id')
+        montant    = request.data.get('montant')
+
+        try:
+            montant = int(montant)
+            if montant <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({'detail': 'Montant invalide'}, status=400)
+
+        wallet = YekiWallet.get_or_create_wallet(request.user)
+
+        if not wallet.peut_debiter(montant):
+            return Response({
+                'detail': f'Solde insuffisant. Solde actuel: {wallet.solde} FCFA. Requis: {montant} FCFA.',
+                'solde':  wallet.solde,
+                'requis': montant,
+            }, status=402)
+
+        descriptions = {
+            'cours':      f'Accès cours #{objet_id}',
+            'formation':  f'Accès formation #{objet_id}',
+            'olympiade':  f'Inscription olympiade #{objet_id}',
+            'ia':         f'Session Yéki IA #{objet_id}',
+        }
+        description = descriptions.get(type_achat, f'Paiement {type_achat}')
+        wallet.debiter(montant=montant, description=description)
+
+        # Enregistrer dans Paiement
+        type_map = {
+            'cours': 'acces_departement',
+            'formation': 'acces_departement',
+            'olympiade': 'olympiade',
+            'ia': 'acces_departement',
+        }
+        Paiement.objects.create(
+            utilisateur=request.user,
+            type_paiement=type_map.get(type_achat, 'acces_departement'),
+            moyen='wallet',
+            montant=montant,
+            statut='succes',
+            transaction_id=f"WALLET-{uuid.uuid4().hex[:10].upper()}",
+        )
+
+        return Response({
+            'statut':  'succes',
+            'solde':   wallet.solde,
+            'debite':  montant,
+            'detail':  f'{description} payé avec succès.',
+        })
+
+
+class WalletVerifierIAPView(APIView):
+    """
+    POST /api/wallet/verifier-iap/
+    Webhook appelé par le frontend après achat Google Play.
+    Body: { "purchase_token": "...", "sku": "yeki_recharge_5000", "platform": "android" }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Déléguer à WalletRechargerView._google_play()
+        request.data._mutable = True if hasattr(request.data, '_mutable') else None
+        moyen_orig = request.data.get('moyen')
+        request.data['moyen'] = 'google_play'
+        view = WalletRechargerView()
+        view.request = request
+        view.format_kwarg = None
+        return view._google_play(request)
+
+
 # ══════════════════════════════════════════════════════════════════
 # ENSEIGNANT ADMIN — DASHBOARD ENRICHI (avec olympiades + formations)
 # GET /api/enseignant/admin/dashboard/enrichi/
@@ -5140,7 +5457,8 @@ class YekiIAChatAvecHistoriqueView(APIView):
 
         # Appel OpenAI
         try:
-            client = openai.OpenAI(api_key=os.environ.get('OPENAI_API_KEY', ''))
+            import openai as _openai
+            client = _openai.OpenAI(api_key=os.environ.get('OPENAI_API_KEY', ''))
             completion = client.chat.completions.create(
                 model='gpt-3.5-turbo',
                 messages=messages_openai,
@@ -5165,11 +5483,24 @@ class YekiIAChatAvecHistoriqueView(APIView):
             tokens    = tokens,
         )
 
+        # Debit wallet + commission Yeki
+        cout_ia = _calculer_cout_ia(tokens)
+        wallet  = YekiWallet.get_or_create_wallet(request.user)
+        debit_ok = wallet.debiter(
+            montant=cout_ia,
+            description=f"Yeki IA — {cours.titre} ({tokens} tokens)"
+        )
+        if debit_ok:
+            YekiCompteIA.crediter_commission(COMMISSION_YEKI_IA_FCFA)
+
         return Response({
             'reponse':      texte_ia,
             'message_id':   user_msg.id,
             'assistant_id': assistant_msg.id,
             'tokens':       tokens,
+            'cout_ia':      cout_ia,
+            'solde_restant': wallet.solde,
+            'debit_ok':     debit_ok,
         })
 
 
