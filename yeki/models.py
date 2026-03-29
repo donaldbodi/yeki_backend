@@ -9,6 +9,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 from datetime import timedelta
 import random
+from django.db import transaction
 import string
 
 
@@ -1373,7 +1374,7 @@ class YekiWallet(models.Model):
     def peut_debiter(self, montant: int) -> bool:
         return self.solde >= montant
 
-    @translation.atomic
+    @transaction.atomic
     def debiter(self, montant: int, description: str = '') -> bool:
         if not self.peut_debiter(montant):
             return False
@@ -1386,7 +1387,7 @@ class YekiWallet(models.Model):
         )
         return True
 
-    @translation.atomic
+    @transaction.atomic
     def crediter(self, montant: int, description: str = '', reference: str = ''):
         self.solde          += montant
         self.total_recharge += montant
