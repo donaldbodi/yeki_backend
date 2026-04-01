@@ -745,6 +745,71 @@ class LeconDeleteView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+# views.py - Ajoutez cette classe après les autres vues
+
+class LeconLikeView(APIView):
+    """
+    POST /api/apprenant/lecon/<lecon_id>/like/
+    Gère les likes d'une leçon par un apprenant.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, lecon_id):
+        lecon = get_object_or_404(Lecon, pk=lecon_id)
+        user = request.user
+
+        # Vérifier que l'utilisateur est un apprenant
+        try:
+            profile = user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'apprenant':
+            return Response({"detail": "Seuls les apprenants peuvent liker des leçons."}, status=403)
+
+        # Récupérer ou créer l'objet like (vous devez créer ce modèle si ce n'est pas fait)
+        # Si vous n'avez pas de modèle Like, créez-le :
+        # class LeconLike(models.Model):
+        #     user = models.ForeignKey(User, on_delete=models.CASCADE)
+        #     lecon = models.ForeignKey(Lecon, on_delete=models.CASCADE)
+        #     created_at = models.DateTimeField(auto_now_add=True)
+        #     
+        #     class Meta:
+        #         unique_together = ('user', 'lecon')
+
+        try:
+            like = LeconLike.objects.get(user=user, lecon=lecon)
+            like.delete()
+            liked = False
+            message = "Like retiré"
+        except LeconLike.DoesNotExist:
+            LeconLike.objects.create(user=user, lecon=lecon)
+            liked = True
+            message = "Like ajouté"
+
+        # Récupérer le nombre total de likes
+        total_likes = LeconLike.objects.filter(lecon=lecon).count()
+
+        return Response({
+            "liked": liked,
+            "total_likes": total_likes,
+            "message": message
+        }, status=status.HTTP_200_OK)
+
+    def get(self, request, lecon_id):
+        """Vérifie si l'utilisateur a liké la leçon"""
+        lecon = get_object_or_404(Lecon, pk=lecon_id)
+        user = request.user
+
+        liked = LeconLike.objects.filter(user=user, lecon=lecon).exists()
+        total_likes = LeconLike.objects.filter(lecon=lecon).count()
+
+        return Response({
+            "liked": liked,
+            "total_likes": total_likes
+        }, status=status.HTTP_200_OK)
+
+
 class ListeExercicesCoursView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -761,55 +826,144 @@ class SoumettreEvaluationView(APIView):
         user = request.user
         exercice = get_object_or_404(Exercice, id=exercice_id)
 
-        session = get_object_or_404(
-            SessionExercice,
+        # Récupérer la session en cours
+        session = SessionExercice.objects.filter(
             user=user,
             exercice=exercice,
             termine=False
-        )
+        ).first()
 
-        # ⛔ Vérifier chrono expiré
-        if session.temps_restant() <= 0:
+        # Si pas de session, en créer une
+        if not session:
+            # Vérifier les tentatives
+            tentatives = EvaluationExercice.objects.filter(
+                user=user, exercice=exercice
+            ).count()
+            
+            if tentatives >= exercice.tentatives_max:
+                return Response(
+                    {"detail": f"Nombre maximum de tentatives atteint ({exercice.tentatives_max})."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            session = SessionExercice.objects.create(
+                user=user,
+                exercice=exercice
+            )
+
+        # Vérifier si le temps est écoulé
+        temps_restant = session.temps_restant()
+        if temps_restant <= 0:
             session.termine = True
             session.save()
             return Response(
-                {"detail": "Temps écoulé. Examen terminé."},
-                status=403
+                {"detail": "Temps écoulé. Examen terminé.", "auto_soumis": True},
+                status=status.HTTP_200_OK
             )
 
+        # Récupérer les réponses
         reponses = request.data.get("reponses", {})
+        
+        # Calculer le score
         score = 0
         total = 0
+        details = []
 
         for question in exercice.questions.all():
-            bonne = question.bonne_reponse.lower().strip()
+            points = question.points
+            total += points
+            
+            # Récupérer la réponse de l'utilisateur
+            user_rep = reponses.get(str(question.id), "").strip().lower()
+            bonne_rep = question.bonne_reponse.strip().lower()
+            
+            is_correct = (user_rep == bonne_rep)
+            
+            if is_correct:
+                score += points
+            
+            details.append({
+                "question_id": question.id,
+                "question": question.text,
+                "reponse_utilisateur": user_rep,
+                "bonne_reponse": question.bonne_reponse,
+                "correct": is_correct,
+                "points_obtenus": points if is_correct else 0,
+                "points_max": points
+            })
 
-            # support id OU texte (compatibilité Flutter)
-            user_rep = (
-                reponses.get(str(question.id)) or
-                reponses.get(question.text) or
-                ""
-            ).lower().strip()
-
-            total += question.points
-            if user_rep == bonne:
-                score += question.points
-
-        EvaluationExercice.objects.create(
+        # Sauvegarder l'évaluation
+        evaluation = EvaluationExercice.objects.create(
             user=user,
             exercice=exercice,
             score=score,
             total=total
         )
 
+        # Marquer la session comme terminée
         session.termine = True
         session.save()
+
+        # Calculer la note sur 20
+        note_sur_20 = (score / total) * 20 if total > 0 else 0
 
         return Response({
             "score": score,
             "total": total,
+            "note": round(note_sur_20, 1),
+            "note_sur": 20,
+            "detail": details,
             "message": "Examen soumis avec succès",
-        })
+            "auto_soumis": False
+        }, status=status.HTTP_200_OK)
+
+
+class ResultatExerciceView(APIView):
+    """
+    GET /api/evaluations/exercice/<exercice_id>/
+    Retourne le dernier résultat de l'utilisateur pour un exercice donné.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, exercice_id):
+        exercice = get_object_or_404(Exercice, id=exercice_id)
+        user = request.user
+
+        # Récupérer la dernière évaluation
+        evaluation = EvaluationExercice.objects.filter(
+            user=user,
+            exercice=exercice
+        ).order_by('-date').first()
+
+        if not evaluation:
+            return Response(
+                {"detail": "Aucun résultat trouvé pour cet exercice."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Récupérer les détails des questions
+        details = []
+        for question in exercice.questions.all():
+            # Pour récupérer la réponse de l'utilisateur, il faudrait stocker les réponses
+            # Dans une table séparée. Pour l'instant, on retourne juste le score par question
+            details.append({
+                "question_id": question.id,
+                "question": question.text,
+                "points_max": question.points,
+                "bonne_reponse": question.bonne_reponse
+            })
+
+        return Response({
+            "exercice_id": exercice.id,
+            "exercice_titre": exercice.titre,
+            "note": evaluation.score,
+            "note_sur": evaluation.total,
+            "score": evaluation.score,
+            "total": evaluation.total,
+            "date": evaluation.date,
+            "detail": details
+        }, status=status.HTTP_200_OK)
+
 
 class HistoriqueEvaluationsView(APIView):
     #permission_classes = [IsAuthenticated]
@@ -827,18 +981,18 @@ class DemarrerExerciceView(APIView):
         user = request.user
         exercice = get_object_or_404(Exercice, id=exercice_id)
 
-        # 🔒 Anti-triche : vérifier tentatives
+        # Vérifier les tentatives
         tentatives = EvaluationExercice.objects.filter(
             user=user, exercice=exercice
         ).count()
 
         if tentatives >= exercice.tentatives_max:
             return Response(
-                {"detail": "Nombre maximum de tentatives atteint."},
-                status=403
+                {"detail": f"Nombre maximum de tentatives atteint ({exercice.tentatives_max})."},
+                status=status.HTTP_403_FORBIDDEN
             )
 
-        # 🔁 Vérifier session existante non terminée
+        # Vérifier si une session existe déjà
         session = SessionExercice.objects.filter(
             user=user, exercice=exercice, termine=False
         ).first()
@@ -849,8 +1003,14 @@ class DemarrerExerciceView(APIView):
                 exercice=exercice
             )
 
-        serializer = SessionSerializer(session)
-        return Response(serializer.data)
+        # Retourner les informations
+        return Response({
+            "session_id": session.id,
+            "debut": session.debut,
+            "temps_restant": session.temps_restant(),
+            "duree_totale": exercice.duree_minutes * 60,
+            "tentatives_restantes": exercice.tentatives_max - tentatives
+        }, status=status.HTTP_200_OK)
 
 
 class ExerciceDetailView(APIView):

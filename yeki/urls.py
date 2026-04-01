@@ -78,6 +78,7 @@ urlpatterns = [
     path('apprenant/marquer-lecon/', MarquerLeconVueView.as_view(), name='marquer-lecon'),
     path('lecons/<int:lecon_id>/modifier/', views.LeconUpdateView.as_view(), name='lecon-modifier'),
     path('lecons/<int:lecon_id>/supprimer/', views.LeconDeleteView.as_view(), name='lecon-supprimer'),
+    path('apprenant/lecon/<int:lecon_id>/like/', LeconLikeView.as_view(), name='lecon-like'),
 
     # ── MODULES ───────────────────────────────────────────────────
     path('cours/<int:cours_id>/modules/', ModuleCreateView.as_view(), name='module-create'),
@@ -94,6 +95,7 @@ urlpatterns = [
     path('cours/<int:cours_id>/exercices/ajouter/', views.AjouterExerciceView.as_view(), name='exercice-ajouter'),
     path('exercices/<int:exercice_id>/questions/', views.ListeQuestionsExerciceView.as_view(), name='question-liste'),
     path('exercices/<int:exercice_id>/questions/ajouter/', views.AjouterQuestionView.as_view(), name='question-ajouter'),
+    path('evaluations/exercice/<int:exercice_id>/', ResultatExerciceView.as_view(), name='resultat-exercice'),
 
     # ── DEVOIRS ───────────────────────────────────────────────────
     path('devoirs/', ListeDevoirsView.as_view(), name='liste-devoirs'),

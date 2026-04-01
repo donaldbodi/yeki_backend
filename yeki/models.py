@@ -452,6 +452,20 @@ class ProgressionLecon(models.Model):
           return f"{self.apprenant.username} → {self.lecon.titre} ({self.pourcentage}%)"
 
 
+class LeconLike(models.Model):
+    """Like d'une leçon par un apprenant"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='lecon_likes')
+    lecon = models.ForeignKey(Lecon, on_delete=models.CASCADE, related_name='likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'lecon')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} → {self.lecon.titre}"
+
+
 class Exercice(models.Model):
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="exercices")
     titre = models.CharField(max_length=255)
