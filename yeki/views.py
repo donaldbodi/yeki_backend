@@ -981,34 +981,49 @@ class DemarrerExerciceView(APIView):
         user = request.user
         exercice = get_object_or_404(Exercice, id=exercice_id)
 
-        # Vérifier les tentatives
+        # Vérifier les tentatives déjà faites
         tentatives = EvaluationExercice.objects.filter(
             user=user, exercice=exercice
         ).count()
-
+        
         if tentatives >= exercice.tentatives_max:
             return Response(
-                {"detail": f"Nombre maximum de tentatives atteint ({exercice.tentatives_max})."},
+                {
+                    "detail": f"Nombre maximum de tentatives atteint ({exercice.tentatives_max}).",
+                    "tentatives_restantes": 0
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Vérifier si une session existe déjà
+        # Vérifier si une session non terminée existe déjà
         session = SessionExercice.objects.filter(
-            user=user, exercice=exercice, termine=False
+            user=user, 
+            exercice=exercice, 
+            termine=False
         ).first()
 
+        if session:
+            # Si la session existe mais que le temps est écoulé
+            if session.temps_restant() <= 0:
+                session.termine = True
+                session.save()
+                session = None
+
+        # Créer une nouvelle session si nécessaire
         if not session:
             session = SessionExercice.objects.create(
                 user=user,
                 exercice=exercice
             )
 
-        # Retourner les informations
+        duree_totale = exercice.duree_minutes * 60
+        temps_restant = session.temps_restant()
+
         return Response({
             "session_id": session.id,
-            "debut": session.debut,
-            "temps_restant": session.temps_restant(),
-            "duree_totale": exercice.duree_minutes * 60,
+            "debut": session.debut.isoformat(),
+            "duree_totale": duree_totale,
+            "temps_restant": temps_restant,
             "tentatives_restantes": exercice.tentatives_max - tentatives
         }, status=status.HTTP_200_OK)
 
@@ -1023,21 +1038,57 @@ class ExerciceDetailView(APIView):
             id=exercice_id
         )
 
-        # session en cours
+        # Vérifier si une session est en cours
         session = SessionExercice.objects.filter(
             user=user,
             exercice=exercice,
             termine=False
         ).first()
 
-        data = ExerciceSerializer(exercice).data
-
+        # Calculer le temps restant
+        duree_totale = exercice.duree_minutes * 60
+        temps_restant = duree_totale
+        
         if session:
-            data["temps_restant"] = session.temps_restant()
-        else:
-            data["temps_restant"] = exercice.duree
+            temps_restant = session.temps_restant()
+            # Si le temps est écoulé, marquer la session comme terminée
+            if temps_restant <= 0:
+                session.termine = True
+                session.save()
+                temps_restant = 0
 
-        return Response(data, status=status.HTTP_200_OK)
+        # Compter les tentatives déjà faites
+        tentatives = EvaluationExercice.objects.filter(
+            user=user, exercice=exercice
+        ).count()
+        
+        tentatives_restantes = max(0, exercice.tentatives_max - tentatives)
+
+        # Sérialiser les questions
+        questions_data = []
+        for q in exercice.questions.all():
+            q_data = {
+                "id": q.id,
+                "text": q.text,
+                "type": q.type_question,
+                "points": q.points,
+                "bonne_reponse": q.bonne_reponse,  # À ne pas exposer en prod
+                "choix": [c.texte for c in q.choix.all()] if q.type_question == "qcm" else []
+            }
+            questions_data.append(q_data)
+
+        return Response({
+            "id": exercice.id,
+            "titre": exercice.titre,
+            "enonce": exercice.enonce,
+            "etoiles": exercice.etoiles,
+            "duree_minutes": exercice.duree_minutes,
+            "duree_totale": duree_totale,
+            "temps_restant": temps_restant,
+            "tentatives_max": exercice.tentatives_max,
+            "tentatives_restantes": tentatives_restantes,
+            "questions": questions_data
+        }, status=status.HTTP_200_OK)
 
 
 class AjouterExerciceView(APIView):
