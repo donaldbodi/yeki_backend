@@ -20,7 +20,7 @@ import openai
 
 
 from django.contrib.auth import get_user_model
-from django.db.models import Sum, Avg
+from django.db.models import Count, Sum, Avg
 
 from .models import *
 from .serializers import *
@@ -2679,7 +2679,8 @@ class ListeQuestionsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = QuestionForum.objects.all()
+        # Utiliser select_related pour optimiser les requêtes
+        qs = QuestionForum.objects.select_related('auteur__profile').all()
 
         # Filtres
         source    = request.query_params.get("source")
@@ -2688,7 +2689,7 @@ class ListeQuestionsView(APIView):
         devoir_id = request.query_params.get("devoir_id")
         cours_id  = request.query_params.get("cours_id")
         resolue   = request.query_params.get("resolue")
-        since     = request.query_params.get("since")   # ISO timestamp pour polling temps réel
+        since     = request.query_params.get("since")
 
         if source:
             qs = qs.filter(source=source)
@@ -2705,9 +2706,9 @@ class ListeQuestionsView(APIView):
         if since:
             qs = qs.filter(cree_le__gt=since)
 
-        # Annoter nb_reponses
+        # ✅ Utiliser annotate au lieu de @property
         from django.db.models import Count
-        qs = qs.annotate(nb_reponses=Count("reponses"))
+        qs = qs.annotate(nb_reponses=Count("reponses", distinct=True))
 
         serializer = QuestionForumListSerializer(
             qs, many=True, context={"request": request}
@@ -2720,12 +2721,15 @@ class ListeQuestionsView(APIView):
         )
         if serializer.is_valid():
             question = serializer.save()
+            # Recharger avec les annotations
+            question = QuestionForum.objects.annotate(
+                nb_reponses=Count("reponses")
+            ).get(pk=question.pk)
             return Response(
                 QuestionForumListSerializer(question, context={"request": request}).data,
                 status=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 # ─────────────────────────────────────────────────────────────────
 # GET  /api/forum/questions/<pk>/     → détail + réponses
@@ -2736,7 +2740,11 @@ class DetailQuestionView(APIView):
 
     def get(self, request, pk):
         try:
-            question = QuestionForum.objects.get(pk=pk)
+            from django.db.models import Count
+            # Utiliser annotate pour avoir nb_reponses
+            question = QuestionForum.objects.annotate(
+                nb_reponses=Count("reponses")
+            ).select_related('auteur__profile').get(pk=pk)
         except QuestionForum.DoesNotExist:
             return Response({"detail": "Question introuvable."}, status=404)
 
@@ -2784,17 +2792,19 @@ class RepondreQuestionView(APIView):
         except QuestionForum.DoesNotExist:
             return Response({"detail": "Question introuvable."}, status=404)
 
-        serializer = ReponseCreateSerializer(
-            data=request.data,
-            context={"request": request, "question": question},
+        contenu = request.data.get('contenu', '').strip()
+        if not contenu:
+            return Response({"detail": "Le contenu de la réponse est requis."}, status=400)
+
+        reponse = ReponseQuestion.objects.create(
+            question=question,
+            auteur=request.user,
+            contenu=contenu,
+            est_solution=False,
         )
-        if serializer.is_valid():
-            reponse = serializer.save()
-            return Response(
-                ReponseSerializer(reponse, context={"request": request}).data,
-                status=status.HTTP_201_CREATED,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = ReponseSerializer(reponse, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 # ─────────────────────────────────────────────────────────────────

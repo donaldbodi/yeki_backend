@@ -932,7 +932,6 @@ class ForumMessage(models.Model):
 # QUESTION FORUM
 # Peut être liée à une leçon, un exercice ou un devoir
 # ─────────────────────────────────────────────────────────────────
-
 class QuestionForum(models.Model):
     SOURCE_CHOICES = [
         ("lecon",    "Leçon"),
@@ -947,22 +946,16 @@ class QuestionForum(models.Model):
     cree_le         = models.DateTimeField(auto_now_add=True)
     modifie_le      = models.DateTimeField(auto_now=True)
 
-    # Liens optionnels selon la source
-    # Si source == "lecon"
+    # Liens optionnels
     lecon_id        = models.IntegerField(null=True, blank=True)
     lecon_titre     = models.CharField(max_length=255, blank=True)
     cours_id        = models.IntegerField(null=True, blank=True)
     cours_titre     = models.CharField(max_length=255, blank=True)
-
-    # Si source == "exercice"
     exercice_id     = models.IntegerField(null=True, blank=True)
     exercice_titre  = models.CharField(max_length=255, blank=True)
-
-    # Si source == "devoir" (lié à un cours précis)
     devoir_id       = models.IntegerField(null=True, blank=True)
     devoir_titre    = models.CharField(max_length=255, blank=True)
 
-    # Résolu ?
     est_resolue     = models.BooleanField(default=False)
     nb_vues         = models.IntegerField(default=0)
 
@@ -972,9 +965,6 @@ class QuestionForum(models.Model):
     def __str__(self):
         return f"[{self.source}] {self.auteur.username} — {self.contenu[:60]}"
 
-    @property
-    def nb_reponses(self):
-        return self.reponses.count()
 
 
 # ─────────────────────────────────────────────────────────────────

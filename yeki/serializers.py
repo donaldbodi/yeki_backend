@@ -919,6 +919,7 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
 class ReponseSerializer(serializers.ModelSerializer):
     auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
     auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
     nb_likes        = serializers.SerializerMethodField()
     mon_like        = serializers.SerializerMethodField()
 
@@ -926,9 +927,16 @@ class ReponseSerializer(serializers.ModelSerializer):
         model  = ReponseQuestion
         fields = [
             "id", "contenu", "cree_le", "est_solution",
-            "auteur_nom", "auteur_username",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
             "nb_likes", "mon_like",
         ]
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
 
     def get_nb_likes(self, obj):
         return obj.likes.count()
@@ -943,8 +951,9 @@ class ReponseSerializer(serializers.ModelSerializer):
 class QuestionForumListSerializer(serializers.ModelSerializer):
     auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
     auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
     nb_reponses     = serializers.IntegerField(read_only=True)
-
+    
     class Meta:
         model  = QuestionForum
         fields = [
@@ -953,13 +962,21 @@ class QuestionForumListSerializer(serializers.ModelSerializer):
             "lecon_id", "lecon_titre", "cours_id", "cours_titre",
             "exercice_id", "exercice_titre",
             "devoir_id", "devoir_titre",
-            "auteur_nom", "auteur_username",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
         ]
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
 
 
 class QuestionForumDetailSerializer(serializers.ModelSerializer):
     auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
     auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
     nb_reponses     = serializers.IntegerField(read_only=True)
     reponses        = ReponseSerializer(many=True, read_only=True)
 
@@ -971,8 +988,15 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
             "lecon_id", "lecon_titre", "cours_id", "cours_titre",
             "exercice_id", "exercice_titre",
             "devoir_id", "devoir_titre",
-            "auteur_nom", "auteur_username",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
         ]
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
 
 
 class QuestionForumCreateSerializer(serializers.ModelSerializer):
