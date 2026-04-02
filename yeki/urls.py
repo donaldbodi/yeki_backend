@@ -157,6 +157,13 @@ urlpatterns = [
     path('paiements/historique/', HistoriquePaiementsView.as_view(), name='paiements-historique'),
     # GET /api/abonnement/statut/
     path('abonnement/statut/', StatutAbonnementView.as_view(), name='abonnement-statut'),
+    # Campay
+    path('paiements/campay/initier/', InitierPaiementCampayView.as_view(), name='campay-initier'),
+    path('paiements/campay/verifier/<str:reference>/', VerifierPaiementCampayView.as_view(), name='campay-verifier'),
+    # CinetPay
+    path('paiements/cinetpay/initier/', InitierPaiementCinetPayView.as_view(), name='cinetpay-initier'),
+    path('paiements/cinetpay/notify/', CinetPayWebhookView.as_view(), name='cinetpay-webhook'),
+
 
     # ── HISTORIQUE ────────────────────────────────────────────────
     path('historique/', HistoriqueActiviteView.as_view(), name='historique'),
@@ -272,5 +279,7 @@ urlpatterns = [
         EnseignantAdminDashboardEnrichiView.as_view(),
         name='admin-dashboard-enrichi',
     ),
+
+    path('api/latest-version/', latest_version, name='latest-version'),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -1519,3 +1519,81 @@ class YekiIAMessage(models.Model):
 
     def __str__(self):
         return f"Yeki IA → Q{self.question_id} ({self.cree_le:%d/%m/%Y %H:%M})"
+
+
+# models.py - Transaction
+
+class CampayTransaction(models.Model):
+    """Transaction Campay"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='campay_transactions')
+    amount = models.PositiveIntegerField()
+    reference = models.CharField(max_length=100, unique=True)
+    phone = models.CharField(max_length=20)
+    status = models.CharField(max_length=20, choices=[
+        ('pending', 'En attente'),
+        ('success', 'Succès'),
+        ('failed', 'Échec'),
+    ], default='pending')
+    operation_id = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"Campay {self.reference} - {self.status}"
+
+
+class CinetPayTransaction(models.Model):
+    """Transaction CinetPay"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cinetpay_transactions')
+    amount = models.PositiveIntegerField()
+    reference = models.CharField(max_length=100, unique=True)
+    transaction_id = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=20, choices=[
+        ('pending', 'En attente'),
+        ('success', 'Succès'),
+        ('failed', 'Échec'),
+    ], default='pending')
+    payment_method = models.CharField(max_length=20, choices=[
+        ('mtn_momo', 'MTN Mobile Money'),
+        ('orange_money', 'Orange Money'),
+        ('card', 'Carte bancaire'),
+    ], blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"CinetPay {self.reference} - {self.status}"
+    
+
+# models.py - Ajouter à la fin du fichier
+
+class AppVersion(models.Model):
+    """
+    Gestion des versions de l'application pour les mises à jour.
+    """
+    PLATFORM_CHOICES = [
+        ('android', 'Android'),
+        ('ios', 'iOS'),
+        ('desktop', 'Desktop'),
+        ('web', 'Web'),
+    ]
+    
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='android')
+    version_code = models.PositiveIntegerField(help_text="Numéro de version interne (ex: 2, 3, 4...)")
+    version_name = models.CharField(max_length=20, help_text="Nom de version (ex: v1.0.3)")
+    download_url = models.URLField(help_text="URL de téléchargement de l'APK/EXE/DMG")
+    changelog = models.TextField(blank=True, help_text="Description des nouveautés")
+    min_version_code = models.PositiveIntegerField(default=1, help_text="Version minimale requise")
+    force_update = models.BooleanField(default=False, help_text="Si True, oblige l'utilisateur à mettre à jour")
+    is_active = models.BooleanField(default=True, help_text="Version active/public")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-version_code']
+        verbose_name = "Version de l'application"
+        verbose_name_plural = "Versions de l'application"
+        unique_together = ('platform', 'version_code')
+    
+    def __str__(self):
+        return f"{self.get_platform_display()} - {self.version_name} (code: {self.version_code})"

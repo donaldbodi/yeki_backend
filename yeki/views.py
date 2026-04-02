@@ -1,4 +1,7 @@
 # views.py
+import json
+
+from django.http import JsonResponse
 from django.shortcuts import render, get_object_or_404
 from django.db import transaction
 from django.core.exceptions import PermissionDenied
@@ -8,7 +11,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework import status, generics
-from rest_framework.views import APIView
+from rest_framework.views import APIView, csrf_exempt
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -17,6 +20,9 @@ from django.contrib.auth.hashers import check_password
 import uuid
 import os
 import openai
+import hashlib
+import hmac
+
 
 
 from django.contrib.auth import get_user_model
@@ -52,6 +58,41 @@ def _nom_profil(profile):
     return n or profile.user.username
 
 
+@csrf_exempt
+def latest_version(request):
+    """
+    GET /api/latest-version/
+    Paramètre optionnel: platform (android, ios, desktop, web)
+    Retourne la dernière version de l'application pour la plateforme demandée
+    """
+    platform = request.GET.get('platform', 'android')
+    
+    try:
+        version = AppVersion.objects.filter(
+            platform=platform, 
+            is_active=True
+        ).latest('version_code')
+        
+        return JsonResponse({
+            'version_code': version.version_code,
+            'version_name': version.version_name,
+            'download_url': version.download_url,
+            'changelog': version.changelog,
+            'min_version': version.min_version_code,
+            'force_update': version.force_update,
+        })
+    except AppVersion.DoesNotExist:
+        # Version par défaut si rien n'existe
+        return JsonResponse({
+            'version_code': 1,
+            'version_name': 'v1.0.3',
+            'download_url': '/static/app/yeki-v.1.0.3.apk',
+            'changelog': 'Première version',
+            'min_version': 1,
+            'force_update': False,
+        })
+
+
 def _progression_cours(user, cours_qs):
     """Calcule le % de progression par cours pour cet apprenant."""
     progressions = ProgressionLecon.objects.filter(
@@ -67,6 +108,237 @@ def _progression_cours(user, cours_qs):
         terminees = sum(1 for p in progressions if p['cours_id'] == c.id and p['terminee'])
         prog_map[c.id] = round((terminees / total) * 100, 1)
     return prog_map
+
+
+# views_paiement.py -
+
+# Configuration Campay
+CAMPAY_API_URL = "https://demo.campay.net/api/collect/"
+CAMPAY_USERNAME = settings.CAMPAY_USERNAME
+CAMPAY_PASSWORD = settings.CAMPAY_PASSWORD
+
+# Configuration CinetPay
+CINETPAY_API_KEY = settings.CINETPAY_API_KEY
+CINETPAY_SITE_ID = settings.CINETPAY_SITE_ID
+CINETPAY_API_URL = "https://api-checkout.cinetpay.com/v2/payment"
+
+class InitierPaiementCampayView(APIView):
+    """Initier un paiement avec Campay"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        amount = request.data.get('amount')
+        phone = request.data.get('phone')
+        description = request.data.get('description', 'Recharge Yéki Wallet')
+        
+        if not amount or not phone:
+            return Response({'error': 'Montant et téléphone requis'}, status=400)
+        
+        reference = f"YEKI-{uuid.uuid4().hex[:8].upper()}"
+        
+        # Créer la transaction dans la base
+        transaction = CampayTransaction.objects.create(
+            user=request.user,
+            amount=amount,
+            reference=reference,
+            phone=phone
+        )
+        
+        # Appeler l'API Campay
+        try:
+            response = request.post(
+                CAMPAY_API_URL,
+                auth=(CAMPAY_USERNAME, CAMPAY_PASSWORD),
+                json={
+                    'amount': str(amount),
+                    'currency': 'XAF',
+                    'from': phone,
+                    'description': description,
+                    'external_reference': reference
+                }
+            )
+            
+            if response.status_code == 201:
+                data = response.json()
+                transaction.operation_id = data.get('operation')
+                transaction.save()
+                
+                return Response({
+                    'reference': reference,
+                    'status': 'pending',
+                    'message': 'Paiement initié. Veuillez confirmer sur votre téléphone.'
+                }, status=200)
+            else:
+                transaction.status = 'failed'
+                transaction.save()
+                return Response({'error': 'Erreur lors du paiement'}, status=400)
+                
+        except Exception as e:
+            transaction.status = 'failed'
+            transaction.save()
+            return Response({'error': str(e)}, status=500)
+
+
+class VerifierPaiementCampayView(APIView):
+    """Vérifier le statut d'un paiement Campay"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, reference):
+        transaction = get_object_or_404(CampayTransaction, reference=reference, user=request.user)
+        
+        if transaction.status == 'success':
+            return Response({'status': 'success', 'amount': transaction.amount})
+        
+        try:
+            response = request.get(
+                f"{CAMPAY_API_URL}{transaction.operation_id}/",
+                auth=(CAMPAY_USERNAME, CAMPAY_PASSWORD)
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'success':
+                    transaction.status = 'success'
+                    transaction.save()
+                    
+                    # Créditer le wallet
+                    wallet = YekiWallet.get_or_create_wallet(request.user)
+                    wallet.crediter(
+                        montant=transaction.amount,
+                        description=f'Recharge via Campay - {reference}',
+                        reference=reference
+                    )
+                    
+                    # Créer l'enregistrement de paiement
+                    Paiement.objects.create(
+                        utilisateur=request.user,
+                        type_paiement='wallet_recharge',
+                        moyen='campay',
+                        montant=transaction.amount,
+                        statut='succes',
+                        transaction_id=transaction.operation_id
+                    )
+                    
+                    return Response({'status': 'success', 'amount': transaction.amount})
+                    
+        except Exception as e:
+            pass
+            
+        return Response({'status': transaction.status})
+
+
+class InitierPaiementCinetPayView(APIView):
+    """Initier un paiement avec CinetPay"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        amount = request.data.get('amount')
+        phone = request.data.get('phone')
+        payment_method = request.data.get('payment_method', 'mtn_momo')  # mtn_momo, orange_money, card
+        
+        if not amount:
+            return Response({'error': 'Montant requis'}, status=400)
+        
+        reference = f"YEKI-{uuid.uuid4().hex[:8].upper()}"
+        
+        # Créer la transaction
+        transaction = CinetPayTransaction.objects.create(
+            user=request.user,
+            amount=amount,
+            reference=reference,
+            payment_method=payment_method
+        )
+        
+        # Générer le hash de sécurité
+        data_to_hash = f"{CINETPAY_SITE_ID}{reference}{amount}XAF{phone or ''}"
+        hash_value = hashlib.sha256(data_to_hash.encode()).hexdigest()
+        
+        # Préparer les données pour CinetPay
+        payment_data = {
+            'amount': amount,
+            'currency': 'XAF',
+            'transaction_id': reference,
+            'description': 'Recharge Yéki Wallet',
+            'site_id': CINETPAY_SITE_ID,
+            'apikey': CINETPAY_API_KEY,
+            'notify_url': f"{settings.SITE_URL}/api/paiements/cinetpay/notify/",
+            'return_url': f"{settings.SITE_URL}/payment-result/",
+            'metadata': json.dumps({'user_id': request.user.id, 'reference': reference}),
+            'customer_phone_number': phone or '',
+            'customer_email': request.user.email
+        }
+        
+        # Ajouter le mode de paiement spécifique si fourni
+        if payment_method == 'mtn_momo':
+            payment_data['payment_method'] = 'mtn_money'
+        elif payment_method == 'orange_money':
+            payment_data['payment_method'] = 'orange_money'
+        
+        try:
+            response = request.post(CINETPAY_API_URL, json=payment_data)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('code') == '201':
+                    payment_url = data.get('payment_url')
+                    transaction.transaction_id = data.get('transaction_id')
+                    transaction.save()
+                    
+                    return Response({
+                        'reference': reference,
+                        'payment_url': payment_url,
+                        'status': 'pending'
+                    }, status=200)
+                    
+            transaction.status = 'failed'
+            transaction.save()
+            return Response({'error': 'Erreur lors de l\'initialisation'}, status=400)
+            
+        except Exception as e:
+            transaction.status = 'failed'
+            transaction.save()
+            return Response({'error': str(e)}, status=500)
+
+
+class CinetPayWebhookView(APIView):
+    """Webhook pour recevoir les notifications CinetPay"""
+    permission_classes = []  # Public endpoint
+    
+    def post(self, request):
+        data = request.data
+        transaction_id = data.get('transaction_id')
+        status = data.get('status')
+        amount = data.get('amount')
+        
+        if status == 'ACCEPTED' or status == 'success':
+            try:
+                transaction = CinetPayTransaction.objects.get(transaction_id=transaction_id)
+                if transaction.status != 'success':
+                    transaction.status = 'success'
+                    transaction.save()
+                    
+                    # Créditer le wallet
+                    wallet = YekiWallet.get_or_create_wallet(transaction.user)
+                    wallet.crediter(
+                        montant=transaction.amount,
+                        description=f'Recharge via CinetPay - {transaction.reference}',
+                        reference=transaction.reference
+                    )
+                    
+                    # Créer l'enregistrement de paiement
+                    Paiement.objects.create(
+                        utilisateur=transaction.user,
+                        type_paiement='wallet_recharge',
+                        moyen='cinetpay',
+                        montant=transaction.amount,
+                        statut='succes',
+                        transaction_id=transaction_id
+                    )
+                    
+            except CinetPayTransaction.DoesNotExist:
+                pass
+                
+        return Response({'status': 'ok'})
 
 
 def _serialise_cours(c, prog_map):

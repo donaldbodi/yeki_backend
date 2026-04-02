@@ -165,3 +165,11 @@ DEFAULT_FROM_EMAIL  = 'Yéki <mdonabodi99@gmail.com>'
 
 EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+
+# Campay
+CAMPAY_USERNAME = os.environ.get('CAMPAY_USERNAME', '')
+CAMPAY_PASSWORD = os.environ.get('CAMPAY_PASSWORD', '')
+
+# CinetPay
+CINETPAY_API_KEY = os.environ.get('CINETPAY_API_KEY', '')
+CINETPAY_SITE_ID = os.environ.get('CINETPAY_SITE_ID', '')
