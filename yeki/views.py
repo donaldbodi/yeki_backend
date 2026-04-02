@@ -474,66 +474,55 @@ class ApprenantCursusAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = request.user.profile
-
+        profile = _get_profile(request.user)
         if profile.user_type != 'apprenant':
-            return Response(
-                {"detail": "Accès réservé aux apprenants"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"detail": "Accès réservé aux apprenants"}, status=403)
 
         if not profile.cursus:
-            return Response([], status=status.HTTP_200_OK)
+            return Response([], status=200)
 
-        cours_qs = Cours.objects.filter(
-            departement__parcours__nom=profile.cursus
-        ).select_related('enseignant_principal__user')
-
-        # Récupérer les progressions de cet apprenant en une seule requête
+        # Récupérer le parcours du cursus
         try:
-            from .models import ProgressionLecon
-            progressions = ProgressionLecon.objects.filter(
-                apprenant=request.user,
-                cours__in=cours_qs,
-            ).values('cours_id', 'terminee')
+            parcours = Parcours.objects.get(nom=profile.cursus, type_parcours='cursus')
+        except Parcours.DoesNotExist:
+            return Response([], status=200)
 
-            # Calculer le taux de complétion par cours
-            from django.db.models import Count, Q
-            prog_map = {}
-            for c in cours_qs:
-                total_lecons = c.nb_lecons or Lecon.objects.filter(cours=c).count()
-                if total_lecons == 0:
-                    prog_map[c.id] = 0.0
-                    continue
-                terminees = sum(
-                    1 for p in progressions
-                    if p['cours_id'] == c.id and p['terminee']
-                )
-                prog_map[c.id] = round((terminees / total_lecons) * 100, 1)
-        except Exception:
-            prog_map = {}
-
+        # Utiliser le niveau enregistré dans le profil
+        niveau_apprenant = profile.niveau or ''
+        
+        # Récupérer les départements du cursus
+        depts = Departement.objects.filter(parcours=parcours, est_actif=True)
+        
+        # Récupérer les cours du niveau EXACT de l'apprenant (pas inférieur, pas supérieur)
+        cours_qs = Cours.objects.filter(
+            departement__in=depts,
+            niveau=niveau_apprenant  # ← Filtre exact sur le niveau
+        ).select_related('enseignant_principal__user')
+        
+        # Calculer les progressions
+        prog_map = _progression_cours(request.user, cours_qs)
+        
         result = []
         for c in cours_qs:
             ep_nom = '—'
             if c.enseignant_principal:
                 ep = c.enseignant_principal
-                ep_nom = f"{ep.user.first_name} {ep.user.last_name}".strip() \
-                         or ep.user.username
+                ep_nom = f"{ep.user.first_name} {ep.user.last_name}".strip() or ep.user.username
 
             result.append({
-                'id':                   c.id,
-                'title':                c.titre,
-                'description':          c.description_brief or '',
+                'id': c.id,
+                'title': c.titre,
+                'description': c.description_brief or '',
                 'enseignant_principal': ep_nom,
-                'lessons':              c.nb_lecons,
-                'assignments':          c.nb_devoirs,
-                'icon':                 c.icon_name or 'school',
-                'color':                c.color_code or '#2884A0',
-                'progression':          prog_map.get(c.id, 0.0),
+                'lessons': c.nb_lecons,
+                'assignments': c.nb_devoirs,
+                'icon': c.icon_name or 'school',
+                'color': c.color_code or '#2884A0',
+                'progression': prog_map.get(c.id, 0.0),
+                'niveau': c.niveau,
             })
 
-        return Response(result, status=status.HTTP_200_OK)
+        return Response(result, status=200)
 
 
 # ---------------------------
@@ -4632,7 +4621,7 @@ class HistoriqueStatsView(APIView):
 
 
 # ══════════════════════════════════════════════════════════════════
-# APPRENANT — PRÉPA CONCOURS
+# APPRENANT — PRÉPA CONCOURS/FORMATION
 # GET /api/apprenant/prepa-concours/
 #
 # Filtre par profile.sub_cursus, exactement comme ApprenantCursusAPIView
@@ -4641,48 +4630,153 @@ class HistoriqueStatsView(APIView):
 # groupés par département, avec les cours à l'intérieur.
 # ══════════════════════════════════════════════════════════════════
 
-class ApprenantPrepaConcoursAPIView(APIView):
+
+class ApprenantConcoursFormationsView(APIView):
     """
-    GET /api/apprenant/prepa-concours/
-    Retourne les departements (concours) du parcours Prepa Concours
-    avec tous les champs enrichis (arrete, dates, places, etc.).
-    Filtre : parcours.type_parcours = 'prepa' et parcours.nom = profile.cursus
+    GET /api/apprenant/concours-formations/
+    Retourne les concours et formations accessibles selon le niveau de l'apprenant
+    Pour les concours/formations: niveau <= niveau apprenant
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         profile = _get_profile(request.user)
         if not profile or profile.user_type != 'apprenant':
-            return Response({"detail": "Acces reserve aux apprenants."}, status=403)
-
-        if not profile.cursus:
-            return Response([], status=200)
-
-        # Tous les departements du parcours dont le nom correspond au cursus ET type=prepa
-        # OU simplement le parcours dont le nom = profile.cursus
-        depts = Departement.objects.filter(
-            parcours__nom=profile.cursus,
-            est_actif=True,
-        ).select_related('parcours', 'cadre__user').order_by('nom')
-
-        if not depts.exists():
-            # Fallback: chercher n'importe quel parcours de type prepa
+            return Response({"detail": "Accès réservé aux apprenants"}, status=403)
+        
+        type_parcours = request.query_params.get('type', 'prepa')  # prepa ou formation
+        
+        # Utiliser le niveau enregistré dans le profil
+        niveau_apprenant = profile.niveau or ''
+        
+        # Ordre des niveaux pour comparaison
+        niveaux_ordre = {
+            '6eme': 1, '5eme': 2, '4eme': 3, '3eme': 4,
+            'seconde': 5, 'premiere': 6, 'terminale': 7,
+            'licence1': 8, 'licence2': 9, 'licence3': 10,
+            'master1': 11, 'master2': 12,
+        }
+        
+        niveau_score = niveaux_ordre.get(niveau_apprenant, 0)
+        
+        # Récupérer les départements du parcours concerné
+        if type_parcours == 'prepa':
             depts = Departement.objects.filter(
                 parcours__type_parcours='prepa',
                 est_actif=True,
-            ).select_related('parcours', 'cadre__user').order_by('nom')
+            ).select_related('parcours', 'cadre__user')
 
-        cours_qs = Cours.objects.filter(departement__in=depts).select_related(
-            'enseignant_principal__user', 'departement__parcours'
-        )
-        prog_map = _progression_cours(request.user, cours_qs)
-
-        result = []
-        for dept in depts:
-            d = _serialise_departement_detail(dept, prog_map=prog_map, include_cours=True, user=request.user)
-            result.append(d)
-
-        return Response(result, status=200)
+            resultats = []
+            for dept in depts:
+                # Pour les concours: on prend ceux dont le niveau cible <= niveau apprenant
+                niveaux_cibles = dept.niveaux_cibles or ''
+                est_accessible = self._est_niveau_accessible(niveau_apprenant, niveaux_cibles, niveaux_ordre)
+                
+                if est_accessible:
+                    # Récupérer tous les cours du département (pas de filtre supplémentaire)
+                    cours_qs = Cours.objects.filter(departement=dept)
+                    cours_data = []
+                    for cours in cours_qs:
+                        cours_data.append({
+                            'id': cours.id,
+                            'titre': cours.titre,
+                            'niveau': cours.niveau,
+                            'description_brief': cours.description_brief,
+                            'color_code': cours.color_code,
+                            'icon_name': cours.icon_name,
+                            'nb_lecons': cours.nb_lecons,
+                            'nb_devoirs': cours.nb_devoirs,
+                        })
+                    
+                    resultats.append(self._serialiser_departement(dept, cours_data, request))
+            
+            return Response(resultats)
+            
+        elif type_parcours == 'formation':
+            depts = Departement.objects.filter(
+                parcours__type_parcours='formation',
+                est_actif=True,
+            ).select_related('parcours', 'cadre__user')
+            
+            resultats = []
+            for dept in depts:
+                # Pour les formations: on prend celles dont le niveau <= niveau apprenant
+                # Le niveau est déterminé par les cours associés ou par le champ description
+                niveaux_formation = self._extraire_niveau_formation(dept, niveaux_ordre)
+                est_accessible = niveaux_formation <= niveau_score if niveaux_formation else True
+                
+                if est_accessible:
+                    cours_qs = Cours.objects.filter(departement=dept)
+                    cours_data = []
+                    for cours in cours_qs:
+                        cours_data.append({
+                            'id': cours.id,
+                            'titre': cours.titre,
+                            'niveau': cours.niveau,
+                            'description_brief': cours.description_brief,
+                            'color_code': cours.color_code,
+                            'icon_name': cours.icon_name,
+                            'nb_lecons': cours.nb_lecons,
+                            'nb_devoirs': cours.nb_devoirs,
+                        })
+                    
+                    resultats.append(self._serialiser_departement(dept, cours_data, request))
+            
+            return Response(resultats)
+        
+        return Response([])
+    
+    def _est_niveau_accessible(self, niveau_apprenant, niveau_cible_str, niveaux_ordre):
+        """Vérifie si le niveau cible est accessible (niveau cible <= niveau apprenant)"""
+        if not niveau_cible_str:
+            return True  # Pas de niveau spécifié, accessible
+        
+        # Extraire les niveaux cibles de la chaîne
+        niveaux_cibles = []
+        for niveau in niveaux_ordre.keys():
+            if niveau.lower() in niveau_cible_str.lower():
+                niveaux_cibles.append(niveau)
+        
+        if not niveaux_cibles:
+            return True
+        
+        niveau_apprenant_score = niveaux_ordre.get(niveau_apprenant, 0)
+        # Prendre le niveau cible le plus bas (le plus facile d'accès)
+        niveau_min_cible = min([niveaux_ordre.get(n, 0) for n in niveaux_cibles])
+        
+        # Accessible si le niveau cible <= niveau apprenant
+        return niveau_min_cible <= niveau_apprenant_score
+    
+    def _extraire_niveau_formation(self, dept, niveaux_ordre):
+        """Extrait le niveau d'une formation à partir de ses cours"""
+        cours_qs = Cours.objects.filter(departement=dept)
+        if not cours_qs.exists():
+            return 0
+        
+        # Prendre le niveau le plus élevé parmi les cours de la formation
+        niveaux_trouves = []
+        for cours in cours_qs:
+            if cours.niveau and cours.niveau in niveaux_ordre:
+                niveaux_trouves.append(niveaux_ordre[cours.niveau])
+        
+        return max(niveaux_trouves) if niveaux_trouves else 0
+    
+    def _serialiser_departement(self, dept, cours_data, request):
+        """Sérialise un département avec ses cours"""
+        return {
+            'id': dept.id,
+            'nom': dept.nom,
+            'description': dept.description,
+            'type': dept.type_departement,
+            'cours': cours_data,
+            'niveaux_cibles': dept.niveaux_cibles,
+            'date_limite_inscription': dept.date_limite_inscription,
+            'date_examen': dept.date_examen,
+            'frais_dossier': dept.frais_dossier,
+            'duree_formation': dept.duree_formation,
+            'mode_formation': dept.mode_formation,
+            'certificat_delivre': dept.certificat_delivre,
+        }
 
 
 class ApprenantFormationsAPIView(APIView):

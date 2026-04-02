@@ -176,7 +176,7 @@ urlpatterns = [
     # Exemple : concours ENS, concours Polytechnique, etc.
     path(
         'apprenant/prepa-concours/',
-        ApprenantPrepaConcoursAPIView.as_view(),
+        ApprenantConcoursFormationsView.as_view(),
         name='apprenant-prepa-concours',
     ),
 
@@ -185,8 +185,8 @@ urlpatterns = [
     # parcours "Formations" filtrés par profile.sub_cursus.
     # Paramètre optionnel : ?parcours=NomDuParcours
     path(
-        'apprenant/formations/',
-        ApprenantFormationsAPIView.as_view(),
+        'apprenant/formations/?type=all',
+        ApprenantConcoursFormationsView.as_view(),
         name='apprenant-formations',
     ),
 
