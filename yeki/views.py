@@ -4068,8 +4068,8 @@ class EnseignantAdminDashboardView(APIView):
         }
 
         nom_complet = (
-            f"{profile.user.first_name} {profile.user.last_name}".strip()
-            or profile.user.username
+            profile.user.username
+            or f"{profile.user.first_name} {profile.user.last_name}".strip()
         )
 
         return Response({
