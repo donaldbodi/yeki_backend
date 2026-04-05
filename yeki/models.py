@@ -208,6 +208,20 @@ class Departement(models.Model):
         help_text="Débouchés après réussite du concours"
     )
 
+    est_valide = models.BooleanField(default=False, help_text="Validé par l'admin du parcours")
+    est_refuse = models.BooleanField(default=False, help_text="Refusé par l'admin du parcours")
+    motif_refus = models.TextField(blank=True, help_text="Motif du refus")
+    valide_le = models.DateTimeField(null=True, blank=True, help_text="Date de validation")
+
+    # Ajouter ces champs pour la gestion des accès
+    acces_restreint = models.BooleanField(default=False, help_text="Accès limité aux apprenants sélectionnés")
+    apprenants_autorises = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name='formations_autorisees',
+        help_text="Apprenants autorisés à accéder à cette formation (si acces_restreint=True)"
+    )
+
     # ── CHAMPS FORMATION ──────────────────────────────────────────
     # Activés quand parcours.type_parcours == 'formation'
     est_formation_metier    = models.BooleanField(
@@ -816,6 +830,13 @@ class Olympiade(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True
     )
 
+    # ---validation olympiade ----
+    est_validee = models.BooleanField(default=False)  # Validée par l'admin
+    est_refusee = models.BooleanField(default=False)   # Refusée par l'admin
+    motif_refus = models.TextField(blank=True)         # Motif du refus
+    validee_le = models.DateTimeField(null=True, blank=True)  # Date de validatio
+    
+
     class Meta:
         ordering = ["-date_debut_olympiade"]
 
@@ -830,10 +851,10 @@ class Olympiade(models.Model):
         if now <= self.date_cloture_inscription:
             return "inscription"
         if now < self.date_debut_olympiade:
-            return "fermee"
+            return "fermée"
         if now <= self.date_fin_olympiade:
             return "en_cours"
-        return "terminee"
+        return "terminée"
 
     def clean(self):
         if self.date_cloture_inscription >= self.date_debut_olympiade:

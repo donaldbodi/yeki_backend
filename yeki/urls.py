@@ -282,4 +282,15 @@ urlpatterns = [
 
     path('api/latest-version/', latest_version, name='latest-version'),
 
+    # Admin - Refus olympiade
+    path('admin/olympiades/<int:pk>/refuser/', AdminRefuserOlympiadeView.as_view(), name='admin-refuser-olympiade'),
+    
+    # Admin - Validation/Refus département gratuit
+    path('admin/departements/<int:pk>/valider/', AdminValiderDepartementGratuitView.as_view(), name='admin-valider-departement'),
+    path('admin/departements/<int:pk>/refuser/', AdminRefuserDepartementView.as_view(), name='admin-refuser-departement'),
+    
+    # Cadre - Apprenants par département
+    path('departements/<int:departement_id>/apprenants/', ApprenantsParDepartementView.as_view(), name='departement-apprenants'),
+
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+

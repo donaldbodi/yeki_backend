@@ -4899,10 +4899,13 @@ class OlympiadesPourMoiView(APIView):
 #             L'admin met est_publie=True → visible pour les apprenants.
 # ══════════════════════════════════════════════════════════════════
 
+# views.py - Modifier AdminOlympiadesAValiderView
+
 class AdminOlympiadesAValiderView(APIView):
     """
     GET /api/admin/olympiades/a-valider/
-    Retourne les olympiades du parcours de l'admin qui attendent validation.
+    Retourne les olympiades du parcours de l'admin qui attendent validation
+    ou qui ont été refusées.
     """
     permission_classes = [IsAuthenticated]
 
@@ -4911,48 +4914,61 @@ class AdminOlympiadesAValiderView(APIView):
         if not profile or profile.user_type != 'enseignant_admin':
             return Response({"detail": "Accès refusé."}, status=403)
 
-        # Récupérer le parcours de cet admin
         try:
             parcours = Parcours.objects.get(admin=profile)
         except Parcours.DoesNotExist:
             return Response({"detail": "Aucun parcours assigné."}, status=404)
 
-        # Olympiades du parcours, non encore publiées
-        olympiades = Olympiade.objects.filter(
+        # Olympiades en attente de validation (prix = 0, non validées, non refusées)
+        olympiades_attente = Olympiade.objects.filter(
             organisateur__departements_cadre__parcours=parcours,
-            devoir__est_publie=False,
-        ).select_related(
-            'organisateur__user', 'devoir'
-        ).distinct().order_by('-date_debut_olympiade')
+            prix=0,
+            est_validee=False,
+            est_refusee=False,
+        ).distinct().select_related('organisateur__user', 'devoir')
+
+        # Olympiades refusées (l'admin peut encore les voir pour accepter)
+        olympiades_refusees = Olympiade.objects.filter(
+            organisateur__departements_cadre__parcours=parcours,
+            prix=0,
+            est_refusee=True,
+        ).distinct().select_related('organisateur__user', 'devoir')
 
         result = []
-        for o in olympiades:
-            cadre_nom = _nom_profil(o.organisateur) if o.organisateur else '—'
-            dept = (
-                o.organisateur.departements_cadre.filter(parcours=parcours).first()
-                if o.organisateur else None
-            )
+        for o in olympiades_attente:
             result.append({
-                "id":             o.id,
-                "titre":          o.titre,
-                "matiere":        o.matiere,
-                "niveau":         o.niveau,
-                "edition":        o.edition,
-                "cadre":          cadre_nom,
-                "departement":    {"id": dept.id, "nom": dept.nom} if dept else None,
-                "date_debut":     o.date_debut_olympiade,
-                "date_fin":       o.date_fin_olympiade,
-                "nb_questions":   o.nb_questions,
-                "prix_1er":       o.prix_1er,
-                "prix_2eme":      o.prix_2eme,
-                "prix_3eme":      o.prix_3eme,
-                "est_gratuite":   not any([o.prix_1er, o.prix_2eme, o.prix_3eme]),
-                "devoir_id":      o.devoir.id if o.devoir else None,
-                "statut":         o.statut_auto,
+                "id": o.id,
+                "titre": o.titre,
+                "matiere": o.matiere,
+                "niveau": o.niveau,
+                "edition": o.edition,
+                "statut_validation": "attente",
+                "cadre": {
+                    "id": o.organisateur.id,
+                    "nom": _nom_profil(o.organisateur),
+                },
+                "date_creation": o.created_at,
+                "prix": getattr(o, 'prix', 0),
+            })
+        
+        for o in olympiades_refusees:
+            result.append({
+                "id": o.id,
+                "titre": o.titre,
+                "matiere": o.matiere,
+                "niveau": o.niveau,
+                "edition": o.edition,
+                "statut_validation": "refuse",
+                "motif_refus": getattr(o, 'motif_refus', ''),
+                "cadre": {
+                    "id": o.organisateur.id,
+                    "nom": _nom_profil(o.organisateur),
+                },
+                "date_creation": o.created_at,
+                "prix": getattr(o, 'prix', 0),
             })
 
         return Response(result)
-
 
 class AdminValiderOlympiadeView(APIView):
     """
@@ -5024,6 +5040,165 @@ class AdminValiderOlympiadeView(APIView):
             "id":     olympiade.id,
             "titre":  olympiade.titre,
             "statut": "validee",
+        })
+
+
+# views.py - Ajouter après AdminValiderOlympiadeView existant
+
+class AdminRefuserOlympiadeView(APIView):
+    """Refuser une olympiade (la garde visible mais marquée comme refusée)"""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, olympiade_id):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        olympiade = get_object_or_404(
+            Olympiade,
+            pk=olympiade_id,
+            organisateur__departements_cadre__parcours=parcours,
+        )
+
+        motif = request.data.get('motif', 'Refusée par l\'administrateur.')
+        
+        olympiade.est_refusee = True
+        olympiade.est_validee = False
+        olympiade.motif_refus = motif
+        olympiade.save()
+        
+        # Optionnel: envoyer une notification au cadre
+        # Notification.objects.create(...)
+        
+        enregistrer_activite(
+            user=request.user,
+            action='olympiad_rejected',
+            description=f"Olympiade « {olympiade.titre} » refusée. Motif : {motif}",
+            objet_id=olympiade.id,
+            objet_type='Olympiade',
+        )
+        
+        return Response({
+            "detail": "Olympiade refusée.",
+            "id": olympiade.id,
+            "est_refusee": True,
+        })
+
+
+class AdminValiderDepartementGratuitView(APIView):
+    """Valider un département gratuit (formation/concours)"""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, departement_id):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        departement = get_object_or_404(Departement, pk=departement_id, parcours=parcours)
+        
+        departement.est_valide = True
+        departement.est_refuse = False
+        departement.valide_le = timezone.now()
+        departement.save()
+        
+        # Activer tous les cours du département
+        departement.cours.update(est_actif=True)
+        
+        enregistrer_activite(
+            user=request.user,
+            action='department_validated',
+            description=f"Département « {departement.nom} » validé",
+            objet_id=departement.id,
+            objet_type='Departement',
+        )
+        
+        return Response({
+            "detail": "Département validé avec succès.",
+            "est_valide": True,
+        })
+
+
+# views.py - Ajouter
+
+class ApprenantsParDepartementView(APIView):
+    """GET /api/departements/<departement_id>/apprenants/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, departement_id):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_cadre':
+            return Response({"detail": "Accès réservé aux enseignants cadres."}, status=403)
+        
+        departement = get_object_or_404(Departement, pk=departement_id)
+        
+        # Vérifier que le cadre gère ce département
+        if departement.cadre != profile:
+            return Response({"detail": "Vous n'êtes pas le cadre de ce département."}, status=403)
+        
+        # Récupérer les apprenants du parcours
+        apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus=departement.parcours.nom,
+            is_active=True
+        ).select_related('user')
+        
+        data = [{
+            "id": a.id,
+            "nom": _nom_profil(a),
+            "username": a.user.username,
+            "email": a.user.email,
+        } for a in apprenants]
+        
+        return Response(data)
+    
+
+class AdminRefuserDepartementView(APIView):
+    """Refuser un département gratuit"""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, departement_id):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        departement = get_object_or_404(Departement, pk=departement_id, parcours=parcours)
+        
+        motif = request.data.get('motif', 'Refusé par l\'administrateur.')
+        
+        departement.est_refuse = True
+        departement.est_valide = False
+        departement.motif_refus = motif
+        departement.save()
+        
+        enregistrer_activite(
+            user=request.user,
+            action='department_rejected',
+            description=f"Département « {departement.nom} » refusé. Motif : {motif}",
+            objet_id=departement.id,
+            objet_type='Departement',
+        )
+        
+        return Response({
+            "detail": "Département refusé.",
+            "est_refuse": True,
         })
 
 
