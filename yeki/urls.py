@@ -280,7 +280,7 @@ urlpatterns = [
         name='admin-dashboard-enrichi',
     ),
 
-    path('api/latest-version/', latest_version, name='latest-version'),
+    path('latest-version/', latest_version, name='latest-version'),
 
     # Admin - Refus olympiade
     path('admin/olympiades/<int:pk>/refuser/', AdminRefuserOlympiadeView.as_view(), name='admin-refuser-olympiade'),
@@ -291,6 +291,7 @@ urlpatterns = [
     
     # Cadre - Apprenants par département
     path('departements/<int:departement_id>/apprenants/', ApprenantsParDepartementView.as_view(), name='departement-apprenants'),
+
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
