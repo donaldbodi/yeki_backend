@@ -6411,6 +6411,8 @@ def landing(request):
 # ---------------------------
 # Register
 # ---------------------------
+# Dans views.py, modifiez la classe RegisterView
+
 class RegisterView(APIView):
     permission_classes = [AllowAny]
 
@@ -6418,22 +6420,46 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
 
         if serializer.is_valid():
-            profile = serializer.save()
-            
-            token, _ = Token.objects.get_or_create(user=profile.user)
+            try:
+                profile = serializer.save()
+                
+                token, _ = Token.objects.get_or_create(user=profile.user)
 
+                return Response({
+                    'token': token.key,
+                    'role': profile.user_type,
+                    'user': {
+                        'id': profile.user.id,
+                        'username': profile.user.username,
+                        'email': profile.user.email,
+                    }
+                }, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                # Gestion des erreurs inattendues
+                return Response({
+                    'detail': str(e),
+                    'error_type': 'server_error'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # ✅ Formatage des erreurs pour le frontend
+        errors = {}
+        for field, error_list in serializer.errors.items():
+            errors[field] = error_list[0] if error_list else "Champ invalide"
+        
+        # Détecter spécifiquement l'erreur email
+        if 'email' in errors:
             return Response({
-                'token': token.key,
-                'role': profile.user_type,
-                'user': {
-                    'id': profile.user.id,
-                    'username': profile.user.username,
-                    'email': profile.user.email,
-                }
-            }, status=status.HTTP_201_CREATED)
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+                'detail': errors['email'],
+                'error_type': 'email_exists',
+                'field': 'email',
+                'errors': errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        return Response({
+            'detail': next(iter(errors.values())) if errors else "Erreur d'inscription",
+            'error_type': 'validation_error',
+            'errors': errors
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 # ---------------------------
 # Login

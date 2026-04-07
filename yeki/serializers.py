@@ -34,6 +34,8 @@ class ProfileSerializer(serializers.ModelSerializer):
 # REGISTER SERIALIZER
 # =======================
 
+# Dans serializers.py, modifiez la classe RegisterSerializer
+
 class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
     name = serializers.CharField(required=True)
@@ -54,6 +56,7 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value):
+        # ✅ Vérification email unique (insensible à la casse)
         if User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError("Cette adresse email est déjà utilisée.")
         return value
@@ -71,10 +74,15 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
+        # Vérification supplémentaire email unique (sécurité)
+        email = validated_data.get('email')
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError({"email": "Cette adresse email est déjà utilisée."})
+        
         # Crée l'utilisateur Django
         user = User.objects.create(
             username=validated_data['username'],
-            email=validated_data['email'],
+            email=email,
         )
         user.set_password(validated_data['password'])
         user.save()
