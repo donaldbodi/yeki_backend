@@ -3167,6 +3167,12 @@ def _nb_apprenants_pour_parcours(nom_parcours: str) -> int:
 
 
 class EnseignantCadreDashboardView(APIView):
+    """
+    GET /api/enseignant/cadre/dashboard/
+    
+    Retourne tous les départements gérés par l'enseignant cadre,
+    avec leurs cours, enseignants principaux et statistiques.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -3181,31 +3187,228 @@ class EnseignantCadreDashboardView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # ── Département unique du cadre ───────────────────────────
-        departement = Departement.objects.filter(
-            cadre=profile
-        ).select_related('parcours').first()
+        # ✅ Récupérer TOUS les départements du cadre
+        departements = Departement.objects.filter(
+            cadre=profile,
+            est_actif=True
+        ).select_related('parcours').prefetch_related(
+            'cours__enseignant_principal__user',
+            'cours__enseignants__user'
+        )
 
-        if departement is None:
-            # Cadre non encore affecté à un département
-            nom_complet = (
-                f"{profile.user.first_name} {profile.user.last_name}".strip()
-                or profile.user.username
-            )
+        nom_complet = (
+            f"{profile.user.first_name} {profile.user.last_name}".strip()
+            or profile.user.username
+        )
+
+        # Si aucun département, retourner une structure vide
+        if not departements.exists():
             return Response({
-                "nom":                   nom_complet,
-                "departement":           {},
-                "cours":                 [],
-                "enseignants_principaux": [],
+                "nom": nom_complet,
+                "departements": [],
                 "stats": {
-                    "nb_cours":       0,
-                    "nb_apprenants":  0,
+                    "nb_departements": 0,
+                    "nb_cours": 0,
+                    "nb_apprenants": 0,
                     "nb_enseignants": 0,
-                    "taux_moyen":     0,
+                    "taux_moyen": 0,
                 },
             }, status=status.HTTP_200_OK)
 
-        # ── Cours du département ──────────────────────────────────
+        # ── Construire les données pour chaque département ──
+        departements_data = []
+        stats_globales = {
+            "nb_departements": departements.count(),
+            "nb_cours": 0,
+            "nb_apprenants": 0,
+            "nb_enseignants": 0,
+            "taux_moyen": 0,
+        }
+        
+        # Pour éviter les doublons d'enseignants
+        enseignants_ids = set()
+        total_taux = 0
+
+        for dept in departements:
+            # Récupérer les cours du département
+            cours_qs = Cours.objects.filter(
+                departement=dept
+            ).select_related('enseignant_principal__user')
+            
+            cours_data = []
+            for c in cours_qs:
+                ep_data = None
+                if c.enseignant_principal:
+                    ep = c.enseignant_principal
+                    ep_data = {
+                        "id": ep.id,
+                        "nom": f"{ep.user.first_name} {ep.user.last_name}".strip() or ep.user.username,
+                        "username": ep.user.username,
+                        "photo": request.build_absolute_uri(ep.avatar.url) if ep.avatar else None,
+                    }
+                    enseignants_ids.add(ep.id)
+                
+                # Calcul du taux de complétion moyen du cours
+                taux_completion = self._calculer_taux_completion_cours(c, request.user)
+                
+                cours_data.append({
+                    "id": c.id,
+                    "titre": c.titre,
+                    "niveau": c.niveau,
+                    "nb_apprenants": c.nb_apprenants,
+                    "taux_completion": taux_completion,
+                    "color_code": c.color_code,
+                    "icon_name": c.icon_name,
+                    "enseignant_principal": ep_data,
+                    "nb_lecons": c.nb_lecons,
+                    "nb_devoirs": c.nb_devoirs,
+                })
+                
+                stats_globales["nb_cours"] += 1
+                total_taux += taux_completion
+
+            # Récupérer les apprenants du parcours (calcul dynamique)
+            parcours_nom = dept.parcours.nom if dept.parcours else ''
+            nb_apprenants = Profile.objects.filter(
+                user_type='apprenant',
+                cursus=parcours_nom,
+                is_active=True
+            ).count()
+            stats_globales["nb_apprenants"] += nb_apprenants
+
+            # Données du département
+            dept_data = {
+                "id": dept.id,
+                "nom": dept.nom,
+                "description": getattr(dept, 'description', ''),
+                "parcours": dept.parcours.nom if dept.parcours else "",
+                "parcours_id": dept.parcours.id if dept.parcours else None,
+                "couleur": dept.couleur,
+                "prix": dept.prix,
+                "est_actif": dept.est_actif,
+                "type_departement": dept.type_departement,
+                "image_url": request.build_absolute_uri(dept.image.url) if dept.image else None,
+                # Champs spécifiques
+                "est_prepa_concours": dept.est_prepa_concours,
+                "nom_concours": dept.nom_concours,
+                "organisme_concours": dept.organisme_concours,
+                "date_limite_inscription": dept.date_limite_inscription,
+                "date_examen": dept.date_examen,
+                "est_formation_metier": dept.est_formation_metier,
+                "est_formation_classique": dept.est_formation_classique,
+                "duree_formation": dept.duree_formation,
+                "mode_formation": dept.mode_formation,
+                "certificat_delivre": dept.certificat_delivre,
+                "ville": dept.ville,
+                "domaine": dept.domaine,
+                "est_certifiante": dept.est_certifiante,
+                # Statistiques
+                "nb_cours": cours_qs.count(),
+                "nb_apprenants": nb_apprenants,
+                "taux_moyen": self._calculer_taux_moyen_departement(cours_qs, request.user),
+                "cours": cours_data,
+            }
+            departements_data.append(dept_data)
+
+        # ── Enseignants principaux distincts ──
+        enseignants_data = []
+        for ep_id in enseignants_ids:
+            try:
+                ep = Profile.objects.get(id=ep_id)
+                nb_cours_ep = Cours.objects.filter(
+                    enseignant_principal=ep,
+                    departement__in=departements
+                ).count()
+                nb_app_ep = sum(
+                    c.nb_apprenants
+                    for c in Cours.objects.filter(
+                        enseignant_principal=ep,
+                        departement__in=departements
+                    )
+                )
+                
+                # Score moyen à partir des évaluations
+                from django.db.models import Avg
+                avg = EvaluationExercice.objects.filter(
+                    exercice__cours__enseignant_principal=ep,
+                    exercice__cours__departement__in=departements
+                ).aggregate(moy=Avg('score'))['moy']
+                score_moyen = round((avg or 0) / 20 * 20, 1)
+                
+                enseignants_data.append({
+                    "id": ep.id,
+                    "nom": f"{ep.user.first_name} {ep.user.last_name}".strip() or ep.user.username,
+                    "username": ep.user.username,
+                    "email": ep.user.email,
+                    "photo": request.build_absolute_uri(ep.avatar.url) if ep.avatar else None,
+                    "nb_cours": nb_cours_ep,
+                    "nb_apprenants": nb_app_ep,
+                    "score_moyen": score_moyen,
+                })
+            except Profile.DoesNotExist:
+                pass
+
+        # Calcul des moyennes globales
+        if stats_globales["nb_cours"] > 0:
+            stats_globales["taux_moyen"] = round(total_taux / stats_globales["nb_cours"], 1)
+        stats_globales["nb_enseignants"] = len(enseignants_data)
+
+        return Response({
+            "nom": nom_complet,
+            "departements": departements_data,
+            "enseignants_principaux": enseignants_data,
+            "stats": stats_globales,
+        }, status=status.HTTP_200_OK)
+
+    def _calculer_taux_completion_cours(self, cours, user):
+        """Calcule le taux de complétion d'un cours pour un apprenant donné."""
+        total_lecons = Lecon.objects.filter(cours=cours).count()
+        if total_lecons == 0:
+            return 0.0
+        terminees = ProgressionLecon.objects.filter(
+            apprenant=user,
+            cours=cours,
+            terminee=True
+        ).count()
+        return round((terminees / total_lecons) * 100, 1)
+
+    def _calculer_taux_moyen_departement(self, cours_qs, user):
+        """Calcule le taux de complétion moyen d'un département."""
+        if not cours_qs.exists():
+            return 0.0
+        total = 0
+        count = 0
+        for cours in cours_qs:
+            taux = self._calculer_taux_completion_cours(cours, user)
+            total += taux
+            count += 1
+        return round(total / count, 1) if count > 0 else 0.0
+
+
+# views.py - Ajouter
+
+class EnseignantCadreDepartementDetailView(APIView):
+    """
+    GET /api/enseignant/cadre/departement/<departement_id>/
+    
+    Retourne les détails complets d'un département pour l'enseignant cadre.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, departement_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        departement = get_object_or_404(Departement, pk=departement_id, cadre=profile)
+
         cours_qs = Cours.objects.filter(
             departement=departement
         ).select_related('enseignant_principal__user')
@@ -3216,106 +3419,86 @@ class EnseignantCadreDashboardView(APIView):
             if c.enseignant_principal:
                 ep = c.enseignant_principal
                 ep_data = {
-                    "id":       ep.id,
-                    "nom":      f"{ep.user.first_name} {ep.user.last_name}".strip()
-                                or ep.user.username,
-                    "username": ep.user.username,
-                    "photo":    request.build_absolute_uri(ep.avatar.url)
-                                if ep.avatar else None,
+                    "id": ep.id,
+                    "nom": f"{ep.user.first_name} {ep.user.last_name}".strip() or ep.user.username,
                 }
             cours_data.append({
-                "id":               c.id,
-                "titre":            c.titre,
-                "niveau":           c.niveau,
-                "nb_apprenants":    c.nb_apprenants,
-                "taux_completion":  0,          # calculer si tu as le modèle de progression
-                "color_code":       c.color_code,
-                "icon_name":        c.icon_name,
+                "id": c.id,
+                "titre": c.titre,
+                "niveau": c.niveau,
+                "description_brief": c.description_brief,
+                "color_code": c.color_code,
+                "icon_name": c.icon_name,
+                "nb_lecons": c.nb_lecons,
+                "nb_devoirs": c.nb_devoirs,
+                "nb_apprenants": c.nb_apprenants,
                 "enseignant_principal": ep_data,
             })
 
-        # ── Enseignants principaux distincts + leurs stats ────────
-        ep_ids_vus = set()
-        enseignants_principaux = []
+        return Response({
+            "id": departement.id,
+            "nom": departement.nom,
+            "description": departement.description,
+            "parcours": departement.parcours.nom if departement.parcours else "",
+            "couleur": departement.couleur,
+            "prix": departement.prix,
+            "type_departement": departement.type_departement,
+            "cours": cours_data,
+            "nb_cours": cours_qs.count(),
+        }, status=status.HTTP_200_OK)
 
-        for c in cours_qs:
-            if c.enseignant_principal is None:
-                continue
-            ep = c.enseignant_principal
-            if ep.id in ep_ids_vus:
-                continue
-            ep_ids_vus.add(ep.id)
 
-            nb_cours_ep   = Cours.objects.filter(
-                enseignant_principal=ep,
-                departement=departement
-            ).count()
-            nb_app_ep     = sum(
-                co.nb_apprenants
-                for co in Cours.objects.filter(
-                    enseignant_principal=ep,
-                    departement=departement
-                )
+class EnseignantCadreDepartementUpdateView(APIView):
+    """
+    PATCH /api/enseignant/cadre/departement/<departement_id>/update/
+    
+    Met à jour les informations d'un département.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, departement_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=status.HTTP_403_FORBIDDEN
             )
 
-            # Score moyen à partir des évaluations d'exercices
-            from django.db.models import Avg
-            avg = EvaluationExercice.objects.filter(
-                exercice__cours__enseignant_principal=ep,
-                exercice__cours__departement=departement
-            ).aggregate(moy=Avg('score'))['moy']
+        departement = get_object_or_404(Departement, pk=departement_id, cadre=profile)
 
-            score_moyen = round((avg or 0) / 20 * 20, 1)   # ramener sur 20
+        data = request.data
+        updates = {}
 
-            enseignants_principaux.append({
-                "id":          ep.id,
-                "nom":         f"{ep.user.first_name} {ep.user.last_name}".strip()
-                               or ep.user.username,
-                "username":    ep.user.username,
-                "email":       ep.user.email,
-                "photo":       request.build_absolute_uri(ep.avatar.url)
-                               if ep.avatar else None,
-                "nb_cours":    nb_cours_ep,
-                "nb_apprenants": nb_app_ep,
-                "score_moyen": score_moyen,
-            })
+        if 'nom' in data:
+            updates['nom'] = data['nom'].strip()
+        if 'description' in data:
+            updates['description'] = data['description'].strip()
+        if 'couleur' in data:
+            updates['couleur'] = data['couleur']
+        if 'prix' in data:
+            updates['prix'] = int(data['prix'])
+        if 'est_actif' in data:
+            updates['est_actif'] = data['est_actif']
 
-        # ── Stats globales du département ─────────────────────────
-        nb_cours      = len(cours_data)
-        # Calcul dynamique : apprenants dont profile.cursus == nom du parcours
-        parcours_nom  = departement.parcours.nom if departement.parcours else ''
-        nb_apprenants = _nb_apprenants_pour_parcours(parcours_nom)
-        nb_enseignants = len(enseignants_principaux)
-        taux_moyen    = (
-            sum(c["taux_completion"] for c in cours_data) / nb_cours
-            if nb_cours > 0 else 0
-        )
-
-        # ── Infos département ─────────────────────────────────────
-        dept_data = {
-            "id":          departement.id,
-            "nom":         departement.nom,
-            "description": getattr(departement, 'description', ''),
-            "parcours":    departement.parcours.nom if departement.parcours else "",
-            "parcours_id": departement.parcours.id  if departement.parcours else None,
-        }
-
-        nom_complet = (
-            f"{profile.user.first_name} {profile.user.last_name}".strip()
-            or profile.user.username
-        )
+        if updates:
+            for key, value in updates.items():
+                setattr(departement, key, value)
+            departement.save()
 
         return Response({
-            "nom":                   nom_complet,
-            "departement":           dept_data,
-            "cours":                 cours_data,
-            "enseignants_principaux": enseignants_principaux,
-            "stats": {
-                "nb_cours":       nb_cours,
-                "nb_apprenants":  nb_apprenants,
-                "nb_enseignants": nb_enseignants,
-                "taux_moyen":     round(taux_moyen, 1),
-            },
+            "detail": "Département mis à jour avec succès.",
+            "departement": {
+                "id": departement.id,
+                "nom": departement.nom,
+                "description": departement.description,
+                "couleur": departement.couleur,
+                "prix": departement.prix,
+                "est_actif": departement.est_actif,
+            }
         }, status=status.HTTP_200_OK)
 
 

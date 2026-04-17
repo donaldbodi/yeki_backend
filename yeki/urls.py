@@ -292,6 +292,16 @@ urlpatterns = [
     # Cadre - Apprenants par département
     path('departements/<int:departement_id>/apprenants/', ApprenantsParDepartementView.as_view(), name='departement-apprenants'),
 
+    # Enseignant cadre - Détail d'un département spécifique
+    path('enseignant/cadre/departement/<int:departement_id>/',
+         EnseignantCadreDepartementDetailView.as_view(),
+         name='enseignant-cadre-departement'),
+    
+    # Enseignant cadre - Mettre à jour un département
+    path('enseignant/cadre/departement/<int:departement_id>/update/',
+         EnseignantCadreDepartementUpdateView.as_view(),
+         name='enseignant-cadre-departement-update'),
+
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
