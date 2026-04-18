@@ -22,6 +22,7 @@ import os
 import openai
 import hashlib
 import hmac
+import requests
 
 
 
@@ -110,235 +111,12 @@ def _progression_cours(user, cours_qs):
     return prog_map
 
 
-# views_paiement.py -
-
-# Configuration Campay
-CAMPAY_API_URL = "https://demo.campay.net/api/collect/"
-CAMPAY_USERNAME = settings.CAMPAY_USERNAME
-CAMPAY_PASSWORD = settings.CAMPAY_PASSWORD
+# views_paiement.py
 
 # Configuration CinetPay
 CINETPAY_API_KEY = settings.CINETPAY_API_KEY
 CINETPAY_SITE_ID = settings.CINETPAY_SITE_ID
 CINETPAY_API_URL = "https://api-checkout.cinetpay.com/v2/payment"
-
-class InitierPaiementCampayView(APIView):
-    """Initier un paiement avec Campay"""
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        amount = request.data.get('amount')
-        phone = request.data.get('phone')
-        description = request.data.get('description', 'Recharge Yéki Wallet')
-        
-        if not amount or not phone:
-            return Response({'error': 'Montant et téléphone requis'}, status=400)
-        
-        reference = f"YEKI-{uuid.uuid4().hex[:8].upper()}"
-        
-        # Créer la transaction dans la base
-        transaction = CampayTransaction.objects.create(
-            user=request.user,
-            amount=amount,
-            reference=reference,
-            phone=phone
-        )
-        
-        # Appeler l'API Campay
-        try:
-            response = request.post(
-                CAMPAY_API_URL,
-                auth=(CAMPAY_USERNAME, CAMPAY_PASSWORD),
-                json={
-                    'amount': str(amount),
-                    'currency': 'XAF',
-                    'from': phone,
-                    'description': description,
-                    'external_reference': reference
-                }
-            )
-            
-            if response.status_code == 201:
-                data = response.json()
-                transaction.operation_id = data.get('operation')
-                transaction.save()
-                
-                return Response({
-                    'reference': reference,
-                    'status': 'pending',
-                    'message': 'Paiement initié. Veuillez confirmer sur votre téléphone.'
-                }, status=200)
-            else:
-                transaction.status = 'failed'
-                transaction.save()
-                return Response({'error': 'Erreur lors du paiement'}, status=400)
-                
-        except Exception as e:
-            transaction.status = 'failed'
-            transaction.save()
-            return Response({'error': str(e)}, status=500)
-
-
-class VerifierPaiementCampayView(APIView):
-    """Vérifier le statut d'un paiement Campay"""
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request, reference):
-        transaction = get_object_or_404(CampayTransaction, reference=reference, user=request.user)
-        
-        if transaction.status == 'success':
-            return Response({'status': 'success', 'amount': transaction.amount})
-        
-        try:
-            response = request.get(
-                f"{CAMPAY_API_URL}{transaction.operation_id}/",
-                auth=(CAMPAY_USERNAME, CAMPAY_PASSWORD)
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('status') == 'success':
-                    transaction.status = 'success'
-                    transaction.save()
-                    
-                    # Créditer le wallet
-                    wallet = YekiWallet.get_or_create_wallet(request.user)
-                    wallet.crediter(
-                        montant=transaction.amount,
-                        description=f'Recharge via Campay - {reference}',
-                        reference=reference
-                    )
-                    
-                    # Créer l'enregistrement de paiement
-                    Paiement.objects.create(
-                        utilisateur=request.user,
-                        type_paiement='wallet_recharge',
-                        moyen='campay',
-                        montant=transaction.amount,
-                        statut='succes',
-                        transaction_id=transaction.operation_id
-                    )
-                    
-                    return Response({'status': 'success', 'amount': transaction.amount})
-                    
-        except Exception as e:
-            pass
-            
-        return Response({'status': transaction.status})
-
-
-class InitierPaiementCinetPayView(APIView):
-    """Initier un paiement avec CinetPay"""
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        amount = request.data.get('amount')
-        phone = request.data.get('phone')
-        payment_method = request.data.get('payment_method', 'mtn_momo')  # mtn_momo, orange_money, card
-        
-        if not amount:
-            return Response({'error': 'Montant requis'}, status=400)
-        
-        reference = f"YEKI-{uuid.uuid4().hex[:8].upper()}"
-        
-        # Créer la transaction
-        transaction = CinetPayTransaction.objects.create(
-            user=request.user,
-            amount=amount,
-            reference=reference,
-            payment_method=payment_method
-        )
-        
-        # Générer le hash de sécurité
-        data_to_hash = f"{CINETPAY_SITE_ID}{reference}{amount}XAF{phone or ''}"
-        hash_value = hashlib.sha256(data_to_hash.encode()).hexdigest()
-        
-        # Préparer les données pour CinetPay
-        payment_data = {
-            'amount': amount,
-            'currency': 'XAF',
-            'transaction_id': reference,
-            'description': 'Recharge Yéki Wallet',
-            'site_id': CINETPAY_SITE_ID,
-            'apikey': CINETPAY_API_KEY,
-            'notify_url': f"{settings.SITE_URL}/api/paiements/cinetpay/notify/",
-            'return_url': f"{settings.SITE_URL}/payment-result/",
-            'metadata': json.dumps({'user_id': request.user.id, 'reference': reference}),
-            'customer_phone_number': phone or '',
-            'customer_email': request.user.email
-        }
-        
-        # Ajouter le mode de paiement spécifique si fourni
-        if payment_method == 'mtn_momo':
-            payment_data['payment_method'] = 'mtn_money'
-        elif payment_method == 'orange_money':
-            payment_data['payment_method'] = 'orange_money'
-        
-        try:
-            response = request.post(CINETPAY_API_URL, json=payment_data)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('code') == '201':
-                    payment_url = data.get('payment_url')
-                    transaction.transaction_id = data.get('transaction_id')
-                    transaction.save()
-                    
-                    return Response({
-                        'reference': reference,
-                        'payment_url': payment_url,
-                        'status': 'pending'
-                    }, status=200)
-                    
-            transaction.status = 'failed'
-            transaction.save()
-            return Response({'error': 'Erreur lors de l\'initialisation'}, status=400)
-            
-        except Exception as e:
-            transaction.status = 'failed'
-            transaction.save()
-            return Response({'error': str(e)}, status=500)
-
-
-class CinetPayWebhookView(APIView):
-    """Webhook pour recevoir les notifications CinetPay"""
-    permission_classes = []  # Public endpoint
-    
-    def post(self, request):
-        data = request.data
-        transaction_id = data.get('transaction_id')
-        status = data.get('status')
-        amount = data.get('amount')
-        
-        if status == 'ACCEPTED' or status == 'success':
-            try:
-                transaction = CinetPayTransaction.objects.get(transaction_id=transaction_id)
-                if transaction.status != 'success':
-                    transaction.status = 'success'
-                    transaction.save()
-                    
-                    # Créditer le wallet
-                    wallet = YekiWallet.get_or_create_wallet(transaction.user)
-                    wallet.crediter(
-                        montant=transaction.amount,
-                        description=f'Recharge via CinetPay - {transaction.reference}',
-                        reference=transaction.reference
-                    )
-                    
-                    # Créer l'enregistrement de paiement
-                    Paiement.objects.create(
-                        utilisateur=transaction.user,
-                        type_paiement='wallet_recharge',
-                        moyen='cinetpay',
-                        montant=transaction.amount,
-                        statut='succes',
-                        transaction_id=transaction_id
-                    )
-                    
-            except CinetPayTransaction.DoesNotExist:
-                pass
-                
-        return Response({'status': 'ok'})
 
 
 def _serialise_cours(c, prog_map):
@@ -2902,17 +2680,6 @@ class MonInscriptionOlympiadeView(APIView):
         )
         serializer = InscriptionOlympiadeSerializer(inscription, context={"request": request})
         return Response(serializer.data)
-
-
-# GET tous les messages + réponses
-class ForumMessagesListAPIView(generics.ListAPIView):
-    serializer_class = ForumMessageSerializer
-
-    def get_queryset(self):
-        cours_id = self.request.query_params.get('cours_id')
-        if cours_id:
-            return ForumMessage.objects.filter(cours_id=cours_id, parent=None).order_by('-timestamp')
-        return ForumMessage.objects.filter(parent=None).order_by('-timestamp')
 
 
 # POST nouvelle question ou réponse
@@ -5542,177 +5309,276 @@ class AdminValiderDepartementView(APIView):
 # GET  /api/paiements/historique/
 # ══════════════════════════════════════════════════════════════════
 
-class InitierPaiementView(APIView):
+# ══════════════════════════════════════════════════════════════════
+# PAIEMENT CINETPAY - VERSION UNIFIÉE
+# ══════════════════════════════════════════════════════════════════
+
+class InitierPaiementCinetPayView(APIView):
     """
-    POST /api/paiements/initier/
-    Body : {
-      "type_paiement": "abonnement_mensuel" | "abonnement_annuel" | "acces_departement" | "olympiade",
-      "moyen":         "mtn_momo" | "orange_om" | "carte",
-      "montant":       1500,
-      "telephone":     "6XXXXXXXX",        ← pour Mobile Money
-      "departement_id": 3,                 ← si type = acces_departement
-      "olympiade_id":  5                   ← si type = olympiade
+    POST /api/paiements/cinetpay/initier/
+    
+    Body:
+    {
+        "type_paiement": "wallet_recharge" | "acces_departement" | "olympiade" | "abonnement_mensuel" | "abonnement_annuel",
+        "montant": 5000,
+        "payment_method": "mtn_momo" | "orange_money" | "card",
+        "phone": "691234567",  // Optionnel pour carte
+        "departement_id": 1,   // Si type = acces_departement
+        "olympiade_id": 2      // Si type = olympiade
     }
     """
     permission_classes = [IsAuthenticated]
 
-    # Montants attendus (vérification côté serveur)
-    MONTANTS_FIXES = {
-        'abonnement_mensuel': 1500,
-        'abonnement_annuel':  13000,
-    }
-
     def post(self, request):
-        data            = request.data
-        type_paiement   = data.get('type_paiement', '').strip()
-        moyen           = data.get('moyen', '').strip()
-        montant_envoye  = data.get('montant')
+        type_paiement = request.data.get('type_paiement', '').strip()
+        montant = request.data.get('montant')
+        payment_method = request.data.get('payment_method', 'mtn_momo').strip()
+        phone = request.data.get('phone', '').strip()
+        departement_id = request.data.get('departement_id')
+        olympiade_id = request.data.get('olympiade_id')
 
-        # ── Validations ────────────────────────────────────────────
-        types_valides = [t[0] for t in Paiement.TYPE_CHOICES]
+        # ── Validation ──────────────────────────────────────────
+        types_valides = ['wallet_recharge', 'acces_departement', 'olympiade', 
+                        'abonnement_mensuel', 'abonnement_annuel']
         if type_paiement not in types_valides:
             return Response(
-                {"detail": f"type_paiement invalide. Valeurs acceptées : {types_valides}"},
-                status=400,
+                {'detail': f'type_paiement invalide. Valeurs: {types_valides}'},
+                status=400
             )
 
-        moyens_valides = [m[0] for m in Paiement.MOYEN_CHOICES]
-        if moyen not in moyens_valides:
-            return Response(
-                {"detail": f"moyen invalide. Valeurs acceptées : {moyens_valides}"},
-                status=400,
-            )
+        try:
+            montant = int(montant)
+            if montant < 500:
+                return Response({'detail': 'Montant minimum: 500 FCFA'}, status=400)
+        except (TypeError, ValueError):
+            return Response({'detail': 'Montant invalide'}, status=400)
 
-        # Vérifier le montant pour les abonnements
-        if type_paiement in self.MONTANTS_FIXES:
-            montant_attendu = self.MONTANTS_FIXES[type_paiement]
-            if int(montant_envoye or 0) != montant_attendu:
-                return Response(
-                    {"detail": f"Montant incorrect. Attendu : {montant_attendu} FCFA."},
-                    status=400,
-                )
-            montant = montant_attendu
-        else:
-            try:
-                montant = int(montant_envoye)
-                if montant <= 0:
-                    raise ValueError
-            except (TypeError, ValueError):
-                return Response({"detail": "Montant invalide."}, status=400)
+        # ── Créer la transaction ────────────────────────────────
+        reference = f"YEKI-{uuid.uuid4().hex[:8].upper()}"
+        
+        transaction = CinetPayTransaction.objects.create(
+            user=request.user,
+            amount=montant,
+            reference=reference,
+            payment_method=payment_method,
+            status='pending'
+        )
 
-        # ── Créer le paiement en attente ──────────────────────────
-        paiement_kwargs = {
-            "utilisateur":   request.user,
-            "type_paiement": type_paiement,
-            "moyen":         moyen,
-            "montant":       montant,
-            "statut":        "en_attente",
+        # ── Préparer les données pour CinetPay ──────────────────
+        site_id = settings.CINETPAY_SITE_ID
+        api_key = settings.CINETPAY_API_KEY
+        notify_url = f"https://yeki.pythonanywhere.com/api/paiements/cinetpay/notify/"
+        return_url = f"https://yeki.pythonanywhere.com/payment-result/"
+
+        # Construire le payload
+        payment_data = {
+            'amount': montant,
+            'currency': 'XAF',
+            'transaction_id': reference,
+            'description': f'Yéki - {type_paiement}',
+            'site_id': site_id,
+            'apikey': api_key,
+            'notify_url': notify_url,
+            'return_url': return_url,
+            'channels': 'ALL',
+            'metadata': json.dumps({
+                'user_id': request.user.id,
+                'type_paiement': type_paiement,
+                'departement_id': departement_id,
+                'olympiade_id': olympiade_id,
+                'reference': reference
+            }),
+            'customer_name': f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
+            'customer_email': request.user.email,
+            'customer_phone_number': phone or '',
+            'customer_address': 'Cameroun',
         }
 
-        if type_paiement == 'olympiade':
-            olympiade_id = data.get('olympiade_id')
-            if not olympiade_id:
-                return Response({"detail": "olympiade_id requis."}, status=400)
-            olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
-            paiement_kwargs["olympiade_liee"] = olympiade
+        # Ajouter le canal spécifique si demandé
+        if payment_method == 'mtn_momo':
+            payment_data['channels'] = 'MOBILE_MONEY'
+            payment_data['payment_method'] = 'MTN'
+        elif payment_method == 'orange_money':
+            payment_data['channels'] = 'MOBILE_MONEY'
+            payment_data['payment_method'] = 'ORANGE'
+        elif payment_method == 'card':
+            payment_data['channels'] = 'CARD'
 
-        if type_paiement == 'acces_departement':
-            dept_id = data.get('departement_id')
-            if not dept_id:
-                return Response({"detail": "departement_id requis."}, status=400)
-            # Vérifier que le département existe
-            get_object_or_404(Departement, pk=dept_id)
-            # Commission 15% pour accès département payant
-            paiement_kwargs["commission_yeki"] = round(montant * 0.15)
-
-        paiement = Paiement.objects.create(**paiement_kwargs)
-
-        # ── Simulation opérateur (à remplacer par SDK MTN/Orange) ─
-        # En production : appel API MTN MoMo ou Orange Money ici
-        # Pour l'instant, on simule un succès immédiat
-        # Accepte 'telephone' ET 'numero' (Flutter peut envoyer l'un ou l'autre)
-        telephone = data.get('telephone') or data.get('numero', '')
-        succes_simule = self._simuler_paiement(moyen, telephone)
-
-        if succes_simule:
-            paiement.statut       = 'succes'
-            paiement.transaction_id = f"SIM-{uuid.uuid4().hex[:12].upper()}"
-            paiement.save(update_fields=['statut', 'transaction_id'])
-
-            # Post-traitement selon le type
-            self._post_traitement(request.user, paiement, type_paiement)
-
-            return Response({
-                "reference":      paiement.reference,
-                "statut":         "succes",
-                "transaction_id": paiement.transaction_id,
-                "montant":        paiement.montant,
-                "detail":         "Paiement effectué avec succès.",
-            }, status=201)
-        else:
-            paiement.statut = 'echec'
-            paiement.save(update_fields=['statut'])
-            return Response({
-                "reference": paiement.reference,
-                "statut":    "echec",
-                "detail":    "Échec du paiement. Vérifiez votre solde.",
-            }, status=402)
-
-    def _simuler_paiement(self, moyen, telephone):
-        """
-        Simulation locale — uniquement en mode DEBUG.
-        En production, remplacer par l'appel SDK MTN MoMo / Orange Money.
-        """
-        from django.conf import settings
-        if not settings.DEBUG:
-            # En production : lever une erreur claire pour forcer l'intégration réelle
-            raise NotImplementedError(
-                "Intégration paiement MTN MoMo / Orange Money non configurée. "
-                "Veuillez implémenter _simuler_paiement() avec le SDK opérateur."
-            )
-        return bool(telephone)
-
-    @transaction.atomic
-    def _post_traitement(self, user, paiement, type_paiement):
-        """Actions après un paiement réussi."""
-        if type_paiement == 'abonnement_mensuel':
-            self._activer_abonnement(user, 'mensuel', paiement)
-        elif type_paiement == 'abonnement_annuel':
-            self._activer_abonnement(user, 'annuel', paiement)
-
-    def _activer_abonnement(self, user, type_abo, paiement):
-        jours = 30 if type_abo == 'mensuel' else 365
         try:
-            abo = user.abonnement
-            abo.renouveler(type_abo)
-            abo.paiement = paiement
-            abo.save(update_fields=['paiement'])
-        except AbonnementPremium.DoesNotExist:
-            AbonnementPremium.objects.create(
-                utilisateur     = user,
-                type_abonnement = type_abo,
-                actif           = True,
-                fin             = timezone.now() + timedelta(days=jours),
-                paiement        = paiement,
+            response = requests.post(
+                'https://api-checkout.cinetpay.com/v2/payment',
+                json=payment_data,
+                timeout=30
             )
 
+            if response.status_code == 200 or response.status_code == 201:
+                data = response.json()
+                if data.get('code') in [200, 201]:
+                    payment_url = data.get('data', {}).get('payment_url')
+                    transaction_id = data.get('data', {}).get('transaction_id')
+                    
+                    transaction.transaction_id = transaction_id
+                    transaction.save()
+                    
+                    return Response({
+                        'reference': reference,
+                        'payment_url': payment_url,
+                        'status': 'pending',
+                        'message': 'Paiement initié. Veuillez compléter la transaction.'
+                    }, status=200)
+                else:
+                    transaction.status = 'failed'
+                    transaction.save()
+                    return Response({
+                        'detail': data.get('message', 'Erreur CinetPay')
+                    }, status=400)
+            else:
+                transaction.status = 'failed'
+                transaction.save()
+                return Response({'detail': 'Erreur de communication avec CinetPay'}, status=500)
 
-class VerifierPaiementView(APIView):
-    """GET /api/paiements/<reference>/verifier/"""
+        except Exception as e:
+            transaction.status = 'failed'
+            transaction.save()
+            return Response({'detail': f'Erreur: {str(e)}'}, status=500)
+
+
+class CinetPayWebhookView(APIView):
+    """
+    POST /api/paiements/cinetpay/notify/
+    Webhook appelé par CinetPay après paiement
+    """
+    permission_classes = []  # Public
+    authentication_classes = []  # Pas d'auth
+
+    def post(self, request):
+        data = request.data
+        
+        # Vérifier la signature (recommandé)
+        # signature = request.headers.get('X-CinetPay-Signature')
+        
+        transaction_id = data.get('cpm_trans_id') or data.get('transaction_id')
+        status = data.get('cpm_result') or data.get('status')
+        
+        if not transaction_id:
+            return Response({'detail': 'transaction_id manquant'}, status=400)
+
+        try:
+            transaction = CinetPayTransaction.objects.get(transaction_id=transaction_id)
+        except CinetPayTransaction.DoesNotExist:
+            # Essayer par référence
+            reference = data.get('cpm_custom') or data.get('reference')
+            if reference:
+                try:
+                    transaction = CinetPayTransaction.objects.get(reference=reference)
+                except CinetPayTransaction.DoesNotExist:
+                    return Response({'detail': 'Transaction non trouvée'}, status=404)
+            else:
+                return Response({'detail': 'Transaction non trouvée'}, status=404)
+
+        # Ne pas traiter deux fois
+        if transaction.status == 'success':
+            return Response({'status': 'already_processed'})
+
+        # Vérifier le statut
+        if status in ['00', 'ACCEPTED', 'SUCCESS', 'success']:
+            transaction.status = 'success'
+            transaction.save()
+
+            # ── Créditer le wallet ou activer l'abonnement ──────
+            metadata = json.loads(data.get('metadata', '{}')) if data.get('metadata') else {}
+            type_paiement = metadata.get('type_paiement', 'wallet_recharge')
+
+            if type_paiement == 'wallet_recharge':
+                wallet = YekiWallet.get_or_create_wallet(transaction.user)
+                wallet.crediter(
+                    montant=transaction.amount,
+                    description=f'Recharge CinetPay - {transaction.reference}',
+                    reference=transaction.reference
+                )
+            elif type_paiement in ['abonnement_mensuel', 'abonnement_annuel']:
+                jours = 30 if type_paiement == 'abonnement_mensuel' else 365
+                try:
+                    abo = transaction.user.abonnement
+                    abo.renouveler('mensuel' if jours == 30 else 'annuel')
+                except AbonnementPremium.DoesNotExist:
+                    AbonnementPremium.objects.create(
+                        utilisateur=transaction.user,
+                        type_abonnement='mensuel' if jours == 30 else 'annuel',
+                        actif=True,
+                        fin=timezone.now() + timedelta(days=jours),
+                    )
+            elif type_paiement == 'olympiade':
+                olympiade_id = metadata.get('olympiade_id')
+                if olympiade_id:
+                    InscriptionOlympiade.objects.get_or_create(
+                        olympiade_id=olympiade_id,
+                        apprenant=transaction.user,
+                        defaults={'statut': 'confirme'}
+                    )
+
+            # Créer l'enregistrement de paiement
+            Paiement.objects.create(
+                utilisateur=transaction.user,
+                type_paiement=type_paiement,
+                moyen='cinetpay',
+                montant=transaction.amount,
+                statut='succes',
+                transaction_id=transaction.transaction_id,
+                reference=transaction.reference
+            )
+
+        elif status in ['-1', 'FAILED', 'failed', 'CANCELLED']:
+            transaction.status = 'failed'
+            transaction.save()
+
+        return Response({'status': 'ok'})
+
+
+class VerifierPaiementCinetPayView(APIView):
+    """
+    GET /api/paiements/cinetpay/verifier/<reference>/
+    Vérifie le statut d'une transaction
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, reference):
-        paiement = get_object_or_404(
-            Paiement, reference=reference, utilisateur=request.user
+        transaction = get_object_or_404(
+            CinetPayTransaction, 
+            reference=reference, 
+            user=request.user
         )
+
+        # Optionnel: Vérifier auprès de CinetPay
+        try:
+            site_id = settings.CINETPAY_SITE_ID
+            api_key = settings.CINETPAY_API_KEY
+            
+            response = requests.post(
+                'https://api-checkout.cinetpay.com/v2/payment/check',
+                json={
+                    'site_id': site_id,
+                    'apikey': api_key,
+                    'transaction_id': transaction.transaction_id or reference,
+                },
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('code') == 200:
+                    cinetpay_status = data.get('data', {}).get('status')
+                    if cinetpay_status == 'ACCEPTED' and transaction.status != 'success':
+                        # Mettre à jour (normalement déjà fait par webhook)
+                        pass
+        except Exception:
+            pass
+
         return Response({
-            "reference":      paiement.reference,
-            "statut":         paiement.statut,
-            "type_paiement":  paiement.type_paiement,
-            "montant":        paiement.montant,
-            "moyen":          paiement.moyen,
-            "transaction_id": paiement.transaction_id,
-            "date":           paiement.date,
+            'reference': transaction.reference,
+            'status': transaction.status,
+            'amount': transaction.amount,
+            'created_at': transaction.created_at.isoformat(),
         })
 
 
@@ -5864,86 +5730,6 @@ def _appeler_openai(system_prompt: str, question: str) -> tuple[str, int]:
             "Veuillez réessayer ou contacter un enseignant.",
             0,
         )
-
-
-class YekiIARepondreForumView(APIView):
-    """
-    POST /api/ia/forum/<question_id>/repondre/
-    Déclenche une réponse de Yeki IA sur une question du forum.
-    Peut être appelé manuellement (bouton "@YekiIA") ou automatiquement.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, question_id):
-        question = get_object_or_404(QuestionForum, pk=question_id)
-
-        # Éviter les doublons IA sur la même question
-        if YekiIAMessage.objects.filter(question=question).exists():
-            return Response(
-                {"detail": "Yeki IA a déjà répondu à cette question."},
-                status=400,
-            )
-
-        # Déterminer le contexte de la personnalité IA
-        profile = _get_profile(request.user)
-        cours_lie = None
-        if question.cours_id:
-            try:
-                cours_lie = Cours.objects.get(pk=question.cours_id)
-            except Cours.DoesNotExist:
-                pass
-
-        nom_parcours = None
-        niveau_cursus = None
-        if profile:
-            nom_parcours  = profile.cursus or None
-            niveau_cursus = profile.niveau or None
-
-        personnalite = _get_ia_personnalite(
-            cours=cours_lie,
-            nom_parcours=nom_parcours,
-            niveau_cursus=niveau_cursus,
-        )
-
-        system_prompt = personnalite.build_system_prompt()
-        texte_ia, tokens = _appeler_openai(system_prompt, question.contenu)
-
-        # S'assurer que la réponse commence par "Yeki IA :"
-        if not texte_ia.startswith("Yeki IA :"):
-            texte_ia = f"Yeki IA : {texte_ia}"
-
-        # Créer ou récupérer l'utilisateur YekiIA
-        yeki_user, _ = __import__(
-            'django.contrib.auth', fromlist=['get_user_model']
-        ).get_user_model().objects.get_or_create(
-            username='YekiIA',
-            defaults={'first_name': 'Yeki', 'last_name': 'IA'},
-        )
-
-        # Sauvegarder comme ReponseQuestion normale
-        with transaction.atomic():
-            reponse = ReponseQuestion.objects.create(
-                question   = question,
-                auteur     = yeki_user,
-                contenu    = texte_ia,
-                est_solution = False,
-            )
-
-            ia_msg = YekiIAMessage.objects.create(
-                question        = question,
-                personalite     = personnalite,
-                contenu         = texte_ia,
-                tokens_utilises = tokens,
-                erreur          = tokens == 0,
-                reponse_forum   = reponse,
-            )
-
-        return Response({
-            "id":        ia_msg.id,
-            "contenu":   texte_ia,
-            "tokens":    tokens,
-            "reponse_id": reponse.id,
-        }, status=201)
 
 
 class YekiIAChatView(APIView):
@@ -6131,7 +5917,7 @@ class WalletRechargerView(APIView):
         Nécessite : GOOGLE_SERVICE_ACCOUNT_JSON dans les settings.
         """
         from django.conf import settings
-        import json, requests
+        import json
 
         service_account_json = getattr(settings, 'GOOGLE_SERVICE_ACCOUNT_JSON', None)
 

@@ -129,7 +129,6 @@ urlpatterns = [
     path('olympiades/<int:olympiade_id>/mon-inscription/', MonInscriptionOlympiadeView.as_view(), name='mon-inscription-olympiade'),
 
     # ── FORUM ─────────────────────────────────────────────────────
-    path('forum/messages/', ForumMessagesListAPIView.as_view(), name='forum-messages-list'),
     path('forum/messages/create/', ForumMessageCreateAPIView.as_view(), name='forum-message-create'),
     path('forum/questions/', ListeQuestionsView.as_view()),
     path('forum/questions/<int:pk>/', DetailQuestionView.as_view()),
@@ -138,9 +137,6 @@ urlpatterns = [
     path('forum/reponses/<int:pk>/liker/', LikerReponseView.as_view()),
     path('forum/reponses/<int:pk>/solution/', MarquerSolutionView.as_view()),
     path('forum/stats/', StatsForumView.as_view()),
-    # NOUVEAU : Yeki IA dans le forum
-    path('forum/questions/<int:pk>/ia-repondre/', YekiIARepondreForumView.as_view(), name='forum-ia-repondre'),
-    #path('forum/questions/<int:pk>/ia-discussion/', YekiIADiscussionView.as_view(), name='forum-ia-discussion'),
 
     # ── YEKI IA ───────────────────────────────────────────────────
     #path('ia/generer-exercices/', YekiIAGenererExercicesView.as_view(), name='ia-exercices'),
@@ -149,20 +145,10 @@ urlpatterns = [
 
 
     # ── PAIEMENT ──────────────────────────────────────────────────
-    # POST /api/paiements/initier/
-    path('paiements/initier/', InitierPaiementView.as_view(), name='paiement-initier'),
-    # GET /api/paiements/<reference>/verifier/
-    path('paiements/<str:reference>/verifier/', VerifierPaiementView.as_view(), name='paiement-verifier'),
     # GET /api/paiements/historique/
     path('paiements/historique/', HistoriquePaiementsView.as_view(), name='paiements-historique'),
     # GET /api/abonnement/statut/
     path('abonnement/statut/', StatutAbonnementView.as_view(), name='abonnement-statut'),
-    # Campay
-    path('paiements/campay/initier/', InitierPaiementCampayView.as_view(), name='campay-initier'),
-    path('paiements/campay/verifier/<str:reference>/', VerifierPaiementCampayView.as_view(), name='campay-verifier'),
-    # CinetPay
-    path('paiements/cinetpay/initier/', InitierPaiementCinetPayView.as_view(), name='cinetpay-initier'),
-    path('paiements/cinetpay/notify/', CinetPayWebhookView.as_view(), name='cinetpay-webhook'),
 
 
     # ── HISTORIQUE ────────────────────────────────────────────────
@@ -239,12 +225,6 @@ urlpatterns = [
     ),
 
     # ── YEKI IA ──────────────────────────────────────────────────
-    # Répondre automatiquement à une question du forum
-    path(
-        'ia/forum/<int:question_id>/repondre/',
-        YekiIARepondreForumView.as_view(),
-        name='ia-forum-repondre',
-    ),
     # Chat direct avec Yeki IA dans le contexte d'un cours
     path(
         'ia/cours/<int:cours_id>/chat/',
@@ -301,6 +281,13 @@ urlpatterns = [
     path('enseignant/cadre/departement/<int:departement_id>/update/',
          EnseignantCadreDepartementUpdateView.as_view(),
          name='enseignant-cadre-departement-update'),
+
+    # Paiements - CinetPay uniquement
+    path('paiements/cinetpay/initier/', InitierPaiementCinetPayView.as_view(), name='cinetpay-initier'),
+    path('paiements/cinetpay/notify/', CinetPayWebhookView.as_view(), name='cinetpay-webhook'),
+    path('paiements/cinetpay/verifier/<str:reference>/', VerifierPaiementCinetPayView.as_view(), name='cinetpay-verifier'),
+    path('wallet/solde/', WalletSoldeView.as_view(), name='wallet-solde'),
+    path('wallet/payer/', WalletPayerView.as_view(), name='wallet-payer'),
 
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
