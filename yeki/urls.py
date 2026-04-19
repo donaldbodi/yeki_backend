@@ -129,7 +129,6 @@ urlpatterns = [
     path('olympiades/<int:olympiade_id>/mon-inscription/', MonInscriptionOlympiadeView.as_view(), name='mon-inscription-olympiade'),
 
     # ── FORUM ─────────────────────────────────────────────────────
-    path('forum/messages/create/', ForumMessageCreateAPIView.as_view(), name='forum-message-create'),
     path('forum/questions/', ListeQuestionsView.as_view()),
     path('forum/questions/<int:pk>/', DetailQuestionView.as_view()),
     path('forum/questions/<int:pk>/resoudre/', ResoudreQuestionView.as_view()),
