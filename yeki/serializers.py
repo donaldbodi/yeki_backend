@@ -883,18 +883,6 @@ class ClassementOlympiadeSerializer(serializers.ModelSerializer):
         return full or u.username
 
 
-class ForumMessageSerializer(serializers.ModelSerializer):
-    replies = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ForumMessage
-        fields = ['id', 'parent', 'text', 'image', 'audio', 'sender', 'role', 'timestamp', 'replies']
-
-    def get_replies(self, obj):
-        serializer = ForumMessageSerializer(obj.replies.all(), many=True)
-        return serializer.data
-    
-
 class ProfilDetailSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     avatar = serializers.SerializerMethodField()
