@@ -1341,15 +1341,6 @@ class YekiIAPersonalite(models.Model):
         return prompt
 
 
-
-
-# ══════════════════════════════════════════════════════════════════
-# YEKI IA — HISTORIQUE DES CONVERSATIONS PRIVÉES
-# Une conversation par (apprenant, cours)
-# ══════════════════════════════════════════════════════════════════
-
-
-
 # ══════════════════════════════════════════════════════════════════
 # YEKI WALLET — PORTEFEUILLE UTILISATEUR
 # Chaque utilisateur possède un portefeuille rechargeable.
