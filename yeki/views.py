@@ -3483,6 +3483,9 @@ class CreerOlympiadeParCadreView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # ── Récupération du parcours parent ──────────────────────
+        parcours = departement.parcours
+
         # ── Validation des dates ──────────────────────────────────
         from django.utils.dateparse import parse_datetime
 
@@ -3493,16 +3496,8 @@ class CreerOlympiadeParCadreView(APIView):
             parsed = parse_datetime(str(raw))
             if not parsed:
                 return None, f"Format de date invalide pour '{field_name}'. Utilisez ISO 8601."
-            # Rendre timezone-aware si nécessaire
-            from django.utils import timezone as tz
-            if tz.is_naive(parsed):
-                from django.conf import settings
-                import pytz
-                try:
-                    local_tz = pytz.timezone(settings.TIME_ZONE)
-                    parsed = local_tz.localize(parsed)
-                except Exception:
-                    parsed = tz.make_aware(parsed)
+            if timezone.is_naive(parsed):
+                parsed = timezone.make_aware(parsed)
             return parsed, None
 
         date_ouv_insc, err = _parse_date('date_ouverture_inscription')
@@ -3572,94 +3567,114 @@ class CreerOlympiadeParCadreView(APIView):
             )
 
         melanger_questions = bool(data.get('melanger_questions', True))
-        melanger_choix     = bool(data.get('melanger_choix', True))
-        une_seule_session  = bool(data.get('une_seule_session', True))
+        melanger_choix = bool(data.get('melanger_choix', True))
+        une_seule_session = bool(data.get('une_seule_session', True))
+
+        # ── Prix / Récompenses ───────────────────────────────────
+        prix_1er = (data.get('prix_1er') or '').strip()
+        prix_2eme = (data.get('prix_2eme') or '').strip()
+        prix_3eme = (data.get('prix_3eme') or '').strip()
+        
+        # ⚠️ CORRECTION : Détection olympiade gratuite (aucun prix renseigné)
+        est_gratuite = not prix_1er and not prix_2eme and not prix_3eme
 
         # ── Création de l'olympiade ───────────────────────────────
         olympiade = Olympiade.objects.create(
-            titre                      = titre,
-            description                = (data.get('description') or '').strip(),
-            edition                    = (data.get('edition') or '').strip(),
-            matiere                    = matiere,
-            niveau                     = niveau,
-            date_ouverture_inscription = date_ouv_insc,
-            date_cloture_inscription   = date_clo_insc,
-            date_debut_olympiade       = date_debut,
-            date_fin_olympiade         = date_fin,
-            duree_minutes              = duree_minutes,
-            nb_questions               = nb_questions,
-            max_focus_perdu            = max_focus,
-            melanger_questions         = melanger_questions,
-            melanger_choix             = melanger_choix,
-            une_seule_session          = une_seule_session,
-            prix_1er                   = (data.get('prix_1er') or '').strip(),
-            prix_2eme                  = (data.get('prix_2eme') or '').strip(),
-            prix_3eme                  = (data.get('prix_3eme') or '').strip(),
-            note_sur                   = 20,
-            organisateur               = profile,
-            cree_par                   = request.user,
+            titre=titre,
+            description=(data.get('description') or '').strip(),
+            edition=(data.get('edition') or '').strip(),
+            matiere=matiere,
+            niveau=niveau,
+            date_ouverture_inscription=date_ouv_insc,
+            date_cloture_inscription=date_clo_insc,
+            date_debut_olympiade=date_debut,
+            date_fin_olympiade=date_fin,
+            duree_minutes=duree_minutes,
+            nb_questions=nb_questions,
+            max_focus_perdu=max_focus,
+            melanger_questions=melanger_questions,
+            melanger_choix=melanger_choix,
+            une_seule_session=une_seule_session,
+            prix_1er=prix_1er,
+            prix_2eme=prix_2eme,
+            prix_3eme=prix_3eme,
+            note_sur=20,
+            organisateur=profile,
+            cree_par=request.user,
         )
 
-        # ── Créer automatiquement un Devoir lié (pour les questions) ──
-        # L'enseignant cadre pourra ensuite ajouter des questions via
-        # /api/devoirs/<devoir_id>/questions/ajouter/
-
+        # ── Créer automatiquement un Devoir lié ──────────────────
         devoir_lie = Devoir.objects.create(
-            titre        = f"[Olympiade] {titre}",
-            description  = f"Devoir lié à l'olympiade : {titre}",
-            type_devoir  = 'olympiade',
-            matiere      = matiere,
-            niveau       = niveau,
-            enonce       = f"Questions de l'olympiade {titre}",
-            date_debut   = date_debut,
-            date_limite  = date_fin,
-            duree_minutes= duree_minutes,
-            note_sur     = 20,
-            est_publie   = False,   # Géré par la logique olympiade
-            cree_par     = profile,
+            titre=f"[Olympiade] {titre}",
+            description=f"Devoir lié à l'olympiade : {titre}",
+            type_devoir='olympiade',
+            matiere=matiere,
+            niveau=niveau,
+            enonce=f"Questions de l'olympiade {titre}",
+            date_debut=date_debut,
+            date_limite=date_fin,
+            duree_minutes=duree_minutes,
+            note_sur=20,
+            est_publie=False,  # ⚠️ CORRECTION : Non publié par défaut
+            cree_par=profile,
         )
         olympiade.devoir = devoir_lie
         olympiade.save(update_fields=['devoir'])
 
-        enregistrer_activite(
-       user=request.user,
-       action='olympiad_created',
-       description=f"Olympiade « {olympiade.titre} » créée",
-       data={
-           'titre':   olympiade.titre,
-           'matiere': olympiade.matiere,
-           'niveau':  olympiade.niveau,
-           'edition': olympiade.edition,
-           'debut':   olympiade.date_debut_olympiade.strftime('%d/%m/%Y'),
-       },
-       objet_id=olympiade.id,
-       objet_type='Olympiade',
-   )
-
-        # ── Réponse ───────────────────────────────────────────────
-        return Response({
-            "id":                          olympiade.id,
-            "titre":                       olympiade.titre,
-            "edition":                     olympiade.edition,
-            "matiere":                     olympiade.matiere,
-            "niveau":                      olympiade.niveau,
-            "statut":                      olympiade.statut_auto,
-            "date_ouverture_inscription":  olympiade.date_ouverture_inscription.isoformat(),
-            "date_cloture_inscription":    olympiade.date_cloture_inscription.isoformat(),
-            "date_debut_olympiade":        olympiade.date_debut_olympiade.isoformat(),
-            "date_fin_olympiade":          olympiade.date_fin_olympiade.isoformat(),
-            "duree_minutes":               olympiade.duree_minutes,
-            "nb_questions":                olympiade.nb_questions,
-            "devoir_id":                   devoir_lie.id,
-            "prix_1er":                    olympiade.prix_1er,
-            "prix_2eme":                   olympiade.prix_2eme,
-            "prix_3eme":                   olympiade.prix_3eme,
-            "detail": (
+        # ⚠️ CORRECTION : Si gratuite, mettre en attente de validation
+        if est_gratuite:
+            devoir_lie.est_publie = False
+            devoir_lie.save(update_fields=['est_publie'])
+            message_detail = (
+                "Olympiade gratuite créée avec succès. "
+                "Elle sera visible après validation par l'administrateur du parcours. "
+                f"Ajoutez les questions via /api/devoirs/{devoir_lie.id}/questions/ajouter/"
+            )
+        else:
+            # Olympiade payante : publication automatique
+            devoir_lie.est_publie = True
+            devoir_lie.save(update_fields=['est_publie'])
+            message_detail = (
                 "Olympiade créée avec succès. "
                 f"Ajoutez les questions via /api/devoirs/{devoir_lie.id}/questions/ajouter/"
-            ),
-        }, status=status.HTTP_201_CREATED)
+            )
 
+        enregistrer_activite(
+            user=request.user,
+            action='olympiad_created',
+            description=f"Olympiade « {olympiade.titre} » créée",
+            data={
+                'titre': olympiade.titre,
+                'matiere': olympiade.matiere,
+                'niveau': olympiade.niveau,
+                'edition': olympiade.edition,
+                'gratuite': est_gratuite,
+            },
+            objet_id=olympiade.id,
+            objet_type='Olympiade',
+        )
+
+        return Response({
+            "id": olympiade.id,
+            "titre": olympiade.titre,
+            "edition": olympiade.edition,
+            "matiere": olympiade.matiere,
+            "niveau": olympiade.niveau,
+            "statut": olympiade.statut_auto,
+            "date_ouverture_inscription": olympiade.date_ouverture_inscription.isoformat(),
+            "date_cloture_inscription": olympiade.date_cloture_inscription.isoformat(),
+            "date_debut_olympiade": olympiade.date_debut_olympiade.isoformat(),
+            "date_fin_olympiade": olympiade.date_fin_olympiade.isoformat(),
+            "duree_minutes": olympiade.duree_minutes,
+            "nb_questions": olympiade.nb_questions,
+            "devoir_id": devoir_lie.id,
+            "prix_1er": olympiade.prix_1er,
+            "prix_2eme": olympiade.prix_2eme,
+            "prix_3eme": olympiade.prix_3eme,
+            "est_gratuite": est_gratuite,
+            "en_attente_validation": est_gratuite,
+            "detail": message_detail,
+        }, status=status.HTTP_201_CREATED)
 
 # ---------------------------
 # Liste des enseignants cadres (light)
@@ -3950,13 +3965,29 @@ class EnseignantAdminDashboardView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        parcours_qs = Parcours.objects.prefetch_related(
-            'departements__cours',
-            'departements__cadre__user'
-        ).get(admin=profile)
+        # ── Récupérer le parcours de l'admin ────────────────────
+        try:
+            parcours_qs = Parcours.objects.prefetch_related(
+                'departements__cours',
+                'departements__cadre__user',
+            ).get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({
+                "nom": _nom_profil(profile),
+                "stats": {},
+                "departements": [],
+                "cadres": [],
+                "departements_en_attente": [],
+                "olympiades_en_attente": [],
+                "nom_parcours": "",
+                "id_parcours": 0,
+                "type_parcours": "",
+            })
 
+        # ── Départements ─────────────────────────────────────────
         departements_data = []
         cadres_dict = {}
+        departements_en_attente = []
 
         for dept in parcours_qs.departements.all():
             nb_cours = dept.cours.count()
@@ -3966,9 +3997,8 @@ class EnseignantAdminDashboardView(APIView):
             if dept.cadre:
                 cadre_data = {
                     "id": dept.cadre.id,
-                    "nom": f"{dept.cadre.user.first_name} {dept.cadre.user.last_name}".strip()
-                          or dept.cadre.user.username,
-                    "username": dept.cadre.user.username,
+                    "nom": _nom_profil(dept.cadre),
+                    "email": dept.cadre.user.email,
                 }
                 if dept.cadre.id not in cadres_dict:
                     cadres_dict[dept.cadre.id] = {
@@ -3978,41 +4008,90 @@ class EnseignantAdminDashboardView(APIView):
                         "email": dept.cadre.user.email,
                         "nb_cours": nb_cours,
                         "nb_apprenants": nb_app,
-                        "taux_moyen": 0,
-                        "departement": {"id": dept.id, "nom": dept.nom},
                     }
 
-            departements_data.append({
+            dept_info = {
                 "id": dept.id,
                 "nom": dept.nom,
                 "parcours": parcours_qs.nom,
                 "parcours_id": parcours_qs.id,
+                "type_dept": dept.type_departement,
+                "description": dept.description,
                 "nb_cours": nb_cours,
                 "nb_apprenants": nb_app,
+                "nb_inscrits": nb_app,  # Alias pour le frontend
+                "prix": dept.prix,
                 "taux_moyen": 0,
                 "cadre": cadre_data,
-            })
+                "est_valide": dept.est_valide,
+                "est_refuse": dept.est_refuse,
+                "motif_refus": dept.motif_refus,
+                "couleur": dept.couleur,
+            }
+            departements_data.append(dept_info)
 
+            # ⚠️ CORRECTION : Détecter les départements en attente de validation
+            if not dept.est_valide and not dept.est_refuse:
+                statut_validation = "attente"
+            elif dept.est_refuse:
+                statut_validation = "refuse"
+            else:
+                statut_validation = "valide"
+            
+            dept_info["statut_validation"] = statut_validation
+
+            # Ajouter aux départements en attente
+            if statut_validation in ["attente", "refuse"]:
+                departements_en_attente.append(dept_info)
+
+        # ⚠️ CORRECTION : Récupérer les olympiades en attente (gratuites, non publiées)
+        olympiades_en_attente = []
+        olympiades_attente_qs = Olympiade.objects.filter(
+            organisateur__departements_cadre__parcours=parcours_qs,
+            devoir__est_publie=False,
+        ).distinct().select_related('organisateur__user', 'devoir')
+
+        # Exclure celles déjà refusées (sauf si l'admin veut les voir)
+        for o in olympiades_attente_qs:
+            # Vérifier si les prix sont vides (= gratuite)
+            est_gratuite = not o.prix_1er and not o.prix_2eme and not o.prix_3eme
+            
+            if est_gratuite:
+                olympiades_en_attente.append({
+                    "id": o.id,
+                    "titre": o.titre,
+                    "matiere": o.matiere,
+                    "niveau": o.niveau,
+                    "edition": o.edition,
+                    "statut_validation": "refuse" if o.est_refusee else "attente",
+                    "motif_refus": o.motif_refus if o.est_refusee else "",
+                    "cadre": {
+                        "id": o.organisateur.id,
+                        "nom": _nom_profil(o.organisateur),
+                    } if o.organisateur else None,
+                    "date_creation": o.created_at.isoformat() if hasattr(o, 'created_at') else None,
+                })
+
+        # ── Stats globales ───────────────────────────────────────
         stats = {
             "nb_departements": len(departements_data),
             "nb_cours": sum(d["nb_cours"] for d in departements_data),
             "nb_apprenants": sum(d["nb_apprenants"] for d in departements_data),
             "nb_enseignants": len(cadres_dict),
+            "nb_en_attente": len(departements_en_attente) + len(olympiades_en_attente),
         }
 
-        nom_complet = (
-            profile.user.username
-            or f"{profile.user.first_name} {profile.user.last_name}".strip()
-        )
-
         return Response({
-            "nom": nom_complet,
+            "nom": _nom_profil(profile),
             "stats": stats,
             "nom_parcours": parcours_qs.nom,
             "id_parcours": parcours_qs.id,
+            "type_parcours": parcours_qs.type_parcours,
             "departements": departements_data,
             "cadres": list(cadres_dict.values()),
-        }, status=status.HTTP_200_OK)
+            "departements_en_attente": departements_en_attente,
+            "olympiades_en_attente": olympiades_en_attente,
+        })
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -4113,7 +4192,7 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
 class CreerDepartementView(APIView):
     """
     POST /api/departements/creer/
-    Cree un departement enrichi selon le type du parcours parent.
+    Crée un département enrichi selon le type du parcours parent.
     """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -4126,14 +4205,14 @@ class CreerDepartementView(APIView):
 
         if profile.user_type != 'enseignant_admin':
             return Response(
-                {"detail": "Acces reserve aux enseignants administrateurs."},
+                {"detail": "Accès réservé aux enseignants administrateurs."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
         nom = request.data.get('nom', '').strip()
         if not nom:
             return Response(
-                {"detail": "Le nom du departement est obligatoire."},
+                {"detail": "Le nom du département est obligatoire."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -4143,68 +4222,97 @@ class CreerDepartementView(APIView):
         else:
             parcours_qs = Parcours.objects.filter(admin=profile)
             if not parcours_qs.exists():
-                return Response({"detail": "Aucun parcours ne vous est assigne."}, status=403)
+                return Response({"detail": "Aucun parcours ne vous est assigné."}, status=403)
             if parcours_qs.count() > 1:
-                return Response({"detail": "Specificer parcours_id."}, status=400)
+                return Response({"detail": "Spécifier parcours_id."}, status=400)
             parcours = parcours_qs.first()
 
         def _b(key, default=False):
             v = request.data.get(key, default)
-            if isinstance(v, str): return v.lower() in ('true', '1', 'yes')
+            if isinstance(v, str):
+                return v.lower() in ('true', '1', 'yes')
             return bool(v)
 
         def _i(key, default=0):
-            try: return int(request.data.get(key, default) or default)
-            except (ValueError, TypeError): return default
+            try:
+                return int(request.data.get(key, default) or default)
+            except (ValueError, TypeError):
+                return default
 
+        # === CONSTRUCTION DES CHAMPS DE BASE ===
         kwargs = {
-            'nom':         nom,
-            'parcours':    parcours,
+            'nom': nom,
+            'parcours': parcours,
             'description': request.data.get('description', '').strip(),
-            'couleur':     request.data.get('couleur', '#2884A0'),
-            'prix':        _i('prix'),
-            'est_actif':   _b('est_actif', True),
+            'couleur': request.data.get('couleur', '#2884A0'),
+            'prix': _i('prix'),  # ⚠️ CORRECTION : prix bien récupéré
+            'est_actif': _b('est_actif', True),
         }
+
         if request.FILES.get('image'):
             kwargs['image'] = request.FILES['image']
 
         type_parc = parcours.type_parcours
-        if type_parc == 'prepa' or _b('est_prepa_concours'):
+
+        # === PARCOURS CURSUS : Pas de champ prix ===
+        if type_parc == 'cursus':
+            kwargs['prix'] = 0  # Forcé à 0 pour cursus
+            # Pas de champs supplémentaires
+
+        # === PARCOURS PRÉPA CONCOURS ===
+        elif type_parc == 'prepa' or _b('est_prepa_concours'):
             kwargs.update({
-                'est_prepa_concours':      True,
-                'nom_concours':            request.data.get('nom_concours', ''),
-                'organisme_concours':      request.data.get('organisme_concours', ''),
+                'est_prepa_concours': True,
+                'nom_concours': request.data.get('nom_concours', ''),
+                'organisme_concours': request.data.get('organisme_concours', ''),
                 'date_limite_inscription': request.data.get('date_limite_inscription') or None,
-                'date_examen':             request.data.get('date_examen') or None,
-                'arrete_ministeriel':      request.data.get('arrete_ministeriel', ''),
-                'lien_officiel':           request.data.get('lien_officiel', ''),
-                'niveaux_cibles':          request.data.get('niveaux_cibles', ''),
-                'places_disponibles':      _i('places_disponibles') or None,
-                'frais_dossier':           _i('frais_dossier'),
-                'debouches':               request.data.get('debouches', ''),
+                'date_examen': request.data.get('date_examen') or None,
+                'arrete_ministeriel': request.data.get('arrete_ministeriel', ''),
+                'lien_officiel': request.data.get('lien_officiel', ''),
+                'niveaux_cibles': request.data.get('niveaux_cibles', ''),
+                'places_disponibles': _i('places_disponibles') or None,
+                'frais_dossier': _i('frais_dossier'),
+                'debouches': request.data.get('debouches', ''),
             })
+            # ⚠️ CORRECTION : Le prix est déjà dans kwargs['prix'], pas besoin de le remettre
 
-        if type_parc == 'formation' or _b('est_formation_metier') or _b('est_formation_classique'):
+        # === PARCOURS FORMATION ===
+        elif type_parc == 'formation' or _b('est_formation_metier') or _b('est_formation_classique'):
+            prix = kwargs.get('prix', 0)
+            
             kwargs.update({
-                'est_formation_metier':    _b('est_formation_metier'),
+                'est_formation_metier': _b('est_formation_metier'),
                 'est_formation_classique': _b('est_formation_classique'),
-                'duree_formation':         request.data.get('duree_formation', ''),
-                'mode_formation':          request.data.get('mode_formation', 'hybride'),
-                'certificat_delivre':      request.data.get('certificat_delivre', ''),
-                'prerequis':               request.data.get('prerequis', ''),
-                'objectifs':               request.data.get('objectifs', ''),
-                'domaine':                 request.data.get('domaine', ''),
-                'ville':                   request.data.get('ville', ''),
-                'est_certifiante':         _b('est_certifiante'),
+                'duree_formation': request.data.get('duree_formation', ''),
+                'mode_formation': request.data.get('mode_formation', 'hybride'),
+                'certificat_delivre': request.data.get('certificat_delivre', ''),
+                'prerequis': request.data.get('prerequis', ''),
+                'objectifs': request.data.get('objectifs', ''),
+                'domaine': request.data.get('domaine', ''),
+                'ville': request.data.get('ville', ''),
+                'est_certifiante': _b('est_certifiante'),
             })
 
+            # ⚠️ CORRECTION : Si prix = 0, marquer comme "à valider" par l'admin
+            if prix == 0:
+                kwargs['est_valide'] = False
+                kwargs['est_actif'] = False  # Non visible tant que non validé
+            else:
+                kwargs['est_valide'] = True
+                kwargs['est_actif'] = True
+
+        # === CRÉATION DU DÉPARTEMENT ===
         departement = Departement.objects.create(**kwargs)
 
         enregistrer_activite(
             user=request.user,
             action='department_created',
-            description=f"Departement {departement.nom} cree dans {parcours.nom}",
-            data={'departement': departement.nom, 'parcours': parcours.nom},
+            description=f"Département {departement.nom} créé dans {parcours.nom}",
+            data={
+                'departement': departement.nom,
+                'parcours': parcours.nom,
+                'prix': kwargs.get('prix', 0),
+            },
             objet_id=departement.id,
             objet_type='Departement',
         )
@@ -4214,7 +4322,7 @@ class CreerDepartementView(APIView):
             status=status.HTTP_201_CREATED
         )
 
-
+        
 # ───────────────────────────────────────────────────────────────────────────
 # ENSEIGNANT ADMIN — Nommer / changer le cadre d'un département
 # PATCH /api/departements/<departement_id>/changer-cadre/
@@ -5025,11 +5133,14 @@ class AdminRefuserOlympiadeView(APIView):
 
 
 class AdminValiderDepartementGratuitView(APIView):
-    """Valider un département gratuit (formation/concours)"""
+    """
+    POST /api/admin/departements/<pk>/valider/
+    Valide un département gratuit créé par un cadre.
+    """
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
-    def post(self, request, departement_id):
+    def post(self, request, pk):
         profile = _get_profile(request.user)
         if not profile or profile.user_type != 'enseignant_admin':
             return Response({"detail": "Accès refusé."}, status=403)
@@ -5039,27 +5150,76 @@ class AdminValiderDepartementGratuitView(APIView):
         except Parcours.DoesNotExist:
             return Response({"detail": "Aucun parcours assigné."}, status=404)
 
-        departement = get_object_or_404(Departement, pk=departement_id, parcours=parcours)
+        departement = get_object_or_404(Departement, pk=pk, parcours=parcours)
+        
+        # Vérifier que le département est gratuit
+        if departement.prix > 0:
+            return Response(
+                {"detail": "Ce département est payant, validation automatique déjà effectuée."},
+                status=400
+            )
         
         departement.est_valide = True
         departement.est_refuse = False
+        departement.est_actif = True
         departement.valide_le = timezone.now()
         departement.save()
-        
-        # Activer tous les cours du département
-        departement.cours.update(est_actif=True)
         
         enregistrer_activite(
             user=request.user,
             action='department_validated',
-            description=f"Département « {departement.nom} » validé",
+            description=f"Département gratuit « {departement.nom} » validé",
             objet_id=departement.id,
             objet_type='Departement',
         )
         
         return Response({
-            "detail": "Département validé avec succès.",
+            "detail": "Département validé avec succès. Il est maintenant visible.",
+            "id": departement.id,
             "est_valide": True,
+        })
+
+
+class AdminRefuserDepartementView(APIView):
+    """
+    POST /api/admin/departements/<pk>/refuser/
+    Refuse un département gratuit.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        profile = _get_profile(request.user)
+        if not profile or profile.user_type != 'enseignant_admin':
+            return Response({"detail": "Accès refusé."}, status=403)
+
+        try:
+            parcours = Parcours.objects.get(admin=profile)
+        except Parcours.DoesNotExist:
+            return Response({"detail": "Aucun parcours assigné."}, status=404)
+
+        departement = get_object_or_404(Departement, pk=pk, parcours=parcours)
+        
+        motif = request.data.get('motif', 'Refusé par l\'administrateur.')
+        
+        departement.est_refuse = True
+        departement.est_valide = False
+        departement.motif_refus = motif
+        departement.save()
+        
+        enregistrer_activite(
+            user=request.user,
+            action='department_rejected',
+            description=f"Département « {departement.nom} » refusé. Motif : {motif}",
+            objet_id=departement.id,
+            objet_type='Departement',
+        )
+        
+        return Response({
+            "detail": "Département refusé.",
+            "id": departement.id,
+            "est_refuse": True,
+            "motif": motif,
         })
 
 
@@ -5096,44 +5256,6 @@ class ApprenantsParDepartementView(APIView):
         
         return Response(data)
     
-
-class AdminRefuserDepartementView(APIView):
-    """Refuser un département gratuit"""
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, departement_id):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != 'enseignant_admin':
-            return Response({"detail": "Accès refusé."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        departement = get_object_or_404(Departement, pk=departement_id, parcours=parcours)
-        
-        motif = request.data.get('motif', 'Refusé par l\'administrateur.')
-        
-        departement.est_refuse = True
-        departement.est_valide = False
-        departement.motif_refus = motif
-        departement.save()
-        
-        enregistrer_activite(
-            user=request.user,
-            action='department_rejected',
-            description=f"Département « {departement.nom} » refusé. Motif : {motif}",
-            objet_id=departement.id,
-            objet_type='Departement',
-        )
-        
-        return Response({
-            "detail": "Département refusé.",
-            "est_refuse": True,
-        })
-
 
 # ══════════════════════════════════════════════════════════════════
 # ENSEIGNANT ADMIN — DÉPARTEMENTS À VALIDER (formations/concours)
