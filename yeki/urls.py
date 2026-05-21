@@ -287,6 +287,8 @@ urlpatterns = [
     path('paiements/cinetpay/verifier/<str:reference>/', VerifierPaiementCinetPayView.as_view(), name='cinetpay-verifier'),
     path('wallet/solde/', WalletSoldeView.as_view(), name='wallet-solde'),
     path('wallet/payer/', WalletPayerView.as_view(), name='wallet-payer'),
+    path('niveaux/', ListeNiveauxView.as_view(), name='liste-niveaux'),
+    path('olympiades/mes-olympiades/', MesOlympiadesCadreView.as_view(), name='mes-olympiades-cadre'),
 
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

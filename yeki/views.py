@@ -59,6 +59,83 @@ def _nom_profil(profile):
     return n or profile.user.username
 
 
+# ═══════════════════════════════════════════════════════════════
+# ENDPOINT : Liste des niveaux disponibles pour les formations
+# GET /api/niveaux/
+# ═══════════════════════════════════════════════════════════════
+
+class ListeNiveauxView(APIView):
+    """
+    GET /api/niveaux/
+    Retourne la liste des niveaux uniques déjà enregistrés en base.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        # Récupérer tous les niveaux distincts depuis les cours existants
+        niveaux = Cours.objects.values_list('niveau', flat=True).distinct().order_by('niveau')
+        
+        # Ajouter les niveaux prédéfinis s'ils n'existent pas
+        niveaux_predfinis = [
+            '6ème', '5ème', '4ème', '3ème',
+            'Seconde', 'Première', 'Terminale',
+            'Licence 1', 'Licence 2', 'Licence 3',
+            'Master 1', 'Master 2',
+            'Débutant', 'Intermédiaire', 'Avancé',
+        ]
+        
+        resultats = list(niveaux) + [n for n in niveaux_predfinis if n not in niveaux]
+        
+        return Response(sorted(resultats))
+
+
+# ═══════════════════════════════════════════════════════════════
+# ENDPOINT : Olympiades du cadre connecté
+# GET /api/olympiades/mes-olympiades/
+# ═══════════════════════════════════════════════════════════════
+
+class MesOlympiadesCadreView(APIView):
+    """
+    GET /api/olympiades/mes-olympiades/
+    Retourne toutes les olympiades créées par le cadre connecté.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response({"detail": "Accès réservé aux cadres."}, status=403)
+
+        olympiades = Olympiade.objects.filter(
+            organisateur=profile
+        ).select_related('devoir').order_by('-date_debut_olympiade')
+
+        data = []
+        for o in olympiades:
+            data.append({
+                "id": o.id,
+                "titre": o.titre,
+                "matiere": o.matiere,
+                "niveau": o.niveau,
+                "edition": o.edition,
+                "statut": o.statut_auto,
+                "date_debut_olympiade": o.date_debut_olympiade.isoformat(),
+                "date_fin_olympiade": o.date_fin_olympiade.isoformat(),
+                "nb_inscrits": o.inscriptions.count(),
+                "devoir_id": o.devoir.id if o.devoir else None,
+                "est_publiee": o.devoir.est_publie if o.devoir else False,
+                "prix_1er": o.prix_1er,
+                "prix_2eme": o.prix_2eme,
+                "prix_3eme": o.prix_3eme,
+            })
+
+        return Response(data)
+
+
 @csrf_exempt
 def latest_version(request):
     """
@@ -4671,12 +4748,13 @@ class HistoriqueStatsView(APIView):
 # groupés par département, avec les cours à l'intérieur.
 # ══════════════════════════════════════════════════════════════════
 
-
 class ApprenantConcoursFormationsView(APIView):
     """
-    GET /api/apprenant/concours-formations/
-    Retourne les concours et formations accessibles selon le niveau de l'apprenant
-    Pour les concours/formations: niveau <= niveau apprenant
+    GET /api/apprenant/prepa-concours/   (type=prepa)
+    GET /api/apprenant/formations/       (type=formation)
+    
+    Retourne les concours et formations accessibles selon le niveau de l'apprenant.
+    Logique corrigée : niveau_formation <= niveau_apprenant
     """
     permission_classes = [IsAuthenticated]
 
@@ -4685,10 +4763,10 @@ class ApprenantConcoursFormationsView(APIView):
         if not profile or profile.user_type != 'apprenant':
             return Response({"detail": "Accès réservé aux apprenants"}, status=403)
         
-        type_parcours = request.query_params.get('type', 'prepa')  # prepa ou formation
+        type_parcours = request.query_params.get('type', 'prepa')
         
-        # Utiliser le niveau enregistré dans le profil
-        niveau_apprenant = profile.niveau or ''
+        # ⚠️ CORRECTION : Utiliser le niveau exact de l'apprenant
+        niveau_apprenant = (profile.niveau or '').strip()
         
         # Ordre des niveaux pour comparaison
         niveaux_ordre = {
@@ -4696,129 +4774,150 @@ class ApprenantConcoursFormationsView(APIView):
             'seconde': 5, 'premiere': 6, 'terminale': 7,
             'licence1': 8, 'licence2': 9, 'licence3': 10,
             'master1': 11, 'master2': 12,
+            'debutant': 1, 'intermediaire': 5, 'avance': 9,
         }
         
-        niveau_score = niveaux_ordre.get(niveau_apprenant, 0)
+        # Normaliser le niveau apprenant (minuscule, sans accent)
+        niveau_apprenant_norm = niveau_apprenant.lower().replace('è', 'e').replace('é', 'e')
+        niveau_apprenant_score = niveaux_ordre.get(niveau_apprenant_norm, 0)
         
-        # Récupérer les départements du parcours concerné
+        # Si le niveau n'est pas trouvé, on considère que tout est accessible
+        if niveau_apprenant_score == 0 and niveau_apprenant:
+            # Niveau personnalisé → on laisse tout passer
+            niveau_apprenant_score = 99
+        
+        # Récupérer les départements selon le type
         if type_parcours == 'prepa':
             depts = Departement.objects.filter(
                 parcours__type_parcours='prepa',
                 est_actif=True,
+                est_valide=True,  # ⚠️ CORRECTION : uniquement les validés
             ).select_related('parcours', 'cadre__user')
-
-            resultats = []
-            for dept in depts:
-                # Pour les concours: on prend ceux dont le niveau cible <= niveau apprenant
-                niveaux_cibles = dept.niveaux_cibles or ''
-                est_accessible = self._est_niveau_accessible(niveau_apprenant, niveaux_cibles, niveaux_ordre)
-                
-                if est_accessible:
-                    # Récupérer tous les cours du département (pas de filtre supplémentaire)
-                    cours_qs = Cours.objects.filter(departement=dept)
-                    cours_data = []
-                    for cours in cours_qs:
-                        cours_data.append({
-                            'id': cours.id,
-                            'titre': cours.titre,
-                            'niveau': cours.niveau,
-                            'description_brief': cours.description_brief,
-                            'color_code': cours.color_code,
-                            'icon_name': cours.icon_name,
-                            'nb_lecons': cours.nb_lecons,
-                            'nb_devoirs': cours.nb_devoirs,
-                        })
-                    
-                    resultats.append(self._serialiser_departement(dept, cours_data, request))
-            
-            return Response(resultats)
-            
-        elif type_parcours == 'formation':
+        else:
             depts = Departement.objects.filter(
                 parcours__type_parcours='formation',
                 est_actif=True,
+                est_valide=True,  # ⚠️ CORRECTION : uniquement les validés
             ).select_related('parcours', 'cadre__user')
+
+        resultats = []
+        for dept in depts:
+            # Récupérer le niveau cible du département
+            niveaux_cibles = (dept.niveaux_cibles or '').strip()
             
-            resultats = []
-            for dept in depts:
-                # Pour les formations: on prend celles dont le niveau <= niveau apprenant
-                # Le niveau est déterminé par les cours associés ou par le champ description
-                niveaux_formation = self._extraire_niveau_formation(dept, niveaux_ordre)
-                est_accessible = niveaux_formation <= niveau_score if niveaux_formation else True
+            # ⚠️ CORRECTION : Logique d'accessibilité améliorée
+            est_accessible = self._est_accessible(
+                niveau_apprenant_norm, 
+                niveaux_cibles, 
+                niveaux_ordre, 
+                niveau_apprenant_score
+            )
+            
+            if est_accessible:
+                # Récupérer les cours du département
+                cours_qs = Cours.objects.filter(departement=dept)
+                cours_data = []
+                for cours in cours_qs:
+                    cours_data.append({
+                        'id': cours.id,
+                        'titre': cours.titre,
+                        'niveau': cours.niveau,
+                        'description_brief': cours.description_brief or '',
+                        'color_code': cours.color_code,
+                        'icon_name': cours.icon_name,
+                        'nb_lecons': cours.nb_lecons,
+                        'nb_devoirs': cours.nb_devoirs,
+                    })
                 
-                if est_accessible:
-                    cours_qs = Cours.objects.filter(departement=dept)
-                    cours_data = []
-                    for cours in cours_qs:
-                        cours_data.append({
-                            'id': cours.id,
-                            'titre': cours.titre,
-                            'niveau': cours.niveau,
-                            'description_brief': cours.description_brief,
-                            'color_code': cours.color_code,
-                            'icon_name': cours.icon_name,
-                            'nb_lecons': cours.nb_lecons,
-                            'nb_devoirs': cours.nb_devoirs,
-                        })
-                    
-                    resultats.append(self._serialiser_departement(dept, cours_data, request))
-            
-            return Response(resultats)
+                resultats.append(self._serialiser_departement(dept, cours_data, request))
         
-        return Response([])
-    
-    def _est_niveau_accessible(self, niveau_apprenant, niveau_cible_str, niveaux_ordre):
-        """Vérifie si le niveau cible est accessible (niveau cible <= niveau apprenant)"""
-        if not niveau_cible_str:
-            return True  # Pas de niveau spécifié, accessible
+        return Response(resultats)
+
+    def _est_accessible(self, niveau_apprenant_norm, niveaux_cibles_str, niveaux_ordre, niveau_apprenant_score):
+        """
+        Vérifie si le niveau cible est accessible.
         
-        # Extraire les niveaux cibles de la chaîne
+        Règles :
+        - Si pas de niveau apprenant → tout accessible
+        - Si pas de niveau cible → accessible
+        - Si le niveau cible <= niveau apprenant → accessible
+        """
+        # Pas de niveau apprenant → tout est accessible
+        if not niveau_apprenant_norm or niveau_apprenant_score == 99:
+            return True
+        
+        # Pas de niveau cible spécifié → accessible
+        if not niveaux_cibles_str:
+            return True
+        
+        # Extraire tous les niveaux mentionnés dans la chaîne
         niveaux_cibles = []
         for niveau in niveaux_ordre.keys():
-            if niveau.lower() in niveau_cible_str.lower():
+            if niveau in niveaux_cibles_str.lower():
                 niveaux_cibles.append(niveau)
         
         if not niveaux_cibles:
             return True
         
-        niveau_apprenant_score = niveaux_ordre.get(niveau_apprenant, 0)
-        # Prendre le niveau cible le plus bas (le plus facile d'accès)
-        niveau_min_cible = min([niveaux_ordre.get(n, 0) for n in niveaux_cibles])
+        # Prendre le niveau le plus bas (le plus accessible)
+        scores_cibles = [niveaux_ordre.get(n, 99) for n in niveaux_cibles]
+        niveau_min_cible = min(scores_cibles)
         
-        # Accessible si le niveau cible <= niveau apprenant
+        # Accessible si le niveau cible le plus bas <= niveau apprenant
         return niveau_min_cible <= niveau_apprenant_score
-    
-    def _extraire_niveau_formation(self, dept, niveaux_ordre):
-        """Extrait le niveau d'une formation à partir de ses cours"""
-        cours_qs = Cours.objects.filter(departement=dept)
-        if not cours_qs.exists():
-            return 0
-        
-        # Prendre le niveau le plus élevé parmi les cours de la formation
-        niveaux_trouves = []
-        for cours in cours_qs:
-            if cours.niveau and cours.niveau in niveaux_ordre:
-                niveaux_trouves.append(niveaux_ordre[cours.niveau])
-        
-        return max(niveaux_trouves) if niveaux_trouves else 0
-    
+
     def _serialiser_departement(self, dept, cours_data, request):
-        """Sérialise un département avec ses cours"""
+        """Sérialise un département avec ses cours."""
+        image_url = None
+        if dept.image:
+            try:
+                image_url = request.build_absolute_uri(dept.image.url)
+            except Exception:
+                pass
+
         return {
             'id': dept.id,
             'nom': dept.nom,
             'description': dept.description,
+            'image_url': image_url,
+            'couleur': dept.couleur or '#135F74',
+            'prix': dept.prix,
             'type': dept.type_departement,
+            'statut': 'NOUVEAU' if not dept.est_valide else 'ACTIF',
+            'progression': 0.0,
+            'progression_moyenne': 0.0,
             'cours': cours_data,
-            'niveaux_cibles': dept.niveaux_cibles,
-            'date_limite_inscription': dept.date_limite_inscription,
-            'date_examen': dept.date_examen,
+            'nb_cours': len(cours_data),
+            'niveaux_cibles': dept.niveaux_cibles or '',
+            'date_limite_inscription': dept.date_limite_inscription.isoformat() if dept.date_limite_inscription else None,
+            'date_examen': dept.date_examen.isoformat() if dept.date_examen else None,
             'frais_dossier': dept.frais_dossier,
-            'duree_formation': dept.duree_formation,
-            'mode_formation': dept.mode_formation,
-            'certificat_delivre': dept.certificat_delivre,
+            'duree_formation': dept.duree_formation or '',
+            'mode_formation': dept.mode_formation or '',
+            'mode_formation_label': {
+                'presentiel': 'Présentiel',
+                'distance': 'À distance',
+                'hybride': 'Hybride',
+            }.get(dept.mode_formation, ''),
+            'certificat_delivre': dept.certificat_delivre or '',
+            'prerequis': dept.prerequis or '',
+            'objectifs': dept.objectifs or '',
+            'domaine': dept.domaine or '',
+            'ville': dept.ville or '',
+            'est_certifiante': dept.est_certifiante,
+            'est_formation_metier': dept.est_formation_metier,
+            'est_formation_classique': dept.est_formation_classique,
+            'est_prepa_concours': dept.est_prepa_concours,
+            'nom_concours': dept.nom_concours or '',
+            'organisme_concours': dept.organisme_concours or '',
+            'arrete_ministeriel': dept.arrete_ministeriel or '',
+            'lien_officiel': dept.lien_officiel or '',
+            'places_disponibles': dept.places_disponibles,
+            'debouches': dept.debouches or '',
+            'cadre': {
+                'nom': dept.cadre.user.username if dept.cadre else '',
+            } if dept.cadre else None,
         }
-
 
 class ApprenantFormationsAPIView(APIView):
     """
@@ -4874,16 +4973,10 @@ class ApprenantDepartementDetailView(APIView):
 
 class OlympiadesPourMoiView(APIView):
     """
-    Olympiades filtrées pour l'apprenant connecté.
-
-    Logique de filtrage (par ordre de priorité) :
-    1. Si profile.cursus existe → parcours de l'olympiade == cursus
-    2. Sinon → toutes les olympiades validées (Devoir.est_publie=True)
-
-    Le lien parcours ↔ olympiade se fait via :
-      Olympiade.organisateur (Profile cadre)
-        → departements_cadre (Departement)
-          → parcours (Parcours)
+    GET /api/olympiades/pour-moi/
+    
+    Olympiades filtrées pour l'apprenant connecté selon son niveau.
+    Logique : niveau_olympiade <= niveau_apprenant
     """
     permission_classes = [IsAuthenticated]
 
@@ -4892,41 +4985,42 @@ class OlympiadesPourMoiView(APIView):
         if not profile:
             return Response({"detail": "Profil introuvable."}, status=404)
 
-        # Filtres URL
-        statut  = request.query_params.get('statut')
-        matiere = request.query_params.get('matiere')
-        niveau  = request.query_params.get('niveau')
+        niveau_apprenant = (profile.niveau or '').strip()
+        
+        # Ordre des niveaux
+        niveaux_ordre = {
+            '6eme': 1, '5eme': 2, '4eme': 3, '3eme': 4,
+            'seconde': 5, 'premiere': 6, 'terminale': 7,
+            'licence1': 8, 'licence2': 9, 'licence3': 10,
+            'master1': 11, 'master2': 12,
+        }
+        
+        niveau_apprenant_norm = niveau_apprenant.lower().replace('è', 'e').replace('é', 'e')
+        niveau_score = niveaux_ordre.get(niveau_apprenant_norm, 99)
 
-        # Base queryset — seulement les olympiades publiées
-        # (Devoir.est_publie=True signifie que l'admin a validé)
+        # Base queryset — olympiades publiées ET validées
         qs = Olympiade.objects.filter(
-            devoir__est_publie=True
+            devoir__est_publie=True,
         ).select_related(
             'organisateur__user', 'devoir'
         ).order_by('-date_debut_olympiade')
 
-        # Filtre par parcours si l'apprenant a un cursus (même logique que ApprenantCursusAPIView)
-        if profile.cursus:
-            qs = qs.filter(
-                organisateur__departements_cadre__parcours__nom=profile.cursus
-            ).distinct()
-
-        if matiere:
-            qs = qs.filter(matiere=matiere)
-        if niveau:
-            qs = qs.filter(niveau=niveau)
+        # Filtrage par niveau
+        olympiades_accessibles = []
+        for o in qs:
+            niveau_olympiade = (o.niveau or '').lower().replace('è', 'e').replace('é', 'e')
+            niveau_olympiade_score = niveaux_ordre.get(niveau_olympiade, 99)
+            
+            # Accessible si niveau olympiade <= niveau apprenant
+            if niveau_olympiade_score <= niveau_score:
+                olympiades_accessibles.append(o)
 
         serializer = OlympiadeListSerializer(
-            qs, many=True, context={"request": request}
+            olympiades_accessibles, many=True, context={"request": request}
         )
-        data = serializer.data
-
-        if statut:
-            data = [d for d in data if d["statut"] == statut]
-
-        return Response(data)
-
-
+        return Response(serializer.data)
+    
+    
 # ══════════════════════════════════════════════════════════════════
 # ENSEIGNANT ADMIN — OLYMPIADES À VALIDER
 # GET  /api/admin/olympiades/a-valider/
