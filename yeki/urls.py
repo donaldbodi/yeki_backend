@@ -170,7 +170,7 @@ urlpatterns = [
     # parcours "Formations" filtrés par profile.sub_cursus.
     # Paramètre optionnel : ?parcours=NomDuParcours
     path(
-        'apprenant/formations/?type=all',
+        'apprenant/formations/',
         ApprenantConcoursFormationsView.as_view(),
         name='apprenant-formations',
     ),
