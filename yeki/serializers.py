@@ -382,7 +382,7 @@ class ParcoursSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Parcours
-        fields = ['id', 'nom', 'admin', 'departements']
+        fields = ['id', 'nom', 'admin', 'departements', 'type_parcours']
 
 
 class LeconLightSerializer(serializers.ModelSerializer):
