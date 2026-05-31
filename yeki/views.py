@@ -2764,29 +2764,30 @@ class MonInscriptionOlympiadeView(APIView):
 # POST /api/forum/questions/          → créer une question
 # ─────────────────────────────────────────────────────────────────
 
+# views.py - Mettre à jour la classe ListeQuestionsView
+
 class ListeQuestionsView(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]  # ⚠️ AJOUTÉ
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
-        # Utiliser select_related pour optimiser les requêtes
         qs = QuestionForum.objects.select_related('auteur__profile').all()
-
+        
         # Filtres
-        source    = request.query_params.get("source")
-        lecon_id  = request.query_params.get("lecon_id")
-        exo_id    = request.query_params.get("exercice_id")
+        source = request.query_params.get("source")
+        lecon_id = request.query_params.get("lecon_id")
+        exercice_id = request.query_params.get("exercice_id")
         devoir_id = request.query_params.get("devoir_id")
-        cours_id  = request.query_params.get("cours_id")
-        resolue   = request.query_params.get("resolue")
-        since     = request.query_params.get("since")
+        cours_id = request.query_params.get("cours_id")
+        resolue = request.query_params.get("resolue")
+        since = request.query_params.get("since")
 
         if source:
             qs = qs.filter(source=source)
         if lecon_id:
             qs = qs.filter(lecon_id=lecon_id)
-        if exo_id:
-            qs = qs.filter(exercice_id=exo_id)
+        if exercice_id:
+            qs = qs.filter(exercice_id=exercice_id)
         if devoir_id:
             qs = qs.filter(devoir_id=devoir_id)
         if cours_id:
@@ -2796,11 +2797,8 @@ class ListeQuestionsView(APIView):
         if since:
             qs = qs.filter(cree_le__gt=since)
 
-        # ✅ Utiliser annotate au lieu de @property
         from django.db.models import Count
         qs = qs.annotate(nb_reponses=Count("reponses", distinct=True))
-
-        # ⚠️ CORRECTION : Tri du plus récent au plus ancien
         qs = qs.order_by("-cree_le")
 
         serializer = QuestionForumListSerializer(
@@ -2809,36 +2807,48 @@ class ListeQuestionsView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        # ⚠️ Traitement multipart pour les fichiers
-        data = request.data.copy()
+        # ⭐ CRITIQUE : Extraire les données du request.data (qui peut être QueryDict pour multipart)
+        data = {}
         
-        # Gérer l'image
+        # Copier les champs texte
+        for key in ['contenu', 'source', 'lecon_id', 'lecon_titre', 
+                    'cours_id', 'cours_titre', 'exercice_id', 'exercice_titre',
+                    'devoir_id', 'devoir_titre']:
+            if key in request.data:
+                data[key] = request.data[key]
+        
+        # Gérer les fichiers
         if 'image' in request.FILES:
             data['image'] = request.FILES['image']
-        else:
-            data['image'] = None
-            
-        # Gérer l'audio
         if 'audio' in request.FILES:
             data['audio'] = request.FILES['audio']
-        else:
-            data['audio'] = None
         
         serializer = QuestionForumCreateSerializer(
             data=data, context={"request": request}
         )
+        
         if serializer.is_valid():
             question = serializer.save()
+            
             # Recharger avec les annotations
+            from django.db.models import Count
             question = QuestionForum.objects.annotate(
                 nb_reponses=Count("reponses")
             ).get(pk=question.pk)
+            
             return Response(
                 QuestionForumListSerializer(question, context={"request": request}).data,
                 status=status.HTTP_201_CREATED,
             )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        # ⭐ Afficher les erreurs détaillées
+        print("Serializer errors:", serializer.errors)
+        return Response(
+            {"detail": "Erreur de validation", "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
+        
 # ─────────────────────────────────────────────────────────────────
 # GET  /api/forum/questions/<pk>/     → détail + réponses
 # DELETE /api/forum/questions/<pk>/   → supprimer (auteur seulement)
