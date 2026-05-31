@@ -944,11 +944,15 @@ class ReponseSerializer(serializers.ModelSerializer):
         return False
 
 
+# serializers.py - Mettre à jour les sérialiseurs QuestionForum
+
 class QuestionForumListSerializer(serializers.ModelSerializer):
     auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
     auteur_username = serializers.CharField(source="auteur.username", read_only=True)
     auteur_est_enseignant = serializers.SerializerMethodField()
     nb_reponses     = serializers.IntegerField(read_only=True)
+    image_url       = serializers.SerializerMethodField()
+    audio_url       = serializers.SerializerMethodField()
     
     class Meta:
         model  = QuestionForum
@@ -959,6 +963,7 @@ class QuestionForumListSerializer(serializers.ModelSerializer):
             "exercice_id", "exercice_titre",
             "devoir_id", "devoir_titre",
             "auteur_nom", "auteur_username", "auteur_est_enseignant",
+            "image_url", "audio_url",  # ⚠️ AJOUTÉ
         ]
 
     def get_auteur_est_enseignant(self, obj):
@@ -968,6 +973,22 @@ class QuestionForumListSerializer(serializers.ModelSerializer):
         except:
             return False
 
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
+
+    def get_audio_url(self, obj):
+        if obj.audio:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.audio.url)
+            return obj.audio.url
+        return None
+
 
 class QuestionForumDetailSerializer(serializers.ModelSerializer):
     auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
@@ -975,6 +996,8 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
     auteur_est_enseignant = serializers.SerializerMethodField()
     nb_reponses     = serializers.IntegerField(read_only=True)
     reponses        = ReponseSerializer(many=True, read_only=True)
+    image_url       = serializers.SerializerMethodField()
+    audio_url       = serializers.SerializerMethodField()
 
     class Meta:
         model  = QuestionForum
@@ -985,6 +1008,7 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
             "exercice_id", "exercice_titre",
             "devoir_id", "devoir_titre",
             "auteur_nom", "auteur_username", "auteur_est_enseignant",
+            "image_url", "audio_url",  # ⚠️ AJOUTÉ
         ]
 
     def get_auteur_est_enseignant(self, obj):
@@ -993,6 +1017,22 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
             return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
         except:
             return False
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
+
+    def get_audio_url(self, obj):
+        if obj.audio:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.audio.url)
+            return obj.audio.url
+        return None
 
 
 class QuestionForumCreateSerializer(serializers.ModelSerializer):
@@ -1003,6 +1043,7 @@ class QuestionForumCreateSerializer(serializers.ModelSerializer):
             "lecon_id", "lecon_titre", "cours_id", "cours_titre",
             "exercice_id", "exercice_titre",
             "devoir_id", "devoir_titre",
+            "image", "audio",  # ⚠️ AJOUTÉ
         ]
 
     def create(self, validated_data):

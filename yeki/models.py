@@ -939,6 +939,8 @@ class ClassementOlympiade(models.Model):
 # QUESTION FORUM
 # Peut être liée à une leçon, un exercice ou un devoir
 # ─────────────────────────────────────────────────────────────────
+# models.py - Ajoutez ces champs à la classe QuestionForum
+
 class QuestionForum(models.Model):
     SOURCE_CHOICES = [
         ("lecon",    "Leçon"),
@@ -966,12 +968,23 @@ class QuestionForum(models.Model):
     est_resolue     = models.BooleanField(default=False)
     nb_vues         = models.IntegerField(default=0)
 
+    # ⚠️ NOUVEAUX CHAMPS ⚠️
+    image = models.ImageField(
+        upload_to='forum/questions/images/',
+        null=True, blank=True,
+        help_text="Image jointe à la question"
+    )
+    audio = models.FileField(
+        upload_to='forum/questions/audios/',
+        null=True, blank=True,
+        help_text="Fichier audio joint à la question"
+    )
+
     class Meta:
-        ordering = ["-cree_le"]
+        ordering = ["-cree_le"]  # ⚠️ CORRECTION : Plus récent en premier
 
     def __str__(self):
         return f"[{self.source}] {self.auteur.username} — {self.contenu[:60]}"
-
 
 
 # ─────────────────────────────────────────────────────────────────

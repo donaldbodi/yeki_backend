@@ -2763,8 +2763,10 @@ class MonInscriptionOlympiadeView(APIView):
 # GET  /api/forum/questions/          → liste des questions
 # POST /api/forum/questions/          → créer une question
 # ─────────────────────────────────────────────────────────────────
+
 class ListeQuestionsView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # ⚠️ AJOUTÉ
 
     def get(self, request):
         # Utiliser select_related pour optimiser les requêtes
@@ -2798,14 +2800,32 @@ class ListeQuestionsView(APIView):
         from django.db.models import Count
         qs = qs.annotate(nb_reponses=Count("reponses", distinct=True))
 
+        # ⚠️ CORRECTION : Tri du plus récent au plus ancien
+        qs = qs.order_by("-cree_le")
+
         serializer = QuestionForumListSerializer(
             qs, many=True, context={"request": request}
         )
         return Response(serializer.data)
 
     def post(self, request):
+        # ⚠️ Traitement multipart pour les fichiers
+        data = request.data.copy()
+        
+        # Gérer l'image
+        if 'image' in request.FILES:
+            data['image'] = request.FILES['image']
+        else:
+            data['image'] = None
+            
+        # Gérer l'audio
+        if 'audio' in request.FILES:
+            data['audio'] = request.FILES['audio']
+        else:
+            data['audio'] = None
+        
         serializer = QuestionForumCreateSerializer(
-            data=request.data, context={"request": request}
+            data=data, context={"request": request}
         )
         if serializer.is_valid():
             question = serializer.save()
