@@ -950,7 +950,7 @@ class QuestionForum(models.Model):
     ]
 
     auteur          = models.ForeignKey(User, on_delete=models.CASCADE, related_name="questions_forum")
-    contenu         = models.TextField()
+    contenu         = models.TextField(null=True, blank=True,)
     source          = models.CharField(max_length=20, choices=SOURCE_CHOICES, default="libre")
     cree_le         = models.DateTimeField(auto_now_add=True)
     modifie_le      = models.DateTimeField(auto_now=True)
@@ -1496,6 +1496,13 @@ class YekiIAChatHistorique(models.Model):
     )
     cree_le     = models.DateTimeField(auto_now_add=True)
     tokens      = models.PositiveIntegerField(default=0)
+    tokens_input = models.PositiveIntegerField(default=0, help_text="Nombre de tokens en entrée")
+    tokens_output = models.PositiveIntegerField(default=0, help_text="Nombre de tokens en sortie")
+    audio = models.FileField(
+        upload_to='ia_chat_audios/',
+        null=True, blank=True,
+        help_text="Fichier audio joint à la question"
+    )
 
     class Meta:
         ordering = ['cree_le']

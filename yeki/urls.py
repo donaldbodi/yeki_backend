@@ -6,6 +6,8 @@ from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
 
+from yeki.views_ia import YekiIAChatAvecHistoriqueView, YekiIAChatHistoriqueView
+
 from .views import *
 from . import views
 
@@ -141,6 +143,13 @@ urlpatterns = [
     #path('ia/generer-exercices/', YekiIAGenererExercicesView.as_view(), name='ia-exercices'),
     #path('ia/corriger/', YekiIACorrigerTexteView.as_view(), name='ia-corriger'),
     #path('ia/creer-formation/', YekiIACreerFormationView.as_view(), name='ia-creer-formation'),
+    path('ia/cours/<int:cours_id>/historique/', 
+         YekiIAChatHistoriqueView.as_view(), 
+         name='ia-chat-historique'),
+    
+    path('ia/cours/<int:cours_id>/chat/', 
+         YekiIAChatAvecHistoriqueView.as_view(), 
+         name='ia-chat'),
 
 
     # ── PAIEMENT ──────────────────────────────────────────────────
