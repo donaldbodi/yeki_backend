@@ -367,10 +367,14 @@ class EnseignantCadreLightSerializer(serializers.ModelSerializer): # enseignant 
 class DepartementSerializer(serializers.ModelSerializer):
     cadre = EnseignantCadreLightSerializer(read_only=True)
     cours = CoursSerializer(many=True, read_only=True)
+    niveaux_accessibles = serializers.SerializerMethodField()
 
     class Meta:
         model = Departement
-        fields = ["id", "nom", "parcours", "cadre", "cours"]
+        fields = ["id", "nom", "parcours", "cadre", "cours", "niveaux_accessibles", "niveaux_cibles"]
+    
+    def get_niveaux_accessibles(self, obj):
+        return obj.get_niveaux_accessibles_list()
 
 
 # =======================
@@ -770,6 +774,7 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
     inscription_ouverte = serializers.SerializerMethodField()
     devoir_id           = serializers.IntegerField(source='devoir.id', read_only=True, allow_null=True)
     mon_inscription     = serializers.SerializerMethodField()
+    niveaux_accessibles = serializers.SerializerMethodField()
 
     class Meta:
         model  = Olympiade
@@ -780,8 +785,11 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
             "duree_minutes", "nb_questions", "note_sur",
             "prix_1er", "prix_2eme", "prix_3eme",
             "statut", "est_inscrit", "nb_inscrits", "inscription_ouverte",
-            "devoir_id", "mon_inscription",
+            "devoir_id", "mon_inscription","niveaux_accessibles"
         ]
+    
+    def get_niveaux_accessibles(self, obj):
+        return obj.get_niveaux_accessibles_list()
 
     def get_statut(self, obj):
         return obj.statut_auto

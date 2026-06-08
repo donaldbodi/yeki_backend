@@ -267,6 +267,26 @@ class Departement(models.Model):
         help_text="True si la formation délivre un certificat reconnu"
     )
 
+    niveaux_accessibles = models.TextField(
+        blank=True,
+        help_text="Liste des niveaux séparés par des virgules (ex: 'Terminale,Licence 1,Licence 2')"
+    )
+    
+    def get_niveaux_accessibles_list(self):
+        """Retourne la liste des niveaux accessibles"""
+        if not self.niveaux_accessibles:
+            return []
+        return [n.strip().lower() for n in self.niveaux_accessibles.split(',') if n.strip()]
+    
+    def est_accessible_par_niveau(self, niveau_apprenant: str) -> bool:
+        """Vérifie si le niveau de l'apprenant est dans la liste des niveaux accessibles"""
+        if not niveau_apprenant:
+            return True  # Si pas de niveau défini, on autorise
+        niveaux = self.get_niveaux_accessibles_list()
+        if not niveaux:
+            return True  # Si aucun niveau spécifié, on autorise
+        return niveau_apprenant.lower() in niveaux
+
     class Meta:
         ordering = ['parcours', 'nom']
 
@@ -834,8 +854,25 @@ class Olympiade(models.Model):
     est_validee = models.BooleanField(default=False)  # Validée par l'admin
     est_refusee = models.BooleanField(default=False)   # Refusée par l'admin
     motif_refus = models.TextField(blank=True)         # Motif du refus
-    validee_le = models.DateTimeField(null=True, blank=True)  # Date de validatio
+    validee_le = models.DateTimeField(null=True, blank=True)  # Date de validation
+
+    niveaux_accessibles = models.TextField(
+        blank=True,
+        help_text="Liste des niveaux séparés par des virgules (ex: 'Terminale,Licence 1')"
+    )
     
+    def get_niveaux_accessibles_list(self):
+        if not self.niveaux_accessibles:
+            return []
+        return [n.strip().lower() for n in self.niveaux_accessibles.split(',') if n.strip()]
+    
+    def est_accessible_par_niveau(self, niveau_apprenant: str) -> bool:
+        if not niveau_apprenant:
+            return True
+        niveaux = self.get_niveaux_accessibles_list()
+        if not niveaux:
+            return True
+        return niveau_apprenant.lower() in niveaux
 
     class Meta:
         ordering = ["-date_debut_olympiade"]
