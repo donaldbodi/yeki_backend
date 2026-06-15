@@ -301,7 +301,7 @@ urlpatterns = [
 
     # Répétiteurs
     path('repetiteurs/search/', RepetiteursSearchView.as_view(), name='repetiteurs-search'),
-    path('repetiteurs/', repetiteurs_page, name='repetiteurs'),
+    #path('repetiteurs/', repetiteurs_page, name='repetiteurs'),
 
     path('classement/departement/<int:departement_id>/', 
          ClassementDepartementView.as_view(), 
