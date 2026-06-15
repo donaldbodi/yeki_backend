@@ -1,0 +1,126 @@
+<!-- templates/repetiteurs.html -->
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <meta name="description" content="Trouvez un répétiteur particulier par matière sur Yéki. Cours à domicile ou en ligne à 5000 FCFA/mois.">
+  <title>Yéki — Trouver un répétiteur</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+
+  <link rel="stylesheet" href="{% static 'css/repetiteurs.css' %}">
+</head>
+<body>
+
+<!-- Navigation -->
+<nav class="navbar" id="navbar">
+  <div class="nav-container">
+    <a href="/" class="logo">Yéki<span>.</span></a>
+    <div class="nav-links">
+      <a href="/#features">Fonctionnalités</a>
+      <a href="/#about">À propos</a>
+      <a href="/#download">Télécharger</a>
+      <a href="/#faq">FAQ</a>
+      <a href="/web-login/" class="btn-web">
+        <i class="fas fa-globe"></i> Version Web
+      </a>
+      <a href="#" class="btn-download" id="downloadBtn">
+        <i class="fas fa-download"></i> Télécharger
+      </a>
+    </div>
+    <div class="burger" id="burger">
+      <span></span><span></span><span></span>
+    </div>
+  </div>
+</nav>
+
+<!-- Mobile Menu -->
+<div class="mobile-menu" id="mobileMenu">
+  <a href="/#features">Fonctionnalités</a>
+  <a href="/#about">À propos</a>
+  <a href="/#download">Télécharger</a>
+  <a href="/#faq">FAQ</a>
+  <a href="/web-login/">Version Web</a>
+  <a href="#" id="mobileDownloadBtn">Télécharger l'application</a>
+</div>
+
+<!-- Main Content -->
+<main class="main">
+  <div class="container">
+    <!-- Hero -->
+    <div class="hero">
+      <div class="tarif-badge">
+        <i class="fas fa-chalkboard-user"></i> Cours particuliers
+      </div>
+      <h1>Trouvez un répétiteur<br>près de chez vous</h1>
+      <p>Des enseignants qualifiés pour vous aider à réussir. Cours à domicile ou en ligne.</p>
+    </div>
+
+    <!-- Search Section -->
+    <div class="search-section">
+      <div class="search-box">
+        <input type="text" id="searchInput" class="search-input" placeholder="Rechercher par matière (ex: Mathématiques, Physique, Anglais...)" autocomplete="off">
+        <button id="searchBtn" class="search-btn">
+          <i class="fas fa-search"></i> Rechercher
+        </button>
+      </div>
+      <div class="matieres-populaires">
+        <p><i class="fas fa-fire"></i> Matières populaires :</p>
+        <div class="matieres-list" id="matieresList">
+          <span class="matiere-chip" data-matiere="Mathématiques">📐 Mathématiques</span>
+          <span class="matiere-chip" data-matiere="Physique">⚡ Physique</span>
+          <span class="matiere-chip" data-matiere="Chimie">🧪 Chimie</span>
+          <span class="matiere-chip" data-matiere="SVT">🔬 SVT</span>
+          <span class="matiere-chip" data-matiere="Informatique">💻 Informatique</span>
+          <span class="matiere-chip" data-matiere="Français">📖 Français</span>
+          <span class="matiere-chip" data-matiere="Anglais">🇬🇧 Anglais</span>
+          <span class="matiere-chip" data-matiere="Histoire-Géo">🌍 Histoire-Géo</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsContainer">
+      <div class="results-header" id="resultsHeader" style="display: none;">
+        <h2><i class="fas fa-users"></i> Répétiteurs disponibles</h2>
+        <span class="results-count" id="resultsCount"></span>
+      </div>
+      <div id="resultsGrid" class="results-grid"></div>
+      <div id="loadingState" class="loading" style="display: none;">
+        <div class="spinner"></div>
+        <p>Recherche de répétiteurs...</p>
+      </div>
+      <div id="emptyState" class="empty-state" style="display: none;">
+        <i class="fas fa-user-graduate"></i>
+        <p>Aucun répétiteur trouvé pour cette matière.</p>
+        <p style="font-size: 0.8rem; margin-top: 8px;">Essayez une autre matière ou vérifiez votre connexion.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="footer-content">
+      <div class="footer-logo">Yéki<span>.</span></div>
+      <div class="footer-links">
+        <a href="/#features">Fonctionnalités</a>
+        <a href="/#about">À propos</a>
+        <a href="/#download">Télécharger</a>
+        <a href="/#faq">FAQ</a>
+        <a href="/web-login/">Connexion</a>
+      </div>
+      <div class="copyright">
+        © 2025 Yéki. Tous droits réservés. Conçu au Cameroun 🇨🇲
+      </div>
+    </div>
+  </div>
+</footer>
+<script src="{% static 'js/repetiteurs.js' %}"></script>
+</body>
+</html>

@@ -22,7 +22,8 @@ import os
 import hashlib
 import hmac
 import requests
-
+from .ranking_service import RankingService
+import logging
 
 
 from django.contrib.auth import get_user_model
@@ -55,6 +56,295 @@ def _is_premium(user):
 def _nom_profil(profile):
     n = f"{profile.user.first_name} {profile.user.last_name}".strip()
     return n or profile.user.username
+
+class RepetiteursSearchView(APIView):
+    """
+    GET /api/repetiteurs/search/?matiere=maths
+    Recherche des enseignants (principaux et secondaires) par matière.
+    
+    Retourne :
+    - nom, matière, tarif (5000 FCFA/mois), numéro WhatsApp
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        matiere = request.query_params.get('matiere', '').strip().lower()
+        niveau = request.query_params.get('niveau', '').strip()
+        
+        if not matiere:
+            return Response(
+                {"detail": "Le paramètre 'matiere' est requis."},
+                status=400
+            )
+        
+        # Rechercher les enseignants (principaux et secondaires)
+        # qui enseignent dans des cours correspondant à la matière
+        profils = Profile.objects.filter(
+            user_type__in=['enseignant_principal', 'enseignant'],
+            is_active=True
+        ).select_related('user')
+        
+        resultats = []
+        for profil in profils:
+            # Vérifier si l'enseignant enseigne la matière recherchée
+            enseigne_matiere = False
+            
+            # Cours en tant que principal
+            cours_principaux = Cours.objects.filter(
+                enseignant_principal=profil,
+                matiere__iexact=matiere
+            )
+            
+            # Cours en tant que secondaire
+            cours_secondaires = profil.cours_secondaires.filter(
+                matiere__iexact=matiere
+            )
+            
+            if cours_principaux.exists() or cours_secondaires.exists():
+                enseigne_matiere = True
+            
+            if enseigne_matiere:
+                # Numéro WhatsApp (à stocker dans le profil)
+                whatsapp = getattr(profil, 'whatsapp', None) or profil.phone or ''
+                if not whatsapp.startswith('+237') and whatsapp:
+                    whatsapp = f"+237{whatsapp}"
+                
+                resultats.append({
+                    "id": profil.id,
+                    "nom": _nom_profil(profil),
+                    "username": profil.user.username,
+                    "matiere": matiere.capitalize(),
+                    "tarif": 5000,  # 5000 FCFA par mois
+                    "whatsapp": whatsapp,
+                    "avatar": request.build_absolute_uri(profil.avatar.url) if profil.avatar else None,
+                    "disponible": True,
+                })
+        
+        return Response({
+            "matiere": matiere,
+            "total": len(resultats),
+            "repetiteurs": resultats,
+            "tarif_mensuel": 5000,
+            "message_whatsapp_template": "Bonjour, je souhaite prendre des cours de {matiere} avec vous a domicil.",
+        }, status=200)
+
+
+logger = logging.getLogger(__name__)
+
+
+class ClassementDepartementView(APIView):
+    """
+    GET /api/classement/departement/<departement_id>/
+    Retourne le classement des apprenants d'un département.
+    
+    Query params:
+    - limit: nombre de résultats (défaut 100, max 200)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, departement_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        departement = get_object_or_404(Departement, pk=departement_id)
+        
+        # Vérifier que l'utilisateur a accès à ce département
+        if profile.user_type == 'apprenant':
+            # Vérifier que l'apprenant appartient à ce département
+            if profile.cursus != departement.parcours.nom:
+                return Response(
+                    {"detail": "Vous n'avez pas accès à ce classement."},
+                    status=403
+                )
+        elif profile.user_type == 'enseignant_cadre':
+            if departement.cadre != profile:
+                return Response(
+                    {"detail": "Ce département ne vous appartient pas."},
+                    status=403
+                )
+        elif profile.user_type not in ['admin', 'enseignant_admin']:
+            return Response(
+                {"detail": "Accès non autorisé."},
+                status=403
+            )
+        
+        try:
+            limit = min(int(request.query_params.get('limit', 100)), 200)
+        except (TypeError, ValueError):
+            limit = 100
+        
+        classement = RankingService.obtenir_classement_departement(departement, limit)
+        
+        # Ajouter des métadonnées
+        stats = {
+            'total_apprenants': len(classement),
+            'score_min': classement[-1]['score'] if classement else 0,
+            'score_max': classement[0]['score'] if classement else 0,
+            'score_moyen': round(sum(c['score'] for c in classement) / len(classement), 1) if classement else 0,
+        }
+        
+        return Response({
+            'departement': {
+                'id': departement.id,
+                'nom': departement.nom,
+            },
+            'mon_rang': None,  # Rempli plus bas si apprenant
+            'classement': classement,
+            'stats': stats,
+        })
+    
+    def get(self, request, departement_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        departement = get_object_or_404(Departement, pk=departement_id)
+        
+        # Vérifications d'accès
+        if profile.user_type == 'apprenant':
+            if profile.cursus != departement.parcours.nom:
+                return Response(
+                    {"detail": "Vous n'avez pas accès à ce classement."},
+                    status=403
+                )
+        elif profile.user_type == 'enseignant_cadre':
+            if departement.cadre != profile:
+                return Response(
+                    {"detail": "Ce département ne vous appartient pas."},
+                    status=403
+                )
+        elif profile.user_type not in ['admin', 'enseignant_admin']:
+            return Response(
+                {"detail": "Accès non autorisé."},
+                status=403
+            )
+        
+        try:
+            limit = min(int(request.query_params.get('limit', 100)), 200)
+        except (TypeError, ValueError):
+            limit = 100
+        
+        classement = RankingService.obtenir_classement_departement(departement, limit)
+        
+        # Trouver le rang de l'utilisateur connecté (si apprenant)
+        mon_rang = None
+        if profile.user_type == 'apprenant':
+            for item in classement:
+                if item['apprenant_id'] == request.user.id:
+                    mon_rang = {
+                        'rang': item['rang'],
+                        'score': item['score'],
+                        'progression': item['progression'],
+                    }
+                    break
+        
+        stats = {
+            'total': len(classement),
+            'moyenne': round(sum(c['score'] for c in classement) / len(classement), 1) if classement else 0,
+            'meilleur': classement[0]['score'] if classement else 0,
+        }
+        
+        return Response({
+            'departement': {
+                'id': departement.id,
+                'nom': departement.nom,
+            },
+            'mon_rang': mon_rang,
+            'classement': classement,
+            'stats': stats,
+        })
+
+
+class MonScoreGlobalView(APIView):
+    """
+    GET /api/classement/mon-score/
+    Retourne le score et le rang de l'apprenant dans son département principal.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        
+        if profile.user_type != 'apprenant':
+            return Response({"detail": "Réservé aux apprenants."}, status=403)
+        
+        if not profile.cursus:
+            return Response({"detail": "Aucun cursus assigné."}, status=404)
+        
+        # Récupérer le département principal du parcours de l'apprenant
+        try:
+            parcours = Departement.objects.filter(
+                parcours__nom=profile.cursus,
+                parcours__type_parcours='cursus'
+            ).first()
+        except Exception:
+            parcours = None
+        
+        if not parcours:
+            return Response({"detail": "Aucun département trouvé pour votre cursus."}, status=404)
+        
+        # Récupérer le rang
+        rang = RangApprenant.objects.filter(
+            apprenant=request.user,
+            departement=parcours
+        ).first()
+        
+        # Scores par catégorie
+        scores_categorie = {}
+        if rang:
+            details = rang.details.all()
+            scores_categorie = {d.categorie: round(d.score, 1) for d in details}
+        
+        return Response({
+            'score': round(rang.score, 1) if rang else 0,
+            'rang': rang.rang if rang else None,
+            'total_apprenants': RangApprenant.objects.filter(departement=parcours, rang__isnull=False).count(),
+            'progression': round(rang.progression_semaine, 1) if rang else 0,
+            'scores_categorie': scores_categorie,
+            'departement': {
+                'id': parcours.id,
+                'nom': parcours.nom,
+            }
+        })
+
+
+class RecalculerClassementView(APIView):
+    """
+    POST /api/classement/recalculer/
+    Body: { "departement_id": 123 }  (optionnel)
+    Force le recalcul des rangs. Réservé aux admins.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        
+        if profile.user_type not in ['admin', 'enseignant_admin']:
+            return Response({"detail": "Accès réservé aux administrateurs."}, status=403)
+        
+        departement_id = request.data.get('departement_id')
+        
+        if departement_id:
+            departement = get_object_or_404(Departement, pk=departement_id)
+            count = RankingService.mettre_a_jour_rangs_departement(departement)
+            message = f"Classement recalculé pour {departement.nom}: {count} apprenants"
+        else:
+            count = RankingService.mettre_a_jour_tous_les_rangs()
+            message = f"Classement global recalculé: {count} apprenants"
+        
+        return Response({
+            'detail': message,
+            'apprenants_traites': count,
+        })
 
 
 # ═══════════════════════════════════════════════════════════════

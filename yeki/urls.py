@@ -299,6 +299,20 @@ urlpatterns = [
     path('niveaux/', ListeNiveauxView.as_view(), name='liste-niveaux'),
     path('olympiades/mes-olympiades/', MesOlympiadesCadreView.as_view(), name='mes-olympiades-cadre'),
 
+    # Répétiteurs
+    path('repetiteurs/search/', RepetiteursSearchView.as_view(), name='repetiteurs-search'),
+    path('repetiteurs/', repetiteurs_page, name='repetiteurs'),
+
+    path('classement/departement/<int:departement_id>/', 
+         ClassementDepartementView.as_view(), 
+         name='classement-departement'),
+    path('classement/mon-score/', 
+         MonScoreGlobalView.as_view(), 
+         name='mon-score'),
+    path('classement/recalculer/', 
+         RecalculerClassementView.as_view(), 
+         name='recalculer-classement'),
+
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

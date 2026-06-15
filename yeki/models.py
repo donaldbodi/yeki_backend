@@ -34,6 +34,7 @@ class Profile(models.Model):
     is_active = models.BooleanField(default=False)
 
     phone = models.CharField(max_length=20, blank=True)
+    whatsapp = models.CharField(max_length=20, blank=True, help_text="Numéro WhatsApp pour les répétiteurs")
     avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
     bio = models.TextField(blank=True)
 
@@ -271,6 +272,21 @@ class Departement(models.Model):
         blank=True,
         help_text="Liste des niveaux séparés par des virgules (ex: 'Terminale,Licence 1,Licence 2')"
     )
+
+    prix_presentiel = models.PositiveIntegerField(
+    default=0,
+    help_text="Prix en présentiel (supplément) en FCFA. Le prix total = prix (en ligne) + prix_presentiel"
+    )
+
+    @property
+    def prix_total(self) -> int:
+        """Retourne le prix total (en ligne + présentiel)"""
+        return self.prix + self.prix_presentiel
+
+    @property
+    def a_paiement_presentiel(self) -> bool:
+        """Indique si un paiement présentiel est requis en plus"""
+        return self.prix_presentiel > 0
     
     def get_niveaux_accessibles_list(self):
         """Retourne la liste des niveaux accessibles"""
@@ -1607,3 +1623,83 @@ class AppVersion(models.Model):
     
     def __str__(self):
         return f"{self.get_platform_display()} - {self.version_name} (code: {self.version_code})"
+
+
+# models.py - Ajouter à la fin du fichier
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SYSTÈME DE RANG DES APPRENANTS PAR DÉPARTEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+class RangApprenant(models.Model):
+    """
+    Score et rang d'un apprenant dans un département spécifique.
+    Calculé périodiquement (batch) ou à la demande.
+    """
+    apprenant = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='rangs'
+    )
+    departement = models.ForeignKey(
+        Departement, 
+        on_delete=models.CASCADE, 
+        related_name='rangs_apprenants'
+    )
+    score = models.FloatField(
+        default=0.0,
+        help_text="Score calculé (0-1000) basé sur les performances"
+    )
+    rang = models.PositiveIntegerField(
+        null=True, 
+        blank=True,
+        help_text="Position dans le département (1 = meilleur)"
+    )
+    progression_semaine = models.FloatField(
+        default=0.0,
+        help_text="Variation de score sur les 7 derniers jours (-100 à +100)"
+    )
+    calcule_le = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ('apprenant', 'departement')
+        ordering = ['rang']
+        indexes = [
+            models.Index(fields=['departement', 'rang']),
+            models.Index(fields=['apprenant', 'score']),
+        ]
+        verbose_name = 'Rang Apprenant'
+        verbose_name_plural = 'Rangs Apprenants'
+    
+    def __str__(self):
+        return f"{self.apprenant.username} | {self.departement.nom} | Rang #{self.rang} | Score {self.score:.0f}"
+
+
+class ScoreDetail(models.Model):
+    """
+    Détail des scores par catégorie pour traçabilité.
+    Stocke les composants du score total.
+    """
+    rang_apprenant = models.ForeignKey(
+        RangApprenant, 
+        on_delete=models.CASCADE, 
+        related_name='details'
+    )
+    categorie = models.CharField(max_length=50, choices=[
+        ('devoirs', 'Devoirs rendus à temps'),
+        ('notes_devoirs', 'Notes aux devoirs'),
+        ('exercices', 'Résultats exercices'),
+        ('lecons', 'Progression leçons'),
+        ('forum', 'Participation forum'),
+        ('regularite', 'Régularité de connexion'),
+    ])
+    score = models.FloatField(default=0.0)
+    poids = models.FloatField(default=1.0)
+    calcule_le = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('rang_apprenant', 'categorie')
+    
+    def __str__(self):
+        return f"{self.categorie}: {self.score:.1f} (poids {self.poids})"
+
