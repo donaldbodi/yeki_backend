@@ -36,6 +36,7 @@ User = get_user_model()
 
 
 YEKI_COMMISSION_RATE = 0.15  # 15% de commission sur les formations payantes
+PRIX_MINIMUM_OLYMPIADE = 100  # 100 FCFA par apprenant
 
 # ── Helpers locaux ────────────────────────────────────────────────
 
@@ -362,7 +363,7 @@ class ListeNiveauxView(APIView):
     def get(self, request):
         # Récupérer tous les niveaux distincts depuis les cours existants
         niveaux = Cours.objects.values_list('niveau', flat=True).distinct().order_by('niveau')
-        
+
         # Ajouter les niveaux prédéfinis s'ils n'existent pas
         niveaux_predfinis = [
             '6ème', '5ème', '4ème', '3ème',
@@ -2749,6 +2750,23 @@ class SInscrireOlympiadeView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # Vérifier si l'olympiade est payante pour les participants
+        if olympiade.demande_paiement_participants and olympiade.prix_participation > 0:
+            # Vérifier si l'apprenant a déjà payé
+            paiement = PaiementOlympiade.objects.filter(
+                apprenant=request.user,
+                olympiade=olympiade,
+                statut='paye'
+            ).first()
+            
+            if not paiement:
+                return Response({
+                    "detail": "Cette olympiade requiert un paiement de participation.",
+                    "prix_participation": olympiade.prix_participation,
+                    "olympiade_id": olympiade.id,
+                    "need_payment": True,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
         inscription, created = InscriptionOlympiade.objects.get_or_create(
             olympiade=olympiade,
             apprenant=request.user,
@@ -2773,6 +2791,170 @@ class SInscrireOlympiadeView(APIView):
             return x_forwarded.split(",")[0].strip()
         return request.META.get("REMOTE_ADDR")
 
+
+# 4. Vue pour payer une olympiade
+class PayerOlympiadeView(APIView):
+    """
+    POST /api/olympiades/<id>/payer/
+    Body: {"montant": 500}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+        
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Seuls les enseignants cadres peuvent payer pour une olympiade."},
+                status=403
+            )
+
+        # Vérifier que le cadre est l'organisateur
+        if olympiade.organisateur != profile:
+            return Response(
+                {"detail": "Vous n'êtes pas l'organisateur de cette olympiade."},
+                status=403
+            )
+
+        # Vérifier que l'olympiade n'est pas déjà payée
+        if olympiade.devoir.est_publie:
+            return Response(
+                {"detail": "Cette olympiade est déjà payée et publiée."},
+                status=400
+            )
+
+        montant = request.data.get('montant', 0)
+        try:
+            montant = int(montant)
+        except (TypeError, ValueError):
+            return Response({"detail": "Montant invalide."}, status=400)
+
+        # Vérifier le montant minimum
+        if montant < olympiade.prix_global:
+            return Response({
+                "detail": f"Le montant minimum est de {olympiade.prix_global} FCFA.",
+                "prix_global": olympiade.prix_global
+            }, status=400)
+
+        # Simuler un paiement (à intégrer avec CinetPay)
+        # Pour l'instant, on valide directement
+        olympiade.devoir.est_publie = True
+        olympiade.devoir.save(update_fields=['est_publie'])
+        olympiade.est_validee = True
+        olympiade.save(update_fields=['est_validee'])
+
+        # Enregistrer le paiement
+        Paiement.objects.create(
+            utilisateur=request.user,
+            type_paiement='olympiade',
+            moyen='wallet',
+            montant=montant,
+            statut='succes',
+            olympiade_liee=olympiade,
+            commission_yeki=int(montant * 0.15),
+        )
+
+        enregistrer_activite(
+            user=request.user,
+            action='olympiad_paid',
+            description=f"Paiement de {montant} FCFA pour l'olympiade « {olympiade.titre} »",
+            objet_id=olympiade.id,
+            objet_type='Olympiade',
+        )
+
+        return Response({
+            "detail": "Paiement effectué avec succès. L'olympiade est maintenant publiée.",
+            "montant": montant,
+            "olympiade_id": olympiade.id,
+        }, status=200)
+
+
+# 5. Vue pour payer la participation à une olympiade (apprenant)
+class PayerParticipationOlympiadeView(APIView):
+    """
+    POST /api/olympiades/<id>/payer-participation/
+    Body: {"montant": 100}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, olympiade_id):
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+        
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'apprenant':
+            return Response(
+                {"detail": "Seuls les apprenants peuvent payer leur participation."},
+                status=403
+            )
+
+        if not olympiade.demande_paiement_participants:
+            return Response(
+                {"detail": "Cette olympiade ne demande pas de paiement de participation."},
+                status=400
+            )
+
+        if olympiade.prix_participation <= 0:
+            return Response(
+                {"detail": "Le prix de participation est invalide."},
+                status=400
+            )
+
+        # Vérifier que l'apprenant n'a pas déjà payé
+        if PaiementOlympiade.objects.filter(
+            apprenant=request.user,
+            olympiade=olympiade,
+            statut='paye'
+        ).exists():
+            return Response(
+                {"detail": "Vous avez déjà payé pour cette olympiade."},
+                status=400
+            )
+
+        montant = request.data.get('montant', olympiade.prix_participation)
+        try:
+            montant = int(montant)
+        except (TypeError, ValueError):
+            return Response({"detail": "Montant invalide."}, status=400)
+
+        if montant < olympiade.prix_participation:
+            return Response({
+                "detail": f"Le montant minimum est de {olympiade.prix_participation} FCFA.",
+                "prix_participation": olympiade.prix_participation
+            }, status=400)
+
+        # Créer le paiement
+        paiement = PaiementOlympiade.objects.create(
+            apprenant=request.user,
+            olympiade=olympiade,
+            montant=montant,
+            statut='paye',
+            paye_le=timezone.now(),
+        )
+
+        # Enregistrer dans Paiement global
+        Paiement.objects.create(
+            utilisateur=request.user,
+            type_paiement='olympiade_participation',
+            moyen='wallet',
+            montant=montant,
+            statut='succes',
+            olympiade_liee=olympiade,
+        )
+
+        return Response({
+            "detail": "Paiement de participation effectué avec succès.",
+            "montant": montant,
+            "reference": paiement.reference,
+        }, status=200)
 
 class DemarrerOlympiadeView(APIView):
     """
@@ -3824,13 +4006,11 @@ class CreerOlympiadeParCadreView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        # ── Récupérer le profil ──────────────────────────────────
         try:
             profile = request.user.profile
         except Profile.DoesNotExist:
             return Response({"detail": "Profil introuvable."}, status=404)
 
-        # ── Vérifier le rôle ─────────────────────────────────────
         if profile.user_type != 'enseignant_cadre':
             return Response(
                 {"detail": "Seuls les enseignants cadres peuvent créer des olympiades."},
@@ -3842,43 +4022,26 @@ class CreerOlympiadeParCadreView(APIView):
         # ── Validation des champs obligatoires ───────────────────
         titre = (data.get('titre') or '').strip()
         if not titre:
-            return Response(
-                {"detail": "Le titre est obligatoire."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Le titre est obligatoire."}, status=400)
 
         matiere = (data.get('matiere') or '').strip()
         if not matiere:
-            return Response(
-                {"detail": "La matière est obligatoire."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "La matière est obligatoire."}, status=400)
 
         niveau = (data.get('niveau') or '').strip()
         if not niveau:
-            return Response(
-                {"detail": "Le niveau est obligatoire."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Le niveau est obligatoire."}, status=400)
 
         # ── Validation du département ─────────────────────────────
         departement_id = data.get('departement_id')
         if not departement_id:
-            return Response(
-                {"detail": "departement_id est obligatoire."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "departement_id est obligatoire."}, status=400)
 
         departement = get_object_or_404(Departement, pk=departement_id)
 
-        # Sécurité : le cadre ne peut créer que pour SON département
         if departement.cadre != profile:
-            return Response(
-                {"detail": "Ce département ne vous appartient pas."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"detail": "Ce département ne vous appartient pas."}, status=403)
 
-        # ── Récupération du parcours parent ──────────────────────
         parcours = departement.parcours
 
         # ── Validation des dates ──────────────────────────────────
@@ -3897,38 +4060,29 @@ class CreerOlympiadeParCadreView(APIView):
 
         date_ouv_insc, err = _parse_date('date_ouverture_inscription')
         if err:
-            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": err}, status=400)
 
         date_clo_insc, err = _parse_date('date_cloture_inscription')
         if err:
-            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": err}, status=400)
 
         date_debut, err = _parse_date('date_debut_olympiade')
         if err:
-            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": err}, status=400)
 
         date_fin, err = _parse_date('date_fin_olympiade')
         if err:
-            return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": err}, status=400)
 
         # ── Cohérence des dates ───────────────────────────────────
         if date_clo_insc >= date_debut:
-            return Response(
-                {"detail": "La clôture des inscriptions doit être avant le début de l'olympiade."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "La clôture des inscriptions doit être avant le début de l'olympiade."}, status=400)
 
         if date_debut >= date_fin:
-            return Response(
-                {"detail": "Le début de l'olympiade doit être avant sa fin."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Le début de l'olympiade doit être avant sa fin."}, status=400)
 
         if date_ouv_insc >= date_clo_insc:
-            return Response(
-                {"detail": "L'ouverture des inscriptions doit être avant leur clôture."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "L'ouverture des inscriptions doit être avant leur clôture."}, status=400)
 
         # ── Paramètres de composition ─────────────────────────────
         try:
@@ -3936,42 +4090,67 @@ class CreerOlympiadeParCadreView(APIView):
             if duree_minutes < 1:
                 raise ValueError
         except (TypeError, ValueError):
-            return Response(
-                {"detail": "duree_minutes doit être un entier positif."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "duree_minutes doit être un entier positif."}, status=400)
 
         try:
             nb_questions = int(data.get('nb_questions', 30))
             if nb_questions < 1:
                 raise ValueError
         except (TypeError, ValueError):
-            return Response(
-                {"detail": "nb_questions doit être un entier positif."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "nb_questions doit être un entier positif."}, status=400)
 
         try:
             max_focus = int(data.get('max_focus_perdu', 3))
             if max_focus < 1:
                 raise ValueError
         except (TypeError, ValueError):
-            return Response(
-                {"detail": "max_focus_perdu doit être un entier positif."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "max_focus_perdu doit être un entier positif."}, status=400)
 
         melanger_questions = bool(data.get('melanger_questions', True))
         melanger_choix = bool(data.get('melanger_choix', True))
         une_seule_session = bool(data.get('une_seule_session', True))
 
-        # ── Prix / Récompenses ───────────────────────────────────
+        # ── Niveaux accessibles ────────────────────────────────────
+        niveaux_accessibles = data.get('niveaux_accessibles', [])
+        if isinstance(niveaux_accessibles, str):
+            try:
+                niveaux_accessibles = json.loads(niveaux_accessibles)
+            except:
+                niveaux_accessibles = [n.strip() for n in niveaux_accessibles.split(',') if n.strip()]
+        elif not isinstance(niveaux_accessibles, list):
+            niveaux_accessibles = []
+
+        # ── Prix et récompenses ───────────────────────────────────
         prix_1er = (data.get('prix_1er') or '').strip()
         prix_2eme = (data.get('prix_2eme') or '').strip()
         prix_3eme = (data.get('prix_3eme') or '').strip()
+        recompense = (data.get('recompense') or '').strip()
         
-        # ⚠️ CORRECTION : Détection olympiade gratuite (aucun prix renseigné)
-        est_gratuite = not prix_1er and not prix_2eme and not prix_3eme
+        # Prix de participation par apprenant
+        demande_paiement = data.get('demande_paiement_participants', False)
+        prix_participation = int(data.get('prix_participation', 0))
+        
+        if demande_paiement and prix_participation <= 0:
+            return Response(
+                {"detail": "Veuillez entrer un prix de participation valide."},
+                status=400
+            )
+        
+        if prix_participation > 200:
+            return Response(
+                {"detail": "Le prix de participation ne peut pas dépasser 200 FCFA."},
+                status=400
+            )
+
+        # ── Calcul du prix global ─────────────────────────────────
+        # Récupérer le nombre d'apprenants du département
+        nb_apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus=departement.parcours.nom,
+            is_active=True
+        ).count()
+        
+        prix_global = nb_apprenants * PRIX_MINIMUM_OLYMPIADE
 
         # ── Création de l'olympiade ───────────────────────────────
         olympiade = Olympiade.objects.create(
@@ -3993,9 +4172,14 @@ class CreerOlympiadeParCadreView(APIView):
             prix_1er=prix_1er,
             prix_2eme=prix_2eme,
             prix_3eme=prix_3eme,
+            recompense=recompense,
+            prix_participation=prix_participation,
+            demande_paiement_participants=demande_paiement,
+            prix_global=prix_global,
             note_sur=20,
             organisateur=profile,
             cree_par=request.user,
+            niveaux_accessibles=','.join(niveaux_accessibles) if niveaux_accessibles else '',
         )
 
         # ── Créer automatiquement un Devoir lié ──────────────────
@@ -4010,28 +4194,35 @@ class CreerOlympiadeParCadreView(APIView):
             date_limite=date_fin,
             duree_minutes=duree_minutes,
             note_sur=20,
-            est_publie=False,  # ⚠️ CORRECTION : Non publié par défaut
+            est_publie=False,
             cree_par=profile,
         )
         olympiade.devoir = devoir_lie
         olympiade.save(update_fields=['devoir'])
 
-        # ⚠️ CORRECTION : Si gratuite, mettre en attente de validation
-        if est_gratuite:
+        # ── Gestion de la validation ─────────────────────────────
+        message_detail = ""
+        besoin_validation = False
+        
+        # Si prix_global = 0 (pas d'apprenants) → validation admin requise
+        if prix_global == 0:
+            besoin_validation = True
             devoir_lie.est_publie = False
             devoir_lie.save(update_fields=['est_publie'])
             message_detail = (
-                "Olympiade gratuite créée avec succès. "
-                "Elle sera visible après validation par l'administrateur du parcours. "
-                f"Ajoutez les questions via /api/devoirs/{devoir_lie.id}/questions/ajouter/"
+                "Olympiade créée avec succès. "
+                "Aucun apprenant n'est inscrit dans ce département. "
+                "L'administrateur du parcours doit valider l'olympiade avant qu'elle ne soit visible."
             )
         else:
-            # Olympiade payante : publication automatique
-            devoir_lie.est_publie = True
+            # Prix global > 0 → demande de paiement au cadre
+            devoir_lie.est_publie = False
             devoir_lie.save(update_fields=['est_publie'])
             message_detail = (
-                "Olympiade créée avec succès. "
-                f"Ajoutez les questions via /api/devoirs/{devoir_lie.id}/questions/ajouter/"
+                f"Olympiade créée avec succès. "
+                f"Un paiement de {prix_global} FCFA est requis pour valider l'olympiade.\n"
+                f"Référence : {olympiade.id}\n"
+                f"Pour payer, utilisez le portefeuille Yeki ou Mobile Money."
             )
 
         enregistrer_activite(
@@ -4043,7 +4234,7 @@ class CreerOlympiadeParCadreView(APIView):
                 'matiere': olympiade.matiere,
                 'niveau': olympiade.niveau,
                 'edition': olympiade.edition,
-                'gratuite': est_gratuite,
+                'prix_global': prix_global,
             },
             objet_id=olympiade.id,
             objet_type='Olympiade',
@@ -4066,11 +4257,14 @@ class CreerOlympiadeParCadreView(APIView):
             "prix_1er": olympiade.prix_1er,
             "prix_2eme": olympiade.prix_2eme,
             "prix_3eme": olympiade.prix_3eme,
-            "est_gratuite": est_gratuite,
-            "en_attente_validation": est_gratuite,
+            "recompense": olympiade.recompense,
+            "prix_global": prix_global,
+            "prix_participation": olympiade.prix_participation,
+            "demande_paiement_participants": olympiade.demande_paiement_participants,
+            "en_attente_validation": besoin_validation or prix_global > 0,
             "detail": message_detail,
         }, status=status.HTTP_201_CREATED)
-
+    
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------
@@ -4821,42 +5015,460 @@ def departements_par_parcours(request, parcours_id):
     return Response(data, status=status.HTTP_200_OK)
 
 
-# ---------------------------
-# Creation de Departement
-# ---------------------------
-class DepartementCreateView(generics.CreateAPIView):
-    serializer_class = DepartementSerializer
-    #permission_classes = [IsAuthenticated]
+# 1. Créer la vue pour les demandes d'accès
+class DemandeAccesFormationView(APIView):
+    """
+    POST /api/departements/<departement_id>/demander-acces/
+    L'apprenant demande l'accès à une formation à accès restreint.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, departement_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        
+        if profile.user_type != 'apprenant':
+            return Response(
+                {"detail": "Seuls les apprenants peuvent demander l'accès."},
+                status=403
+            )
+        
+        departement = get_object_or_404(Departement, pk=departement_id)
+        
+        if not departement.acces_restreint:
+            return Response(
+                {"detail": "Cette formation est en accès libre."},
+                status=400
+            )
+        
+        message = request.data.get('message', '').strip()
+        
+        demande, created = DemandeAccesFormation.objects.get_or_create(
+            apprenant=request.user,
+            departement=departement,
+            defaults={'message': message}
+        )
+        
+        if not created:
+            if demande.statut == 'en_attente':
+                return Response(
+                    {"detail": "Votre demande est déjà en attente de traitement."},
+                    status=400
+                )
+            elif demande.statut == 'acceptee':
+                return Response(
+                    {"detail": "Vous avez déjà accès à cette formation."},
+                    status=400
+                )
+            elif demande.statut == 'refusee':
+                # Permettre de refaire une demande après refus
+                demande.statut = 'en_attente'
+                demande.message = message or demande.message
+                demande.traite_le = None
+                demande.reponse_cadre = ''
+                demande.save()
+                return Response({
+                    "detail": "Votre nouvelle demande a été envoyée.",
+                    "statut": "en_attente"
+                })
+        
+        return Response({
+            "detail": "Votre demande d'accès a été envoyée au cadre.",
+            "statut": "en_attente"
+        }, status=201)
 
-    def get_target_parcours(self):
-        parcours_id = self.request.data.get("parcours")
-        if not parcours_id:
-            return None
-        return Parcours.objects.filter(pk=parcours_id).first()
 
-    @transaction.atomic
-    def create(self, request, *args, **kwargs):
-        nom = (request.data.get("nom") or "").strip()
-        parcours_id = request.data.get("parcours")
-        cadre_id = request.data.get("enseignant_cadre", None)
+# 2. Vue pour le cadre - Gérer les demandes d'accès
+class GererDemandeAccesView(APIView):
+    """
+    POST /api/departements/<departement_id>/demandes/<demande_id>/traiter/
+    Body: { "action": "accepter" | "refuser", "reponse": "..." }
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, departement_id, demande_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Seuls les enseignants cadres peuvent traiter les demandes."},
+                status=403
+            )
+        
+        departement = get_object_or_404(Departement, pk=departement_id, cadre=profile)
+        demande = get_object_or_404(DemandeAccesFormation, pk=demande_id, departement=departement)
+        
+        action = request.data.get('action', '').lower()
+        reponse = request.data.get('reponse', '').strip()
+        
+        if action not in ['accepter', 'refuser']:
+            return Response(
+                {"detail": "L'action doit être 'accepter' ou 'refuser'."},
+                status=400
+            )
+        
+        if action == 'accepter':
+            demande.statut = 'acceptee'
+            departement.apprenants_autorises.add(demande.apprenant)
+        else:
+            demande.statut = 'refusee'
+        
+        demande.reponse_cadre = reponse
+        demande.traite_le = timezone.now()
+        demande.save()
+        
+        # Optionnel: envoyer une notification à l'apprenant
+        # Notification.objects.create(...)
+        
+        return Response({
+            "detail": f"Demande {action}e avec succès.",
+            "statut": demande.statut
+        }, status=200)
 
+
+# 3. Vue pour le cadre - Lister les demandes d'accès
+class DemandesAccesDepartementView(APIView):
+    """
+    GET /api/departements/<departement_id>/demandes/
+    Retourne les demandes d'accès pour un département.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, departement_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=403
+            )
+        
+        departement = get_object_or_404(Departement, pk=departement_id, cadre=profile)
+        
+        statut = request.query_params.get('statut', 'en_attente')
+        if statut not in ['en_attente', 'acceptee', 'refusee']:
+            statut = 'en_attente'
+        
+        demandes = DemandeAccesFormation.objects.filter(
+            departement=departement,
+            statut=statut
+        ).select_related('apprenant').order_by('-cree_le')
+        
+        data = [{
+            'id': d.id,
+            'apprenant_id': d.apprenant.id,
+            'apprenant_nom': f"{d.apprenant.first_name} {d.apprenant.last_name}".strip() or d.apprenant.username,
+            'apprenant_username': d.apprenant.username,
+            'apprenant_email': d.apprenant.email,
+            'message': d.message,
+            'reponse_cadre': d.reponse_cadre,
+            'cree_le': d.cree_le.isoformat(),
+            'traite_le': d.traite_le.isoformat() if d.traite_le else None,
+        } for d in demandes]
+        
+        return Response(data, status=200)
+
+
+# 4. Modifier la vue de création de département pour gérer les prix = 0
+class CreerDepartementView(APIView):
+    """
+    POST /api/departements/creer/
+    Crée un département enrichi selon le type du parcours parent.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_admin':
+            return Response(
+                {"detail": "Accès réservé aux enseignants administrateurs."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Récupérer les données
+        data = request.data.copy()
+        if isinstance(data, dict):
+            # Si c'est un dict, le traiter directement
+            pass
+        
+        # Gérer les champs multipart
+        nom = data.get('nom', '').strip()
         if not nom:
-            return Response({"detail": "Le champ 'nom' est requis."}, status=status.HTTP_400_BAD_REQUEST)
-        if not parcours_id:
-            return Response({"detail": "Le champ 'parcours' est requis."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Le nom du département est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        parcours = get_object_or_404(Parcours, pk=parcours_id)
+        parcours_id = data.get('parcours_id')
+        if parcours_id:
+            parcours = get_object_or_404(Parcours, pk=parcours_id, admin=profile)
+        else:
+            parcours_qs = Parcours.objects.filter(admin=profile)
+            if not parcours_qs.exists():
+                return Response({"detail": "Aucun parcours ne vous est assigné."}, status=403)
+            if parcours_qs.count() > 1:
+                return Response({"detail": "Spécifier parcours_id."}, status=400)
+            parcours = parcours_qs.first()
 
-        cadre = None
-        if cadre_id:
-            cadre = get_object_or_404(Profile, pk=cadre_id)
-            if getattr(cadre, "user_type", None) != "enseignant_cadre":
-                return Response({"detail": "L'utilisateur choisi n'est pas un enseignant_cadre."}, status=status.HTTP_400_BAD_REQUEST)
+        def _b(key, default=False):
+            v = data.get(key, default)
+            if isinstance(v, str):
+                return v.lower() in ('true', '1', 'yes')
+            return bool(v)
 
-        dep = Departement.objects.create(nom=nom, parcours=parcours, cadre=cadre)
-        data = DepartementSerializer(dep).data
-        return Response(data, status=status.HTTP_201_CREATED)
+        def _i(key, default=0):
+            try:
+                return int(data.get(key, default) or default)
+            except (ValueError, TypeError):
+                return default
 
+        def _s(key, default=''):
+            v = data.get(key, default)
+            return v if v else default
+
+        # Récupérer les niveaux accessibles
+        niveaux_accessibles = data.get('niveaux_accessibles', [])
+        if isinstance(niveaux_accessibles, str):
+            try:
+                niveaux_accessibles = json.loads(niveaux_accessibles)
+            except:
+                niveaux_accessibles = [n.strip() for n in niveaux_accessibles.split(',') if n.strip()]
+        elif not isinstance(niveaux_accessibles, list):
+            niveaux_accessibles = []
+
+        # === CONSTRUCTION DES CHAMPS DE BASE ===
+        prix = _i('prix')
+        prix_presentiel = _i('prix_presentiel')
+        type_parc = parcours.type_parcours
+        
+        kwargs = {
+            'nom': nom,
+            'parcours': parcours,
+            'description': _s('description'),
+            'couleur': _s('couleur', '#2884A0'),
+            'prix': prix,
+            'prix_presentiel': prix_presentiel,
+            'est_actif': True,
+            'mode': _s('mode', 'hybride'),
+            'acces_restreint': _b('acces_restreint'),
+            'niveaux_accessibles': ','.join(niveaux_accessibles) if niveaux_accessibles else '',
+        }
+
+        if request.FILES.get('image'):
+            kwargs['image'] = request.FILES['image']
+
+        # === PARCOURS PRÉPA CONCOURS ===
+        if type_parc == 'prepa' or _b('est_prepa_concours'):
+            kwargs.update({
+                'est_prepa_concours': True,
+                'nom_concours': _s('nom_concours'),
+                'organisme_concours': _s('organisme_concours'),
+                'date_limite_inscription': data.get('date_limite_inscription') or None,
+                'date_examen': data.get('date_examen') or None,
+                'arrete_ministeriel': _s('arrete_ministeriel'),
+                'places_disponibles': _i('places_disponibles') or None,
+                'debouches': _s('debouches'),
+            })
+
+        # === PARCOURS FORMATION ===
+        elif type_parc == 'formation':
+            est_metier = _b('est_formation_metier')
+            est_classique = _b('est_formation_classique')
+            
+            if not est_metier and not est_classique:
+                return Response({
+                    "detail": "Veuillez sélectionner au moins un type de formation (Métier ou Classique)."
+                }, status=400)
+            
+            kwargs.update({
+                'est_formation_metier': est_metier,
+                'est_formation_classique': est_classique,
+                'duree_formation': _s('duree_formation'),
+                'mode': _s('mode', 'hybride'),
+                'certificat_delivre': _s('certificat_delivre'),
+                'prerequis': _s('prerequis'),
+                'objectifs': _s('objectifs'),
+                'domaine': _s('domaine'),
+                'ville': _s('ville'),
+                'est_certifiante': _b('est_certifiante'),
+            })
+
+        # ⚠️ Si prix = 0, on avertit l'admin mais on valide automatiquement
+        if prix == 0:
+            kwargs['est_valide'] = True  # Pas besoin de validation admin
+            kwargs['est_actif'] = True
+        else:
+            kwargs['est_valide'] = True
+            kwargs['est_actif'] = True
+
+        # === CRÉATION DU DÉPARTEMENT ===
+        departement = Departement.objects.create(**kwargs)
+
+        # Si accès restreint, l'admin a déjà été notifié dans la réponse
+        enregistrer_activite(
+            user=request.user,
+            action='department_created',
+            description=f"Département {departement.nom} créé dans {parcours.nom}",
+            data={
+                'departement': departement.nom,
+                'parcours': parcours.nom,
+                'prix': kwargs.get('prix', 0),
+                'prix_presentiel': kwargs.get('prix_presentiel', 0),
+                'acces_restreint': kwargs.get('acces_restreint', False),
+            },
+            objet_id=departement.id,
+            objet_type='Departement',
+        )
+
+        # Message d'avertissement si prix = 0
+        message = "Département créé avec succès."
+        if prix == 0:
+            message = "Département gratuit créé avec succès. Les apprenants y auront accès sans paiement."
+
+        return Response(
+            {
+                **DepartementSerializer(departement, context={'request': request}).data,
+                'message': message
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
+# 5. Vue pour la mise à jour d'un département (admin)
+class AdminUpdateDepartementView(APIView):
+    """
+    PATCH /api/admin/departements/<pk>/update/
+    Permet à l'enseignant admin de modifier un département.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_admin':
+            return Response(
+                {"detail": "Accès réservé aux enseignants administrateurs."},
+                status=403
+            )
+
+        departement = get_object_or_404(Departement, pk=pk)
+        
+        # Vérifier que le département appartient au parcours de l'admin
+        if departement.parcours.admin != profile:
+            return Response(
+                {"detail": "Ce département n'appartient pas à votre parcours."},
+                status=403
+            )
+
+        data = request.data.copy()
+        
+        # Gérer les niveaux accessibles
+        if 'niveaux_accessibles' in data:
+            niveaux = data.get('niveaux_accessibles', [])
+            if isinstance(niveaux, str):
+                try:
+                    niveaux = json.loads(niveaux)
+                except:
+                    niveaux = [n.strip() for n in niveaux.split(',') if n.strip()]
+            elif not isinstance(niveaux, list):
+                niveaux = []
+            data['niveaux_accessibles'] = ','.join(niveaux)
+
+        serializer = DepartementCreateSerializer(
+            departement, 
+            data=data, 
+            partial=True,
+            context={'request': request}
+        )
+        
+        if serializer.is_valid():
+            updated = serializer.save()
+            enregistrer_activite(
+                user=request.user,
+                action='department_modified',
+                description=f"Département {updated.nom} modifié",
+                objet_id=updated.id,
+                objet_type='Departement',
+            )
+            return Response(
+                DepartementSerializer(updated, context={'request': request}).data,
+                status=200
+            )
+        
+        return Response(serializer.errors, status=400)
+
+
+# 6. Vue pour l'apprenant - Vérifier l'accès à un département
+class VerifierAccesDepartementView(APIView):
+    """
+    GET /api/apprenant/departement/<pk>/acces/
+    Vérifie si l'apprenant a accès au département.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, pk):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        
+        if profile.user_type != 'apprenant':
+            return Response(
+                {"detail": "Accès réservé aux apprenants."},
+                status=403
+            )
+        
+        departement = get_object_or_404(Departement, pk=pk)
+        
+        # Si pas d'accès restreint, tout le monde a accès
+        if not departement.acces_restreint:
+            return Response({
+                "acces": True,
+                "statut": "libre",
+                "message": "Cette formation est en accès libre."
+            })
+        
+        # Vérifier si l'apprenant est autorisé
+        if request.user in departement.apprenants_autorises.all():
+            return Response({
+                "acces": True,
+                "statut": "autorise",
+                "message": "Vous avez accès à cette formation."
+            })
+        
+        # Vérifier si une demande existe
+        try:
+            demande = DemandeAccesFormation.objects.get(
+                apprenant=request.user,
+                departement=departement
+            )
+            return Response({
+                "acces": False,
+                "statut": demande.statut,
+                "message": "Votre demande d'accès est en attente de traitement." if demande.statut == 'en_attente' else "Votre demande d'accès a été refusée. Contactez le service client."
+                    })
+        except DemandeAccesFormation.DoesNotExist:
+            return Response({
+                "acces": False,
+                "statut": "non_demandee",
+                "message": "Vous devez demander l'accès à cette formation."
+            })
 
 # ---------------------------
 # Update partiel departement
@@ -5284,8 +5896,6 @@ class ApprenantDepartementDetailView(APIView):
 #             L'admin met est_publie=True → visible pour les apprenants.
 # ══════════════════════════════════════════════════════════════════
 
-# views.py - Modifier AdminOlympiadesAValiderView
-
 class AdminOlympiadesAValiderView(APIView):
     """
     GET /api/admin/olympiades/a-valider/
@@ -5304,10 +5914,10 @@ class AdminOlympiadesAValiderView(APIView):
         except Parcours.DoesNotExist:
             return Response({"detail": "Aucun parcours assigné."}, status=404)
 
-        # Olympiades en attente de validation (prix = 0, non validées, non refusées)
+        # Olympiades en attente de validation (prix_global = 0, non validées, non refusées)
         olympiades_attente = Olympiade.objects.filter(
             organisateur__departements_cadre__parcours=parcours,
-            prix=0,
+            prix_global=0,
             est_validee=False,
             est_refusee=False,
         ).distinct().select_related('organisateur__user', 'devoir')
@@ -5315,7 +5925,7 @@ class AdminOlympiadesAValiderView(APIView):
         # Olympiades refusées (l'admin peut encore les voir pour accepter)
         olympiades_refusees = Olympiade.objects.filter(
             organisateur__departements_cadre__parcours=parcours,
-            prix=0,
+            prix_global=0,
             est_refusee=True,
         ).distinct().select_related('organisateur__user', 'devoir')
 
@@ -5333,7 +5943,8 @@ class AdminOlympiadesAValiderView(APIView):
                     "nom": _nom_profil(o.organisateur),
                 },
                 "date_creation": o.created_at,
-                "prix": getattr(o, 'prix', 0),
+                "prix_global": getattr(o, 'prix_global', 0),
+                "niveaux_accessibles": o.get_niveaux_accessibles_list(),
             })
         
         for o in olympiades_refusees:
@@ -5350,7 +5961,8 @@ class AdminOlympiadesAValiderView(APIView):
                     "nom": _nom_profil(o.organisateur),
                 },
                 "date_creation": o.created_at,
-                "prix": getattr(o, 'prix', 0),
+                "prix_global": getattr(o, 'prix_global', 0),
+                "niveaux_accessibles": o.get_niveaux_accessibles_list(),
             })
 
         return Response(result)
@@ -5362,10 +5974,10 @@ class AdminValiderOlympiadeView(APIView):
 
     Valide (publie) ou refuse une olympiade du parcours de l'admin.
     Valider = mettre Devoir.est_publie = True
-    Refuser = supprimer l'olympiade et son devoir lié, ou juste notifier
     """
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
         profile = _get_profile(request.user)
         if not profile or profile.user_type != 'enseignant_admin':
@@ -5376,7 +5988,6 @@ class AdminValiderOlympiadeView(APIView):
         except Parcours.DoesNotExist:
             return Response({"detail": "Aucun parcours assigné."}, status=404)
 
-        # Vérifier que cette olympiade appartient bien au parcours de cet admin
         olympiade = get_object_or_404(
             Olympiade,
             pk=pk,
@@ -5387,12 +5998,15 @@ class AdminValiderOlympiadeView(APIView):
 
         if refuser:
             motif = request.data.get('motif', 'Refusée par l\'administrateur.')
-            # On garde l'olympiade mais on la marque comme refusée
-            # en gardant est_publie=False — le cadre peut corriger et resoumettre
+            olympiade.est_refusee = True
+            olympiade.est_validee = False
+            olympiade.motif_refus = motif
+            olympiade.save()
+            
             enregistrer_activite(
                 user=request.user,
-                action='olympiad_closed',
-                description=f"Olympiade « {olympiade.titre} » refusée : {motif}",
+                action='olympiad_rejected',
+                description=f"Olympiade « {olympiade.titre} » refusée. Motif : {motif}",
                 objet_id=olympiade.id,
                 objet_type='Olympiade',
             )
@@ -5411,10 +6025,13 @@ class AdminValiderOlympiadeView(APIView):
 
         olympiade.devoir.est_publie = True
         olympiade.devoir.save(update_fields=['est_publie'])
+        olympiade.est_validee = True
+        olympiade.est_refusee = False
+        olympiade.save(update_fields=['est_validee', 'est_refusee'])
 
         enregistrer_activite(
             user=request.user,
-            action='olympiad_created',
+            action='olympiad_validated',
             description=f"Olympiade « {olympiade.titre} » validée et publiée.",
             objet_id=olympiade.id,
             objet_type='Olympiade',
@@ -5426,9 +6043,6 @@ class AdminValiderOlympiadeView(APIView):
             "titre":  olympiade.titre,
             "statut": "validee",
         })
-
-
-# views.py - Ajouter après AdminValiderOlympiadeView existant
 
 class AdminRefuserOlympiadeView(APIView):
     """Refuser une olympiade (la garde visible mais marquée comme refusée)"""
@@ -5458,9 +6072,6 @@ class AdminRefuserOlympiadeView(APIView):
         olympiade.motif_refus = motif
         olympiade.save()
         
-        # Optionnel: envoyer une notification au cadre
-        # Notification.objects.create(...)
-        
         enregistrer_activite(
             user=request.user,
             action='olympiad_rejected',
@@ -5474,7 +6085,6 @@ class AdminRefuserOlympiadeView(APIView):
             "id": olympiade.id,
             "est_refusee": True,
         })
-
 
 class AdminValiderDepartementGratuitView(APIView):
     """
@@ -6681,7 +7291,6 @@ def landing(request):
 # ---------------------------
 # Register
 # ---------------------------
-# Dans views.py, modifiez la classe RegisterView
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]

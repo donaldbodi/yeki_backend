@@ -363,19 +363,166 @@ class EnseignantCadreLightSerializer(serializers.ModelSerializer): # enseignant 
         model = Profile
         fields = ["id", "user", 'user_type']
 
-
 class DepartementSerializer(serializers.ModelSerializer):
     cadre = EnseignantCadreLightSerializer(read_only=True)
     cours = CoursSerializer(many=True, read_only=True)
     niveaux_accessibles = serializers.SerializerMethodField()
-
+    demandes_acces = serializers.SerializerMethodField()
+    
     class Meta:
         model = Departement
-        fields = ["id", "nom", "parcours", "cadre", "cours", "niveaux_accessibles", "niveaux_cibles"]
+        fields = [
+            "id", "nom", "parcours", "cadre", "cours", 
+            "niveaux_accessibles", "niveaux_cibles",
+            "description", "image", "couleur", "est_actif", "prix",
+            "prix_presentiel", "created_at",
+            "est_prepa_concours", "nom_concours", "organisme_concours",
+            "date_limite_inscription", "date_examen", "arrete_ministeriel",
+            "places_disponibles", "debouches", "mode",
+            "est_formation_metier", "est_formation_classique",
+            "duree_formation", "certificat_delivre", "prerequis",
+            "objectifs", "domaine", "ville", "est_certifiante",
+            "acces_restreint", "apprenants_autorises",
+            "est_valide", "est_refuse", "motif_refus", "valide_le",
+            "demandes_acces"
+        ]
     
     def get_niveaux_accessibles(self, obj):
         return obj.get_niveaux_accessibles_list()
+    
+    def get_demandes_acces(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            try:
+                profile = request.user.profile
+                if profile.user_type == 'enseignant_cadre':
+                    from .models import DemandeAccesFormation
+                    demandes = DemandeAccesFormation.objects.filter(
+                        departement=obj,
+                        statut='en_attente'
+                    ).select_related('apprenant')
+                    return [{
+                        'id': d.id,
+                        'apprenant_id': d.apprenant.id,
+                        'apprenant_nom': f"{d.apprenant.first_name} {d.apprenant.last_name}".strip() or d.apprenant.username,
+                        'apprenant_username': d.apprenant.username,
+                        'message': d.message,
+                        'cree_le': d.cree_le.isoformat(),
+                    } for d in demandes]
+            except Profile.DoesNotExist:
+                pass
+        return []
 
+class DemandeAccesSerializer(serializers.ModelSerializer):
+    apprenant_nom = serializers.SerializerMethodField()
+    apprenant_username = serializers.CharField(source='apprenant.username', read_only=True)
+    
+    class Meta:
+        model = DemandeAccesFormation
+        fields = ['id', 'apprenant', 'apprenant_nom', 'apprenant_username', 
+                  'departement', 'statut', 'message', 'reponse_cadre', 'cree_le', 'traite_le']
+    
+    def get_apprenant_nom(self, obj):
+        return f"{obj.apprenant.first_name} {obj.apprenant.last_name}".strip() or obj.apprenant.username
+
+class DepartementCreateSerializer(serializers.ModelSerializer):
+    niveaux_accessibles = serializers.ListField(
+        child=serializers.CharField(), required=False, default=[]
+    )
+    
+    class Meta:
+        model = Departement
+        fields = [
+            'nom', 'description', 'couleur', 'prix', 'prix_presentiel',
+            'parcours', 'image',
+            'est_prepa_concours', 'nom_concours', 'organisme_concours',
+            'date_limite_inscription', 'date_examen', 'arrete_ministeriel',
+            'places_disponibles', 'debouches', 'mode',
+            'est_formation_metier', 'est_formation_classique',
+            'duree_formation', 'certificat_delivre', 'prerequis',
+            'objectifs', 'domaine', 'ville', 'est_certifiante',
+            'acces_restreint', 'niveaux_accessibles'
+        ]
+        extra_kwargs = {
+            'description': {'required': False, 'allow_blank': True},
+            'couleur': {'required': False, 'default': '#2884A0'},
+            'prix': {'required': False, 'default': 0},
+            'prix_presentiel': {'required': False, 'default': 0},
+            'image': {'required': False},
+            'mode': {'required': False, 'default': 'hybride'},
+            'est_prepa_concours': {'required': False, 'default': False},
+            'est_formation_metier': {'required': False, 'default': False},
+            'est_formation_classique': {'required': False, 'default': False},
+            'acces_restreint': {'required': False, 'default': False},
+        }
+    
+    def validate(self, data):
+        # Si c'est une formation, au moins un type doit être sélectionné
+        parcours = data.get('parcours')
+        if parcours and parcours.type_parcours == 'formation':
+            est_metier = data.get('est_formation_metier', False)
+            est_classique = data.get('est_formation_classique', False)
+            if not est_metier and not est_classique:
+                raise serializers.ValidationError(
+                    "Veuillez sélectionner au moins un type de formation (Métier ou Classique)"
+                )
+        return data
+    
+    def create(self, validated_data):
+        niveaux_accessibles = validated_data.pop('niveaux_accessibles', [])
+        departement = Departement.objects.create(**validated_data)
+        if niveaux_accessibles:
+            departement.niveaux_accessibles = ','.join(niveaux_accessibles)
+            departement.save(update_fields=['niveaux_accessibles'])
+        return departement
+    
+    def update(self, instance, validated_data):
+        niveaux_accessibles = validated_data.pop('niveaux_accessibles', None)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        if niveaux_accessibles is not None:
+            instance.niveaux_accessibles = ','.join(niveaux_accessibles)
+        instance.save()
+        return instance
+
+class ApprenantDepartementDetailSerializer(serializers.ModelSerializer):
+    est_accessible = serializers.SerializerMethodField()
+    demande_statut = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Departement
+        fields = [
+            'id', 'nom', 'description', 'image', 'couleur', 'prix', 'prix_presentiel',
+            'est_prepa_concours', 'nom_concours', 'organisme_concours',
+            'date_limite_inscription', 'date_examen', 'arrete_ministeriel',
+            'places_disponibles', 'debouches', 'mode',
+            'est_formation_metier', 'est_formation_classique',
+            'duree_formation', 'certificat_delivre', 'prerequis',
+            'objectifs', 'domaine', 'ville', 'est_certifiante',
+            'acces_restreint', 'niveaux_accessibles',
+            'est_accessible', 'demande_statut'
+        ]
+    
+    def get_est_accessible(self, obj):
+        user = self.context.get('request').user
+        if not user.is_authenticated:
+            return False
+        if not obj.acces_restreint:
+            return True
+        return user in obj.apprenants_autorises.all()
+    
+    def get_demande_statut(self, obj):
+        user = self.context.get('request').user
+        if not user.is_authenticated:
+            return None
+        try:
+            demande = DemandeAccesFormation.objects.get(
+                apprenant=user,
+                departement=obj
+            )
+            return demande.statut
+        except DemandeAccesFormation.DoesNotExist:
+            return None
 
 # =======================
 # PARCOURS SERIALIZER
@@ -775,6 +922,9 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
     devoir_id           = serializers.IntegerField(source='devoir.id', read_only=True, allow_null=True)
     mon_inscription     = serializers.SerializerMethodField()
     niveaux_accessibles = serializers.SerializerMethodField()
+    prix_global         = serializers.IntegerField(read_only=True)
+    recompense          = serializers.CharField(read_only=True)
+    demande_paiement_participants = serializers.BooleanField(read_only=True)
 
     class Meta:
         model  = Olympiade
@@ -783,7 +933,8 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
             "date_ouverture_inscription", "date_cloture_inscription",
             "date_debut_olympiade", "date_fin_olympiade",
             "duree_minutes", "nb_questions", "note_sur",
-            "prix_1er", "prix_2eme", "prix_3eme",
+            "prix_1er", "prix_2eme", "prix_3eme","prix_participation", "prix_global", "recompense",
+            "demande_paiement_participants",
             "statut", "est_inscrit", "nb_inscrits", "inscription_ouverte",
             "devoir_id", "mon_inscription","niveaux_accessibles"
         ]
@@ -906,7 +1057,7 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "user", "user_type",
             "first_name", "last_name", "email", "username",
-            "phone", "bio",
+            "phone", "bio",'ville',
             "cursus", "sub_cursus", "niveau", "filiere", "licence",
             "is_active", "avatar",
         ]

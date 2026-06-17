@@ -1,4 +1,5 @@
 from gettext import translation
+import uuid
 
 from django.db import models
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -30,6 +31,7 @@ class Profile(models.Model):
     niveau = models.CharField(max_length=100, null=True, blank=True)
     filiere = models.CharField(max_length=100, null=True, blank=True)
     licence = models.CharField(max_length=100, null=True, blank=True)
+    ville = models.CharField(max_length=100, blank=True, null=True, help_text="Ville de résidence")
 
     is_active = models.BooleanField(default=False)
 
@@ -188,10 +190,6 @@ class Departement(models.Model):
         max_length=255, blank=True,
         help_text="Référence de l'arrêté ministériel d'organisation"
     )
-    lien_officiel           = models.URLField(
-        blank=True,
-        help_text="Site officiel du concours"
-    )
     niveaux_cibles          = models.CharField(
         max_length=255, blank=True,
         help_text="Niveaux ciblés ex: Terminale, Licence 3, Master 1"
@@ -200,19 +198,10 @@ class Departement(models.Model):
         null=True, blank=True,
         help_text="Nombre de places au concours (null = non précisé)"
     )
-    frais_dossier           = models.PositiveIntegerField(
-        default=0,
-        help_text="Frais de dossier officiels en FCFA"
-    )
     debouches               = models.TextField(
         blank=True,
         help_text="Débouchés après réussite du concours"
     )
-
-    est_valide = models.BooleanField(default=False, help_text="Validé par l'admin du parcours")
-    est_refuse = models.BooleanField(default=False, help_text="Refusé par l'admin du parcours")
-    motif_refus = models.TextField(blank=True, help_text="Motif du refus")
-    valide_le = models.DateTimeField(null=True, blank=True, help_text="Date de validation")
 
     # Ajouter ces champs pour la gestion des accès
     acces_restreint = models.BooleanField(default=False, help_text="Accès limité aux apprenants sélectionnés")
@@ -237,7 +226,7 @@ class Departement(models.Model):
         max_length=100, blank=True,
         help_text="Ex: 6 mois, 2 ans, 200 heures…"
     )
-    mode_formation          = models.CharField(
+    mode = models.CharField(
         max_length=20,
         choices=[('presentiel','Présentiel'),('distance','À distance'),('hybride','Hybride')],
         default='hybride', blank=True,
@@ -255,7 +244,7 @@ class Departement(models.Model):
         blank=True,
         help_text="Objectifs pédagogiques de la formation"
     )
-    domaine                 = models.CharField(
+    domaine   = models.CharField(
         max_length=255, blank=True,
         help_text="Domaine professionnel (Informatique, Gestion, Santé…)"
     )
@@ -326,6 +315,37 @@ class Departement(models.Model):
         if user.user_type != "enseignant_admin":
             raise PermissionDenied("Seul un enseignant_admin peut créer un département.")
         return Departement.objects.create(parcours=parcours, nom=nom, cadre=cadre)
+
+
+class DemandeAccesFormation(models.Model):
+    STATUT_CHOICES = [
+        ('en_attente', 'En attente'),
+        ('acceptee', 'Acceptée'),
+        ('refusee', 'Refusée'),
+    ]
+    
+    apprenant = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE,
+        related_name='demandes_acces'
+    )
+    departement = models.ForeignKey(
+        Departement,
+        on_delete=models.CASCADE,
+        related_name='demandes_acces'
+    )
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='en_attente')
+    message = models.TextField(blank=True, help_text="Message de l'apprenant")
+    reponse_cadre = models.TextField(blank=True, help_text="Réponse du cadre")
+    cree_le = models.DateTimeField(auto_now_add=True)
+    traite_le = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ('apprenant', 'departement')
+        ordering = ['-cree_le']
+    
+    def __str__(self):
+        return f"{self.apprenant.username} → {self.departement.nom} ({self.statut})"
 
 
 # --- NIVEAU 3 ---
@@ -817,6 +837,25 @@ class Olympiade(models.Model):
         ("terminee",     "Terminée"),
     ]
 
+    prix_participation = models.PositiveIntegerField(
+        default=0,
+        help_text="Prix de participation par apprenant (0 = gratuit)"
+    )
+    recompense = models.TextField(
+        blank=True,
+        help_text="Description des récompenses (trophées, certificats, etc.)"
+    )
+    demande_paiement_participants = models.BooleanField(
+        default=False,
+        help_text="Si True, les participants doivent payer pour s'inscrire"
+    )
+    
+    # Champ pour le prix global (calculé automatiquement)
+    prix_global = models.PositiveIntegerField(
+        default=0,
+        help_text="Prix global calculé automatiquement (nb_apprenants * 100)"
+    )
+
     # ── Identité ─────────────────────────────────────────────────
     titre        = models.CharField(max_length=255)
     description  = models.TextField(blank=True)
@@ -915,6 +954,42 @@ class Olympiade(models.Model):
         if self.date_debut_olympiade >= self.date_fin_olympiade:
             raise ValidationError("La date de début doit être avant la date de fin.")
 
+class PaiementOlympiade(models.Model):
+    """
+    Paiement effectué par un apprenant pour participer à une olympiade.
+    """
+    STATUT_CHOICES = [
+        ('en_attente', 'En attente'),
+        ('paye', 'Payé'),
+        ('rembourse', 'Remboursé'),
+    ]
+    
+    apprenant = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE,
+        related_name='paiements_olympiade'
+    )
+    olympiade = models.ForeignKey(
+        Olympiade,
+        on_delete=models.CASCADE,
+        related_name='paiements'
+    )
+    montant = models.PositiveIntegerField()
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='en_attente')
+    reference = models.CharField(max_length=100, unique=True, blank=True)
+    cree_le = models.DateTimeField(auto_now_add=True)
+    paye_le = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ('apprenant', 'olympiade')
+    
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = f"PAY-OLYMP-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+    
+    def __str__(self):
+        return f"{self.apprenant.username} → {self.olympiade.titre} ({self.statut})"
 
 class InscriptionOlympiade(models.Model):
     """Inscription d'un apprenant à une olympiade."""

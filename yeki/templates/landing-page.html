@@ -6,7 +6,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-  <meta name="description" content="Yéki — La plateforme e-learning qui transforme ta façon d'apprendre. Cours interactifs, concours, olympiades, suivi personnalisé. Conçu pour l'Afrique francophone.">
+  <meta name="description" content="Yéki — La plateforme e-learning qui transforme ta façon d'apprendre. Cours interactifs, concours, olympiades, suivi personnalisé. Conçu pour l'Afrique.">
   <meta name="theme-color" content="#0d1b2a">
   <title>Yéki — Apprendre sans limites</title>
 
@@ -25,6 +25,7 @@
     <div class="nav-links">
       <a href="#features">Fonctionnalités</a>
       <a href="#about">À propos</a>
+      <a href="/repetiteurs/">Répétiteurs</a>
       <a href="#download">Télécharger</a>
       <a href="#faq">FAQ</a>
       <a href="/web-login/" class="btn-web" id="webLoginBtn">
@@ -239,31 +240,40 @@
     <h2 class="section-title">Questions fréquentes</h2>
     <p class="section-subtitle">Tout ce que tu dois savoir sur Yéki.</p>
     <div style="max-width: 700px; margin: 0 auto;">
-      <div style="background: white; border-radius: 16px; margin-bottom: 12px; padding: 20px; cursor: pointer;" onclick="toggleFaq(this)">
+      <div class="faq-item" style="background: white; border-radius: 16px; margin-bottom: 12px; padding: 20px; cursor: pointer;" onclick="toggleFaq(this)">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <strong>Comment télécharger l'application ?</strong>
           <i class="fas fa-chevron-down" style="transition: transform 0.3s;"></i>
         </div>
-        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0;">
+        <div class="faq-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0;">
           <p style="margin-top: 15px; color: #5a7385;">Clique sur le bouton "Télécharger" en haut de la page. Tu obtiendras un fichier APK à installer directement sur ton téléphone Android (6.0 et supérieur).</p>
         </div>
       </div>
-      <div style="background: white; border-radius: 16px; margin-bottom: 12px; padding: 20px; cursor: pointer;" onclick="toggleFaq(this)">
+      <div class="faq-item" style="background: white; border-radius: 16px; margin-bottom: 12px; padding: 20px; cursor: pointer;" onclick="toggleFaq(this)">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <strong>L'application est-elle gratuite ?</strong>
           <i class="fas fa-chevron-down" style="transition: transform 0.3s;"></i>
         </div>
-        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0;">
+        <div class="faq-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0;">
           <p style="margin-top: 15px; color: #5a7385;">L'inscription et l'accès de base sont totalement gratuits. Des options premium sont disponibles pour plus de contenus.</p>
         </div>
       </div>
-      <div style="background: white; border-radius: 16px; margin-bottom: 12px; padding: 20px; cursor: pointer;" onclick="toggleFaq(this)">
+      <div class="faq-item" style="background: white; border-radius: 16px; margin-bottom: 12px; padding: 20px; cursor: pointer;" onclick="toggleFaq(this)">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <strong>Puis-je utiliser Yéki sur ordinateur ?</strong>
           <i class="fas fa-chevron-down" style="transition: transform 0.3s;"></i>
         </div>
-        <div style="max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0;">
+        <div class="faq-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0;">
           <p style="margin-top: 15px; color: #5a7385;">Oui ! Yéki est accessible via la version web. Clique sur "Version Web" dans la navigation pour y accéder directement.</p>
+        </div>
+      </div>
+      <div class="faq-item" style="background: white; border-radius: 16px; margin-bottom: 12px; padding: 20px; cursor: pointer;" onclick="toggleFaq(this)">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong>Comment trouver un répétiteur ?</strong>
+          <i class="fas fa-chevron-down" style="transition: transform 0.3s;"></i>
+        </div>
+        <div class="faq-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0;">
+          <p style="margin-top: 15px; color: #5a7385;">Rendez-vous sur la page <a href="/repetiteurs/" style="color: #2884a0;">Répétiteurs</a> pour rechercher un enseignant par matière et le contacter directement sur WhatsApp.</p>
         </div>
       </div>
     </div>
@@ -285,6 +295,7 @@
           <a href="#about">À propos</a>
           <a href="#download">Télécharger</a>
           <a href="#faq">FAQ</a>
+          <a href="/repetiteurs/">Répétiteurs</a>
         </div>
       </div>
       <div>
@@ -310,6 +321,7 @@
     </div>
   </div>
 </footer>
+
 <script src="{% static 'js/script.js' %}"></script>
 </body>
 </html>

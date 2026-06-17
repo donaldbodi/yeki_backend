@@ -60,7 +60,7 @@ urlpatterns = [
     path('parcours/<int:parcours_id>/nommer-admin/', NommerAdminParcoursView.as_view(), name='parcours-nommer-admin'),
 
     # ── DÉPARTEMENTS ──────────────────────────────────────────────
-    path('departements/', DepartementCreateView.as_view(), name='departement-create'),
+    path('departements/', CreerDepartementView.as_view(), name='departement-create'),
     path('departements/<int:pk>/', DepartementUpdateView.as_view(), name='departement-update'),
     path('departements/<int:departement_id>/niveaux/', DepartementNiveauxAPIView.as_view()),
     path('departements/creer/', CreerDepartementView.as_view(), name='departements-creer'),
@@ -192,10 +192,6 @@ urlpatterns = [
     ),
 
     # ── OLYMPIADES : filtrées pour l'apprenant ───────────────────
-    # Remplace ListeOlympiadesView pour les apprenants.
-    # Filtre par profile.sub_cursus et ne retourne que les olympiades
-    # validées (Devoir.est_publie=True).
-    # Paramètres : ?statut=inscription|en_cours|terminee  ?matiere=  ?niveau=
     path(
         'olympiades/pour-moi/',
         OlympiadesPourMoiView.as_view(),
@@ -312,6 +308,35 @@ urlpatterns = [
     path('classement/recalculer/', 
          RecalculerClassementView.as_view(), 
          name='recalculer-classement'),
+
+
+    path('departements/<int:departement_id>/demander-acces/', 
+         DemandeAccesFormationView.as_view(), 
+         name='demander-acces'),
+    path('departements/<int:departement_id>/demandes/', 
+         DemandesAccesDepartementView.as_view(), 
+         name='demandes-acces'),
+    path('departements/<int:departement_id>/demandes/<int:demande_id>/traiter/', 
+         GererDemandeAccesView.as_view(), 
+         name='gerer-demande'),
+    path('apprenant/departement/<int:pk>/acces/', 
+         VerifierAccesDepartementView.as_view(), 
+         name='verifier-acces'),
+    
+    # Admin - Mise à jour département
+    path('admin/departements/<int:pk>/update/', 
+         AdminUpdateDepartementView.as_view(), 
+         name='admin-departement-update'),
+
+    # Paiement olympiade (cadre)
+    path('olympiades/<int:olympiade_id>/payer/', 
+         PayerOlympiadeView.as_view(), 
+         name='payer-olympiade'),
+    
+    # Paiement participation olympiade (apprenant)
+    path('olympiades/<int:olympiade_id>/payer-participation/', 
+         PayerParticipationOlympiadeView.as_view(), 
+         name='payer-participation-olympiade'),
 
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
