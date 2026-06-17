@@ -954,43 +954,6 @@ class Olympiade(models.Model):
         if self.date_debut_olympiade >= self.date_fin_olympiade:
             raise ValidationError("La date de début doit être avant la date de fin.")
 
-class PaiementOlympiade(models.Model):
-    """
-    Paiement effectué par un apprenant pour participer à une olympiade.
-    """
-    STATUT_CHOICES = [
-        ('en_attente', 'En attente'),
-        ('paye', 'Payé'),
-        ('rembourse', 'Remboursé'),
-    ]
-    
-    apprenant = models.ForeignKey(
-        User, 
-        on_delete=models.CASCADE,
-        related_name='paiements_olympiade'
-    )
-    olympiade = models.ForeignKey(
-        Olympiade,
-        on_delete=models.CASCADE,
-        related_name='paiements'
-    )
-    montant = models.PositiveIntegerField()
-    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='en_attente')
-    reference = models.CharField(max_length=100, unique=True, blank=True)
-    cree_le = models.DateTimeField(auto_now_add=True)
-    paye_le = models.DateTimeField(null=True, blank=True)
-    
-    class Meta:
-        unique_together = ('apprenant', 'olympiade')
-    
-    def save(self, *args, **kwargs):
-        if not self.reference:
-            self.reference = f"PAY-OLYMP-{uuid.uuid4().hex[:8].upper()}"
-        super().save(*args, **kwargs)
-    
-    def __str__(self):
-        return f"{self.apprenant.username} → {self.olympiade.titre} ({self.statut})"
-
 class InscriptionOlympiade(models.Model):
     """Inscription d'un apprenant à une olympiade."""
     STATUT_CHOICES = [
@@ -1280,6 +1243,8 @@ def enregistrer_activite(
     except Exception:
         pass   # Ne jamais bloquer une view à cause du journal
 
+# models.py - Correction des conflits de relations
+
 class Paiement(models.Model):
     """
     Registre centralisé de tous les paiements Yeki.
@@ -1291,11 +1256,14 @@ class Paiement(models.Model):
         ('abonnement_annuel',   'Abonnement annuel cursus'),
         ('acces_departement',   'Accès département (concours/formation)'),
         ('olympiade',           'Participation olympiade'),
+        ('olympiade_participation', 'Participation apprenant à une olympiade'),  # Nouveau type
     ]
     MOYEN_CHOICES = [
         ('mtn_momo',  'MTN Mobile Money'),
         ('orange_om', 'Orange Money'),
         ('carte',     'Carte bancaire'),
+        ('wallet',    'Portefeuille Yeki'),
+        ('cinetpay',  'CinetPay'),
     ]
     STATUT_CHOICES = [
         ('en_attente', 'En attente'),
@@ -1316,10 +1284,10 @@ class Paiement(models.Model):
     transaction_id = models.CharField(
         max_length=200, blank=True, help_text="ID transaction opérateur")
 
-    # Lien optionnel vers olympiade (pour participation payante)
+    # Lien optionnel vers olympiade (pour paiement global)
     olympiade_liee = models.ForeignKey(
         Olympiade, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='paiements principal')
+        null=True, blank=True, related_name='paiements_globaux')  # ✅ related_name unique
 
     # Commission Yeki prélevée (15% si paiement > 0 pour département)
     commission_yeki = models.PositiveIntegerField(
@@ -1327,7 +1295,7 @@ class Paiement(models.Model):
 
     class Meta:
         ordering = ['-date']
-        verbose_name = 'Paiement principal'
+        verbose_name = 'Paiement'
 
     def save(self, *args, **kwargs):
         if not self.reference:
@@ -1338,6 +1306,50 @@ class Paiement(models.Model):
         return f"{self.reference} – {self.utilisateur.username} – {self.montant} FCFA [{self.statut}]"
 
 
+# ─────────────────────────────────────────────────────────────────
+# PAIEMENT OLYMPIADE (pour les participants)
+# ─────────────────────────────────────────────────────────────────
+
+class PaiementOlympiade(models.Model):
+    """
+    Paiement effectué par un apprenant pour participer à une olympiade.
+    """
+    STATUT_CHOICES = [
+        ('en_attente', 'En attente'),
+        ('paye', 'Payé'),
+        ('rembourse', 'Remboursé'),
+    ]
+    
+    apprenant = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE,
+        related_name='paiements_olympiade'
+    )
+    olympiade = models.ForeignKey(
+        Olympiade,
+        on_delete=models.CASCADE,
+        related_name='paiements_participants'  # ✅ related_name unique
+    )
+    montant = models.PositiveIntegerField()
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='en_attente')
+    reference = models.CharField(max_length=100, unique=True, blank=True)
+    cree_le = models.DateTimeField(auto_now_add=True)
+    paye_le = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ('apprenant', 'olympiade')
+        ordering = ['-cree_le']
+        verbose_name = 'Paiement Olympiade'
+        verbose_name_plural = 'Paiements Olympiades'
+    
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = f"PAY-OLYMP-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+    
+    def __str__(self):
+        return f"{self.apprenant.username} → {self.olympiade.titre} ({self.statut})"
+    
 # ══════════════════════════════════════════════════════════════════
 # ABONNEMENT PREMIUM
 # ══════════════════════════════════════════════════════════════════
