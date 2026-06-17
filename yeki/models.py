@@ -1319,7 +1319,7 @@ class Paiement(models.Model):
     # Lien optionnel vers olympiade (pour participation payante)
     olympiade_liee = models.ForeignKey(
         Olympiade, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='paiements')
+        null=True, blank=True, related_name='paiements principal')
 
     # Commission Yeki prélevée (15% si paiement > 0 pour département)
     commission_yeki = models.PositiveIntegerField(
@@ -1327,7 +1327,7 @@ class Paiement(models.Model):
 
     class Meta:
         ordering = ['-date']
-        verbose_name = 'Paiement'
+        verbose_name = 'Paiement principal'
 
     def save(self, *args, **kwargs):
         if not self.reference:
