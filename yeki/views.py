@@ -4721,6 +4721,8 @@ class EnseignantAdminDashboardView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPER : sérialise un Departement avec tous ses champs enrichis
 # ─────────────────────────────────────────────────────────────────────────────
+# views.py - Correction de _serialise_departement_detail
+
 def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user=None):
     """Sérialise un Departement avec tous les champs enrichis selon son type."""
 
@@ -4746,13 +4748,15 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
         "image_url":       image_url,
         "couleur":         dept.couleur,
         "prix":            dept.prix,
+        "prix_presentiel": dept.prix_presentiel,  # ✅ Ajout
         "type":            dept.type_departement,
         "parcours_id":     dept.parcours_id,
         "parcours_nom":    dept.parcours.nom if dept.parcours else '',
         "parcours_type":   dept.parcours.type_parcours if dept.parcours else '',
         "cadre":           cadre_data,
         "created_at":      dept.created_at.isoformat() if dept.created_at else None,
-        "acces_restreint": dept.acces_restreint,  # ✅ Ajout
+        "acces_restreint": dept.acces_restreint,
+        "est_actif":       dept.est_actif,
     }
 
     # Champs prépa concours
@@ -4764,10 +4768,8 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
             "date_limite_inscription": dept.date_limite_inscription.isoformat() if dept.date_limite_inscription else None,
             "date_examen":             dept.date_examen.isoformat() if dept.date_examen else None,
             "arrete_ministeriel":      dept.arrete_ministeriel,
-            "lien_officiel":           dept.lien_officiel,
             "niveaux_cibles":          dept.niveaux_cibles,
             "places_disponibles":      dept.places_disponibles,
-            "frais_dossier":           dept.frais_dossier,
             "debouches":               dept.debouches,
         })
     else:
@@ -4779,7 +4781,7 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
             "est_formation_metier":    dept.est_formation_metier,
             "est_formation_classique": dept.est_formation_classique,
             "duree_formation":         dept.duree_formation,
-            "mode":          dept.mode,  # ✅ Utiliser mode
+            "mode":                    dept.mode,
             "certificat_delivre":      dept.certificat_delivre,
             "prerequis":               dept.prerequis,
             "objectifs":               dept.objectifs,
@@ -4803,6 +4805,8 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
         base["nb_cours"] = nb
 
     return base
+
+
 class CreerDepartementView(APIView):
     """
     POST /api/departements/creer/
@@ -5719,7 +5723,6 @@ class ApprenantConcoursFormationsView(APIView):
         niveau_apprenant = (profile.niveau or '').strip().lower()
         
         # Récupérer les départements selon le type
-        # ✅ SUPPRESSION du filtre est_valide qui n'existe plus
         if type_parcours == 'prepa':
             depts = Departement.objects.filter(
                 parcours__type_parcours='prepa',
@@ -5733,14 +5736,14 @@ class ApprenantConcoursFormationsView(APIView):
 
         resultats = []
         for dept in depts:
-            # ⭐ FILTRE PAR NIVEAU
+            # FILTRE PAR NIVEAU
             if not dept.est_accessible_par_niveau(niveau_apprenant):
                 continue
             
-            # Récupérer les cours du département (filtrés aussi par niveau si besoin)
+            # Récupérer les cours du département
             cours_qs = Cours.objects.filter(departement=dept)
             
-            # ⭐ Filtrer les cours par niveau
+            # Filtrer les cours par niveau
             if niveau_apprenant:
                 cours_qs = cours_qs.filter(niveau__iexact=niveau_apprenant)
             
@@ -5755,7 +5758,7 @@ class ApprenantConcoursFormationsView(APIView):
                     'icon_name': cours.icon_name,
                     'nb_lecons': cours.nb_lecons,
                     'nb_devoirs': cours.nb_devoirs,
-                    'progression': 0.0,  # À calculer si nécessaire
+                    'progression': 0.0,
                 })
             
             resultats.append(self._serialiser_departement(dept, cours_data, request))
@@ -5771,7 +5774,6 @@ class ApprenantConcoursFormationsView(APIView):
             except Exception:
                 pass
 
-        # ✅ Remplacer est_valide par est_actif ou un autre champ existant
         statut = 'ACTIF' if dept.est_actif else 'INACTIF'
 
         return {
@@ -5781,17 +5783,17 @@ class ApprenantConcoursFormationsView(APIView):
             'image_url': image_url,
             'couleur': dept.couleur or '#135F74',
             'prix': dept.prix,
+            'prix_presentiel': dept.prix_presentiel,  # ✅ Ajout du prix présentiel
             'type': dept.type_departement,
-            'statut': statut,  # ✅ Utiliser est_actif
+            'statut': statut,
             'progression': 0.0,
             'progression_moyenne': 0.0,
             'cours': cours_data,
             'nb_cours': len(cours_data),
-            'niveaux_cibles': dept.niveaux_accessibles or dept.niveaux_cibles or '',# a retirer
+            'niveaux_cibles': dept.niveaux_accessibles or dept.niveaux_cibles or '',
             'niveaux_accessibles': dept.get_niveaux_accessibles_list(),
             'date_limite_inscription': dept.date_limite_inscription.isoformat() if dept.date_limite_inscription else None,
             'date_examen': dept.date_examen.isoformat() if dept.date_examen else None,
-            'frais_dossier': dept.frais_dossier,
             'duree_formation': dept.duree_formation or '',
             'mode': dept.mode or '',
             'mode_label': {
@@ -5811,15 +5813,15 @@ class ApprenantConcoursFormationsView(APIView):
             'nom_concours': dept.nom_concours or '',
             'organisme_concours': dept.organisme_concours or '',
             'arrete_ministeriel': dept.arrete_ministeriel or '',
-            'lien_officiel': dept.lien_officiel or '',
             'places_disponibles': dept.places_disponibles,
             'debouches': dept.debouches or '',
-            'acces_restreint': dept.acces_restreint,  # ✅ Ajout du champ
+            'acces_restreint': dept.acces_restreint,
+            'prix_presentiel': dept.prix_presentiel,
             'cadre': {
                 'nom': dept.cadre.user.username if dept.cadre else '',
             } if dept.cadre else None,
         }
-
+    
 # ═══════════════════════════════════════════════════════════════════════════
 # OLYMPIADES POUR APPRENANT (avec filtre par niveau)
 # ═══════════════════════════════════════════════════════════════════════════
