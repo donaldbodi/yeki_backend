@@ -36,6 +36,21 @@ const resultsCount = document.getElementById('resultsCount');
 const loadingState = document.getElementById('loadingState');
 const emptyState = document.getElementById('emptyState');
 
+// Récupérer le token depuis le localStorage ou les cookies
+function getToken() {
+  // Essayer de récupérer depuis localStorage
+  const token = localStorage.getItem('token');
+  if (token) return token;
+  
+  // Essayer de récupérer depuis les cookies
+  const cookies = document.cookie.split(';');
+  for (let cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === 'token') return value;
+  }
+  return null;
+}
+
 // Rechercher les répétiteurs
 async function rechercherRepetiteurs(matiere) {
   if (!matiere || matiere.trim() === '') {
@@ -48,13 +63,19 @@ async function rechercherRepetiteurs(matiere) {
   emptyState.style.display = 'none';
   resultsGrid.innerHTML = '';
 
+  const token = getToken();
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Token ${token}`;
+  }
+
   try {
     // Appel API
     const response = await fetch(`${API_BASE_URL}/repetiteurs/search/?matiere=${encodeURIComponent(matiere)}`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      }
+      headers: headers,
     });
 
     if (response.ok) {
@@ -92,11 +113,17 @@ function afficherResultats(data, matiere) {
         <div>
           <h3>${escapeHtml(rep.nom)}</h3>
           <p>@${escapeHtml(rep.username)}</p>
+          ${rep.ville ? `<p style="font-size: 0.7rem; color: #64748b;"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(rep.ville)}</p>` : ''}
         </div>
       </div>
       <div class="matiere-badge">
         <i class="fas fa-graduation-cap"></i> ${escapeHtml(rep.matiere)}
       </div>
+      ${rep.matieres && rep.matieres.length > 1 ? `
+        <div style="margin-bottom: 10px; font-size: 0.7rem; color: #64748b;">
+          <i class="fas fa-book"></i> ${rep.matieres.join(', ')}
+        </div>
+      ` : ''}
       <div class="prix">
         <i class="fas fa-tag"></i> ${rep.tarif} FCFA/mois
       </div>
@@ -114,22 +141,28 @@ function afficherResultatsDemo(matiere) {
       nom: "M. Kamga François",
       username: "kamga_francois",
       matiere: matiere,
+      matieres: [matiere],
       tarif: 5000,
-      whatsapp: "237691234567"
+      whatsapp: "237691234567",
+      ville: "Yaoundé"
     },
     {
       nom: "Mme Ngo Mbarga",
       username: "ngo_mbarga",
       matiere: matiere,
+      matieres: [matiere],
       tarif: 5000,
-      whatsapp: "237698765432"
+      whatsapp: "237698765432",
+      ville: "Douala"
     },
     {
       nom: "M. Tchinda Pierre",
       username: "tchinda_pierre",
       matiere: matiere,
+      matieres: [matiere],
       tarif: 5000,
-      whatsapp: "237697654321"
+      whatsapp: "237697654321",
+      ville: "Yaoundé"
     }
   ];
 
@@ -143,6 +176,7 @@ function afficherResultatsDemo(matiere) {
         <div>
           <h3>${escapeHtml(rep.nom)}</h3>
           <p>@${escapeHtml(rep.username)}</p>
+          ${rep.ville ? `<p style="font-size: 0.7rem; color: #64748b;"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(rep.ville)}</p>` : ''}
         </div>
       </div>
       <div class="matiere-badge">

@@ -58,19 +58,22 @@ def _nom_profil(profile):
     n = f"{profile.user.first_name} {profile.user.last_name}".strip()
     return n or profile.user.username
 
+# views.py - Ajouter/modifier la classe RepetiteursSearchView
+
 class RepetiteursSearchView(APIView):
     """
-    GET /api/repetiteurs/search/?matiere=maths
+    GET /api/repetiteurs/search/?matiere=maths&ville=Yaounde&niveau=Terminale
     Recherche des enseignants (principaux et secondaires) par matière.
     
     Retourne :
-    - nom, matière, tarif (5000 FCFA/mois), numéro WhatsApp
+    - nom, matière, tarif (5000 FCFA/mois), numéro WhatsApp, ville
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         matiere = request.query_params.get('matiere', '').strip().lower()
-        niveau = request.query_params.get('niveau', '').strip()
+        ville = request.query_params.get('ville', '').strip().lower()
+        niveau = request.query_params.get('niveau', '').strip().lower()
         
         if not matiere:
             return Response(
@@ -104,21 +107,45 @@ class RepetiteursSearchView(APIView):
             if cours_principaux.exists() or cours_secondaires.exists():
                 enseigne_matiere = True
             
+            # Filtrer par ville si spécifiée
+            if ville and enseigne_matiere:
+                profil_ville = (profil.ville or '').strip().lower()
+                if profil_ville and ville not in profil_ville:
+                    # Si la ville ne correspond pas, on vérifie si l'enseignant a des cours dans cette ville
+                    cours_ville = Cours.objects.filter(
+                        departement__ville__iexact=ville,
+                        enseignant_principal=profil
+                    )
+                    if not cours_ville.exists():
+                        enseigne_matiere = False
+            
             if enseigne_matiere:
                 # Numéro WhatsApp (à stocker dans le profil)
                 whatsapp = getattr(profil, 'whatsapp', None) or profil.phone or ''
                 if not whatsapp.startswith('+237') and whatsapp:
                     whatsapp = f"+237{whatsapp}"
                 
+                # Récupérer les matières enseignées
+                matieres_enseignees = []
+                for c in cours_principaux:
+                    if c.matiere and c.matiere not in matieres_enseignees:
+                        matieres_enseignees.append(c.matiere)
+                for c in cours_secondaires:
+                    if c.matiere and c.matiere not in matieres_enseignees:
+                        matieres_enseignees.append(c.matiere)
+                
                 resultats.append({
                     "id": profil.id,
                     "nom": _nom_profil(profil),
                     "username": profil.user.username,
                     "matiere": matiere.capitalize(),
+                    "matieres": matieres_enseignees,
                     "tarif": 5000,  # 5000 FCFA par mois
                     "whatsapp": whatsapp,
                     "avatar": request.build_absolute_uri(profil.avatar.url) if profil.avatar else None,
+                    "ville": profil.ville or '',
                     "disponible": True,
+                    "niveau": profil.niveau or '',
                 })
         
         return Response({
@@ -126,11 +153,15 @@ class RepetiteursSearchView(APIView):
             "total": len(resultats),
             "repetiteurs": resultats,
             "tarif_mensuel": 5000,
-            "message_whatsapp_template": "Bonjour, je souhaite prendre des cours de {matiere} avec vous a domicil.",
+            "message_whatsapp_template": f"Bonjour, je souhaite prendre des cours de {matiere} avec vous à domicile.",
         }, status=200)
 
 
-logger = logging.getLogger(__name__)
+def repetiteurs_page(request):
+    """
+    Page de recherche de répétiteurs
+    """
+    return render(request, 'repetiteurs.html')
 
 
 class ClassementDepartementView(APIView):
@@ -4612,9 +4643,6 @@ class EnseignantAdminDashboardView(APIView):
                 "prix": dept.prix,
                 "taux_moyen": 0,
                 "cadre": cadre_data,
-                "est_valide": dept.est_valide,
-                "est_refuse": dept.est_refuse,
-                "motif_refus": dept.motif_refus,
                 "couleur": dept.couleur,
             }
             departements_data.append(dept_info)
@@ -4695,8 +4723,6 @@ class EnseignantAdminDashboardView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user=None):
     """Sérialise un Departement avec tous les champs enrichis selon son type."""
-    from django.conf import settings
-    import os
 
     cadre_data = None
     if dept.cadre:
@@ -4720,13 +4746,13 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
         "image_url":       image_url,
         "couleur":         dept.couleur,
         "prix":            dept.prix,
-        "est_actif":       dept.est_actif,
         "type":            dept.type_departement,
         "parcours_id":     dept.parcours_id,
         "parcours_nom":    dept.parcours.nom if dept.parcours else '',
         "parcours_type":   dept.parcours.type_parcours if dept.parcours else '',
         "cadre":           cadre_data,
         "created_at":      dept.created_at.isoformat() if dept.created_at else None,
+        "acces_restreint": dept.acces_restreint,  # ✅ Ajout
     }
 
     # Champs prépa concours
@@ -4753,7 +4779,7 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
             "est_formation_metier":    dept.est_formation_metier,
             "est_formation_classique": dept.est_formation_classique,
             "duree_formation":         dept.duree_formation,
-            "mode_formation":          dept.mode_formation,
+            "mode":          dept.mode,  # ✅ Utiliser mode
             "certificat_delivre":      dept.certificat_delivre,
             "prerequis":               dept.prerequis,
             "objectifs":               dept.objectifs,
@@ -4777,7 +4803,6 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
         base["nb_cours"] = nb
 
     return base
-
 class CreerDepartementView(APIView):
     """
     POST /api/departements/creer/
@@ -5694,17 +5719,16 @@ class ApprenantConcoursFormationsView(APIView):
         niveau_apprenant = (profile.niveau or '').strip().lower()
         
         # Récupérer les départements selon le type
+        # ✅ SUPPRESSION du filtre est_valide qui n'existe plus
         if type_parcours == 'prepa':
             depts = Departement.objects.filter(
                 parcours__type_parcours='prepa',
                 est_actif=True,
-                est_valide=True,
             ).select_related('parcours', 'cadre__user')
         else:
             depts = Departement.objects.filter(
                 parcours__type_parcours='formation',
                 est_actif=True,
-                est_valide=True,
             ).select_related('parcours', 'cadre__user')
 
         resultats = []
@@ -5747,6 +5771,9 @@ class ApprenantConcoursFormationsView(APIView):
             except Exception:
                 pass
 
+        # ✅ Remplacer est_valide par est_actif ou un autre champ existant
+        statut = 'ACTIF' if dept.est_actif else 'INACTIF'
+
         return {
             'id': dept.id,
             'nom': dept.nom,
@@ -5755,23 +5782,23 @@ class ApprenantConcoursFormationsView(APIView):
             'couleur': dept.couleur or '#135F74',
             'prix': dept.prix,
             'type': dept.type_departement,
-            'statut': 'NOUVEAU' if not dept.est_valide else 'ACTIF',
+            'statut': statut,  # ✅ Utiliser est_actif
             'progression': 0.0,
             'progression_moyenne': 0.0,
             'cours': cours_data,
             'nb_cours': len(cours_data),
-            'niveaux_cibles': dept.niveaux_accessibles or dept.niveaux_cibles or '',
+            'niveaux_cibles': dept.niveaux_accessibles or dept.niveaux_cibles or '',# a retirer
             'niveaux_accessibles': dept.get_niveaux_accessibles_list(),
             'date_limite_inscription': dept.date_limite_inscription.isoformat() if dept.date_limite_inscription else None,
             'date_examen': dept.date_examen.isoformat() if dept.date_examen else None,
             'frais_dossier': dept.frais_dossier,
             'duree_formation': dept.duree_formation or '',
-            'mode_formation': dept.mode_formation or '',
-            'mode_formation_label': {
+            'mode': dept.mode or '',
+            'mode_label': {
                 'presentiel': 'Présentiel',
                 'distance': 'À distance',
                 'hybride': 'Hybride',
-            }.get(dept.mode_formation, ''),
+            }.get(dept.mode, ''),
             'certificat_delivre': dept.certificat_delivre or '',
             'prerequis': dept.prerequis or '',
             'objectifs': dept.objectifs or '',
@@ -5787,11 +5814,11 @@ class ApprenantConcoursFormationsView(APIView):
             'lien_officiel': dept.lien_officiel or '',
             'places_disponibles': dept.places_disponibles,
             'debouches': dept.debouches or '',
+            'acces_restreint': dept.acces_restreint,  # ✅ Ajout du champ
             'cadre': {
                 'nom': dept.cadre.user.username if dept.cadre else '',
             } if dept.cadre else None,
         }
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # OLYMPIADES POUR APPRENANT (avec filtre par niveau)
@@ -5830,12 +5857,10 @@ class OlympiadesPourMoiView(APIView):
         )
         return Response(serializer.data)
 
-
 class ApprenantFormationsAPIView(APIView):
     """
     GET /api/apprenant/formations/
     Retourne les departements (formations) avec champs enrichis.
-    Parametre optionnel: ?type=metier|classique|all
     """
     permission_classes = [IsAuthenticated]
 
@@ -5847,12 +5872,12 @@ class ApprenantFormationsAPIView(APIView):
         type_filter = request.query_params.get('type', 'all')
         nom_parcours = request.query_params.get('parcours', profile.cursus)
 
+        # ✅ Supprimer est_valide
         qs = Departement.objects.filter(est_actif=True).select_related('parcours', 'cadre__user')
 
         if nom_parcours:
             qs = qs.filter(parcours__nom=nom_parcours)
         else:
-            # Tous les parcours de type formation
             qs = qs.filter(parcours__type_parcours='formation')
 
         if type_filter == 'metier':
@@ -5870,18 +5895,17 @@ class ApprenantFormationsAPIView(APIView):
 
         result = [_serialise_departement_detail(d, prog_map=prog_map, include_cours=True, user=request.user) for d in qs]
         return Response(result, status=200)
-
+    
 
 class ApprenantDepartementDetailView(APIView):
     """GET /api/apprenant/departement/<pk>/ — detail complet"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        dept = get_object_or_404(Departement, pk=pk, est_actif=True)
+        dept = get_object_or_404(Departement, pk=pk)
         cours_qs = Cours.objects.filter(departement=dept).select_related('enseignant_principal__user')
         prog_map = _progression_cours(request.user, cours_qs)
         return Response(_serialise_departement_detail(dept, prog_map=prog_map, include_cours=True, user=request.user))
-
 
 # ══════════════════════════════════════════════════════════════════
 # ENSEIGNANT ADMIN — OLYMPIADES À VALIDER
