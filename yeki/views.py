@@ -4343,6 +4343,11 @@ def liste_enseignants(request):
 # ADMIN GÉNÉRAL — Dashboard
 # GET /api/admin-general/dashboard/
 # ───────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Dashboard (VERSION CORRIGÉE)
+# GET /api/admin-general/dashboard/
+# ───────────────────────────────────────────────────────────────────────────
+
 class AdminGeneralDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -4359,102 +4364,109 @@ class AdminGeneralDashboardView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        parcours_qs = Parcours.objects.prefetch_related(
-            'departements__cours', 'admin__user'
-        ).all()
-
-        parcours_data = []
-        for p in parcours_qs:
-            depts = p.departements.all()
-            nb_depts = depts.count()
-            nb_app = sum(c.nb_apprenants for d in depts for c in d.cours.all())
-            nb_cours = sum(d.cours.count() for d in depts)
-
-            admin_data = None
-            if p.admin:
-                admin_data = {
-                    "id": p.admin.id,
-                    "nom": f"{p.admin.user.first_name} {p.admin.user.last_name}".strip()
-                          or p.admin.user.username,
-                    "username": p.admin.user.username,
-                    "email": p.admin.user.email,
-                }
-
-            parcours_data.append({
-                "id": p.id,
-                "nom": p.nom,
-                "nb_departements": nb_depts,
-                "nb_apprenants": nb_app,
-                "nb_cours": nb_cours,
-                "taux_moyen": 0,
-                "enseignant_admin": admin_data,
-            })
-
-        departements_qs = Departement.objects.select_related(
-            'parcours', 'cadre__user'
-        ).prefetch_related('cours').all()
-
-        depts_data = []
-        for d in departements_qs:
-            nb_cours = d.cours.count()
-            nb_app = sum(c.nb_apprenants for c in d.cours.all())
-            depts_data.append({
-                "id": d.id,
-                "nom": d.nom,
-                "parcours": d.parcours.nom if d.parcours else "",
-                "nb_cours": nb_cours,
-                "nb_apprenants": nb_app,
-                "taux_moyen": 0,
-            })
-
-        stats = {
-            "nb_parcours": Parcours.objects.count(),
-            "nb_departements": Departement.objects.count(),
-            "nb_cours": Cours.objects.count(),
-            "nb_apprenants": Profile.objects.filter(user_type='apprenant').count(),
-            "nb_enseignants": Profile.objects.filter(
-                user_type__in=[
-                    'enseignant_admin', 'enseignant_cadre',
-                    'enseignant_principal', 'enseignant'
-                ]
-            ).count(),
-            "nb_lecons": Lecon.objects.count(),
-        }
-
-        nom_complet = (
-            f"{profile.user.first_name} {profile.user.last_name}".strip()
-            or profile.user.username
-        )
-
-        # Top enseignants (optionnel)
-        top_enseignants = []
         try:
-            from django.db.models import Avg
-            enseignants = Profile.objects.filter(
-                user_type__in=['enseignant_principal', 'enseignant']
-            ).annotate(
-                score_moyen=Avg('cours_principaux__exercices__evaluationexercice__score')
-            ).order_by('-score_moyen')[:10]
-            
-            for e in enseignants:
-                if e.score_moyen:
-                    top_enseignants.append({
-                        "id": e.id,
-                        "nom": _nom_profil(e),
-                        "role": e.user_type,
-                        "score": round(e.score_moyen / 20 * 20, 1) if e.score_moyen else 0,
-                    })
-        except Exception:
-            pass
+            parcours_qs = Parcours.objects.prefetch_related(
+                'departements__cours', 'admin__user'
+            ).all()
 
-        return Response({
-            "nom": nom_complet,
-            "stats": stats,
-            "parcours": parcours_data,
-            "departements": depts_data,
-            "top_enseignants": top_enseignants,
-        }, status=status.HTTP_200_OK)
-    
+            parcours_data = []
+            for p in parcours_qs:
+                depts = p.departements.all()
+                nb_depts = depts.count()
+                nb_app = sum(c.nb_apprenants for d in depts for c in d.cours.all())
+                nb_cours = sum(d.cours.count() for d in depts)
+
+                admin_data = None
+                if p.admin:
+                    admin_data = {
+                        "id": p.admin.id,
+                        "nom": _nom_profil(p.admin),
+                        "username": p.admin.user.username,
+                        "email": p.admin.user.email,
+                    }
+
+                parcours_data.append({
+                    "id": p.id,
+                    "nom": p.nom,
+                    "nb_departements": nb_depts,
+                    "nb_apprenants": nb_app,
+                    "nb_cours": nb_cours,
+                    "taux_moyen": 0,
+                    "enseignant_admin": admin_data,
+                })
+
+            departements_qs = Departement.objects.select_related(
+                'parcours', 'cadre__user'
+            ).prefetch_related('cours').all()
+
+            depts_data = []
+            for d in departements_qs:
+                nb_cours = d.cours.count()
+                nb_app = sum(c.nb_apprenants for c in d.cours.all())
+                depts_data.append({
+                    "id": d.id,
+                    "nom": d.nom,
+                    "parcours": d.parcours.nom if d.parcours else "",
+                    "nb_cours": nb_cours,
+                    "nb_apprenants": nb_app,
+                    "taux_moyen": 0,
+                })
+
+            stats = {
+                "nb_parcours": Parcours.objects.count(),
+                "nb_departements": Departement.objects.count(),
+                "nb_cours": Cours.objects.count(),
+                "nb_apprenants": Profile.objects.filter(user_type='apprenant').count(),
+                "nb_enseignants": Profile.objects.filter(
+                    user_type__in=[
+                        'enseignant_admin', 'enseignant_cadre',
+                        'enseignant_principal', 'enseignant'
+                    ]
+                ).count(),
+                "nb_lecons": Lecon.objects.count(),
+            }
+
+            nom_complet = (
+                f"{profile.user.first_name} {profile.user.last_name}".strip()
+                or profile.user.username
+            )
+
+            # Top enseignants (optionnel)
+            top_enseignants = []
+            try:
+                from django.db.models import Avg
+                enseignants = Profile.objects.filter(
+                    user_type__in=['enseignant_principal', 'enseignant']
+                ).annotate(
+                    score_moyen=Avg('cours_principaux__exercices__evaluationexercice__score')
+                ).order_by('-score_moyen')[:10]
+                
+                for e in enseignants:
+                    if e.score_moyen:
+                        top_enseignants.append({
+                            "id": e.id,
+                            "nom": _nom_profil(e),
+                            "role": e.user_type,
+                            "score": round(e.score_moyen / 20 * 20, 1) if e.score_moyen else 0,
+                        })
+            except Exception:
+                pass
+
+            return Response({
+                "nom": nom_complet,
+                "stats": stats,
+                "parcours": parcours_data,
+                "departements": depts_data,
+                "top_enseignants": top_enseignants,
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            # En cas d'erreur inattendue, retourner une erreur 500 avec détail
+            return Response(
+                {"detail": f"Erreur interne du serveur: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
 
 # ───────────────────────────────────────────────────────────────────────────
 # ADMIN GÉNÉRAL — Créer un parcours
