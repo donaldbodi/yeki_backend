@@ -165,9 +165,6 @@ urlpatterns = [
 
 
     # ── APPRENANT : Prépa Concours ────────────────────────────────
-    # Retourne les départements (= concours) du parcours "Prépa Concours"
-    # filtrés par profile.sub_cursus, groupés par département.
-    # Exemple : concours ENS, concours Polytechnique, etc.
     path(
         'apprenant/prepa-concours/',
         ApprenantConcoursFormationsView.as_view(),
@@ -175,9 +172,6 @@ urlpatterns = [
     ),
 
     # ── APPRENANT : Formations ────────────────────────────────────
-    # Retourne les départements (= formations classiques/métier) du
-    # parcours "Formations" filtrés par profile.sub_cursus.
-    # Paramètre optionnel : ?parcours=NomDuParcours
     path(
         'apprenant/formations/',
         ApprenantConcoursFormationsView.as_view(),

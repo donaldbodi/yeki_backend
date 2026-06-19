@@ -5631,32 +5631,44 @@ class HistoriqueStatsView(APIView):
 
 # ══════════════════════════════════════════════════════════════════
 # APPRENANT — PRÉPA CONCOURS/FORMATION
-# GET /api/apprenant/prepa-concours/
+# views.py - Remplacer ApprenantConcoursFormationsView et ApprenantFormationsAPIView par une vue unifiée
 
 class ApprenantConcoursFormationsView(APIView):
     """
-    GET /api/apprenant/prepa-concours/
-    Retourne les concours (prépa) accessibles selon le niveau de l'apprenant.
-    EXCLUSIVEMENT les concours (type_parcours='prepa')
+    GET /api/apprenant/prepa-concours/   → type='prepa' (concours)
+    GET /api/apprenant/formations/       → type='formation' (formations)
+    
+    Retourne les concours ou formations accessibles selon le niveau de l'apprenant.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Récupérer le type depuis l'URL ou query param
+        # Le type est déterminé par l'URL appelée
+        path = request.path
+        if 'prepa-concours' in path:
+            type_parcours = 'prepa'
+        elif 'formations' in path:
+            type_parcours = 'formation'
+        else:
+            type_parcours = request.query_params.get('type', 'prepa')
+        
+        # Récupérer le profil de l'apprenant
         profile = _get_profile(request.user)
         if not profile or profile.user_type != 'apprenant':
             return Response({"detail": "Accès réservé aux apprenants"}, status=403)
         
         niveau_apprenant = (profile.niveau or '').strip().lower()
         
-        # ✅ CORRECTION : Filtrer EXCLUSIVEMENT les parcours de type 'prepa'
+        # Filtrer par type de parcours
         depts = Departement.objects.filter(
-            parcours__type_parcours='prepa',  # ← CORRECTION ICI
+            parcours__type_parcours=type_parcours,
             est_actif=True,
         ).select_related('parcours', 'cadre__user')
 
         resultats = []
         for dept in depts:
-            # FILTRE PAR NIVEAU
+            # Filtrer par niveau
             if not dept.est_accessible_par_niveau(niveau_apprenant):
                 continue
             
@@ -5678,13 +5690,93 @@ class ApprenantConcoursFormationsView(APIView):
                     'icon_name': cours.icon_name,
                     'nb_lecons': cours.nb_lecons,
                     'nb_devoirs': cours.nb_devoirs,
-                    'progression': 0.0,
+                    'progression': 0.0,  # À calculer avec _progression_cours si besoin
                 })
             
             resultats.append(self._serialiser_departement(dept, cours_data, request))
         
         return Response(resultats)
-    
+
+    def _serialiser_departement(self, dept, cours_data, request):
+        """Sérialise un département avec ses cours selon son type."""
+        image_url = None
+        if dept.image:
+            try:
+                image_url = request.build_absolute_uri(dept.image.url)
+            except Exception:
+                pass
+
+        statut = 'ACTIF' if dept.est_actif else 'INACTIF'
+        type_parcours = dept.parcours.type_parcours if dept.parcours else ''
+
+        # Base commune
+        result = {
+            'id': dept.id,
+            'nom': dept.nom,
+            'description': dept.description,
+            'image_url': image_url,
+            'couleur': dept.couleur or '#135F74',
+            'prix': dept.prix,
+            'prix_presentiel': dept.prix_presentiel,
+            'type': dept.type_departement,
+            'statut': statut,
+            'progression': 0.0,
+            'progression_moyenne': 0.0,
+            'cours': cours_data,
+            'nb_cours': len(cours_data),
+            'niveaux_accessibles': dept.get_niveaux_accessibles_list(),
+            'acces_restreint': dept.acces_restreint,
+            'type_parcours': type_parcours,
+            'parcours_nom': dept.parcours.nom if dept.parcours else '',
+        }
+
+        # Champs spécifiques aux concours (prepa)
+        if type_parcours == 'prepa':
+            result.update({
+                'est_prepa_concours': True,
+                'est_formation_metier': False,
+                'est_formation_classique': False,
+                'nom_concours': dept.nom_concours or '',
+                'organisme_concours': dept.organisme_concours or '',
+                'date_limite_inscription': dept.date_limite_inscription.isoformat() if dept.date_limite_inscription else None,
+                'date_examen': dept.date_examen.isoformat() if dept.date_examen else None,
+                'arrete_ministeriel': dept.arrete_ministeriel or '',
+                'niveaux_cibles': dept.niveaux_cibles or '',
+                'places_disponibles': dept.places_disponibles,
+                'debouches': dept.debouches or '',
+                'date_examen': dept.date_examen,
+                'date_limite_inscription': dept.date_limite_inscription,
+            })
+        # Champs spécifiques aux formations
+        elif type_parcours == 'formation':
+            result.update({
+                'est_prepa_concours': False,
+                'est_formation_metier': dept.est_formation_metier,
+                'est_formation_classique': dept.est_formation_classique,
+                'duree_formation': dept.duree_formation or '',
+                'mode': dept.mode or '',
+                'mode_label': {
+                    'presentiel': 'Présentiel',
+                    'distance': 'À distance',
+                    'hybride': 'Hybride',
+                }.get(dept.mode, ''),
+                'certificat_delivre': dept.certificat_delivre or '',
+                'prerequis': dept.prerequis or '',
+                'objectifs': dept.objectifs or '',
+                'domaine': dept.domaine or '',
+                'ville': dept.ville or '',
+                'est_certifiante': dept.est_certifiante,
+                'mode_formation': dept.mode_formation or 'hybride',
+            })
+        else:
+            # Parcours autre (cursus) - champs par défaut
+            result.update({
+                'est_prepa_concours': False,
+                'est_formation_metier': False,
+                'est_formation_classique': False,
+            })
+
+        return result 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # OLYMPIADES POUR APPRENANT (avec filtre par niveau)
@@ -5722,49 +5814,6 @@ class OlympiadesPourMoiView(APIView):
             olympiades_accessibles, many=True, context={"request": request}
         )
         return Response(serializer.data)
-
-class ApprenantFormationsAPIView(APIView):
-    """
-    GET /api/apprenant/formations/
-    Retourne les departements (formations) avec champs enrichis.
-    EXCLUSIVEMENT les formations (type_parcours='formation')
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != 'apprenant':
-            return Response({"detail": "Acces reserve aux apprenants."}, status=403)
-
-        type_filter = request.query_params.get('type', 'all')
-        nom_parcours = request.query_params.get('parcours', profile.cursus)
-
-        # ✅ CORRECTION : Filtrer EXCLUSIVEMENT les parcours de type 'formation'
-        qs = Departement.objects.filter(
-            est_actif=True,
-            parcours__type_parcours='formation'  # ← CORRECTION ICI
-        ).select_related('parcours', 'cadre__user')
-
-        if nom_parcours:
-            qs = qs.filter(parcours__nom=nom_parcours)
-        else:
-            qs = qs.filter(parcours__type_parcours='formation')
-
-        if type_filter == 'metier':
-            qs = qs.filter(est_formation_metier=True)
-        elif type_filter == 'classique':
-            qs = qs.filter(est_formation_classique=True)
-
-        qs = qs.order_by('nom')
-
-        if not qs.exists():
-            return Response([], status=200)
-
-        cours_qs = Cours.objects.filter(departement__in=qs).select_related('enseignant_principal__user')
-        prog_map = _progression_cours(request.user, cours_qs)
-
-        result = [_serialise_departement_detail(d, prog_map=prog_map, include_cours=True, user=request.user) for d in qs]
-        return Response(result, status=200)
 
 
 class ApprenantDepartementDetailView(APIView):
