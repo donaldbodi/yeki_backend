@@ -1,5 +1,4 @@
 <!-- templates/repetiteurs.html -->
-
 {% load static %}
 <html lang="fr">
 <head>
@@ -64,10 +63,38 @@
     <!-- Search Section -->
     <div class="search-section">
       <div class="search-box">
-        <input type="text" id="searchInput" class="search-input" placeholder="Rechercher par matière (ex: Mathématiques, Physique, Anglais...)" autocomplete="off">
-        <button id="searchBtn" class="search-btn">
-          <i class="fas fa-search"></i> Rechercher
-        </button>
+        <div class="search-header">
+          <h3><i class="fas fa-search"></i> Rechercher un répétiteur</h3>
+        </div>
+        <div class="search-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="searchInput">
+                <i class="fas fa-book"></i> Matière
+              </label>
+              <input type="text" id="searchInput" class="search-input" placeholder="ex: Mathématiques, Physique, Anglais..." autocomplete="off">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="niveauInput">
+                <i class="fas fa-school"></i> Niveau
+              </label>
+              <input type="text" id="niveauInput" class="search-input" placeholder="ex: Terminale, 3ème..." autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label for="villeInput">
+                <i class="fas fa-map-marker-alt"></i> Ville
+              </label>
+              <input type="text" id="villeInput" class="search-input" placeholder="ex: Yaoundé, Douala..." autocomplete="off">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button id="searchBtn" class="search-btn">
+              <i class="fas fa-search"></i> Rechercher
+            </button>
+          </div>
+        </div>
       </div>
       <div class="matieres-populaires">
         <p><i class="fas fa-fire"></i> Matières populaires :</p>

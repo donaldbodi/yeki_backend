@@ -4807,140 +4807,6 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
     return base
 
 
-class CreerDepartementView(APIView):
-    """
-    POST /api/departements/creer/
-    Crée un département enrichi selon le type du parcours parent.
-    """
-    permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
-
-    def post(self, request):
-        try:
-            profile = request.user.profile
-        except Profile.DoesNotExist:
-            return Response({"detail": "Profil introuvable."}, status=404)
-
-        if profile.user_type != 'enseignant_admin':
-            return Response(
-                {"detail": "Accès réservé aux enseignants administrateurs."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        nom = request.data.get('nom', '').strip()
-        if not nom:
-            return Response(
-                {"detail": "Le nom du département est obligatoire."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        parcours_id = request.data.get('parcours_id')
-        if parcours_id:
-            parcours = get_object_or_404(Parcours, pk=parcours_id, admin=profile)
-        else:
-            parcours_qs = Parcours.objects.filter(admin=profile)
-            if not parcours_qs.exists():
-                return Response({"detail": "Aucun parcours ne vous est assigné."}, status=403)
-            if parcours_qs.count() > 1:
-                return Response({"detail": "Spécifier parcours_id."}, status=400)
-            parcours = parcours_qs.first()
-
-        def _b(key, default=False):
-            v = request.data.get(key, default)
-            if isinstance(v, str):
-                return v.lower() in ('true', '1', 'yes')
-            return bool(v)
-
-        def _i(key, default=0):
-            try:
-                return int(request.data.get(key, default) or default)
-            except (ValueError, TypeError):
-                return default
-
-        # === CONSTRUCTION DES CHAMPS DE BASE ===
-        kwargs = {
-            'nom': nom,
-            'parcours': parcours,
-            'description': request.data.get('description', '').strip(),
-            'couleur': request.data.get('couleur', '#2884A0'),
-            'prix': _i('prix'),  # ⚠️ CORRECTION : prix bien récupéré
-            'est_actif': _b('est_actif', True),
-        }
-
-        if request.FILES.get('image'):
-            kwargs['image'] = request.FILES['image']
-
-        type_parc = parcours.type_parcours
-
-        # === PARCOURS CURSUS : Pas de champ prix ===
-        if type_parc == 'cursus':
-            kwargs['prix'] = 0  # Forcé à 0 pour cursus
-            # Pas de champs supplémentaires
-
-        # === PARCOURS PRÉPA CONCOURS ===
-        elif type_parc == 'prepa' or _b('est_prepa_concours'):
-            kwargs.update({
-                'est_prepa_concours': True,
-                'nom_concours': request.data.get('nom_concours', ''),
-                'organisme_concours': request.data.get('organisme_concours', ''),
-                'date_limite_inscription': request.data.get('date_limite_inscription') or None,
-                'date_examen': request.data.get('date_examen') or None,
-                'arrete_ministeriel': request.data.get('arrete_ministeriel', ''),
-                'lien_officiel': request.data.get('lien_officiel', ''),
-                'niveaux_cibles': request.data.get('niveaux_cibles', ''),
-                'places_disponibles': _i('places_disponibles') or None,
-                'frais_dossier': _i('frais_dossier'),
-                'debouches': request.data.get('debouches', ''),
-            })
-            # ⚠️ CORRECTION : Le prix est déjà dans kwargs['prix'], pas besoin de le remettre
-
-        # === PARCOURS FORMATION ===
-        elif type_parc == 'formation' or _b('est_formation_metier') or _b('est_formation_classique'):
-            prix = kwargs.get('prix', 0)
-            
-            kwargs.update({
-                'est_formation_metier': _b('est_formation_metier'),
-                'est_formation_classique': _b('est_formation_classique'),
-                'duree_formation': request.data.get('duree_formation', ''),
-                'mode_formation': request.data.get('mode_formation', 'hybride'),
-                'certificat_delivre': request.data.get('certificat_delivre', ''),
-                'prerequis': request.data.get('prerequis', ''),
-                'objectifs': request.data.get('objectifs', ''),
-                'domaine': request.data.get('domaine', ''),
-                'ville': request.data.get('ville', ''),
-                'est_certifiante': _b('est_certifiante'),
-            })
-
-            # ⚠️ CORRECTION : Si prix = 0, marquer comme "à valider" par l'admin
-            if prix == 0:
-                kwargs['est_valide'] = False
-                kwargs['est_actif'] = False  # Non visible tant que non validé
-            else:
-                kwargs['est_valide'] = True
-                kwargs['est_actif'] = True
-
-        # === CRÉATION DU DÉPARTEMENT ===
-        departement = Departement.objects.create(**kwargs)
-
-        enregistrer_activite(
-            user=request.user,
-            action='department_created',
-            description=f"Département {departement.nom} créé dans {parcours.nom}",
-            data={
-                'departement': departement.nom,
-                'parcours': parcours.nom,
-                'prix': kwargs.get('prix', 0),
-            },
-            objet_id=departement.id,
-            objet_type='Departement',
-        )
-
-        return Response(
-            _serialise_departement_detail(departement),
-            status=status.HTTP_201_CREATED
-        )
-
-        
 # ───────────────────────────────────────────────────────────────────────────
 # ENSEIGNANT ADMIN — Nommer / changer le cadre d'un département
 # PATCH /api/departements/<departement_id>/changer-cadre/
@@ -5206,7 +5072,6 @@ class DemandesAccesDepartementView(APIView):
         return Response(data, status=200)
 
 
-# 4. Modifier la vue de création de département pour gérer les prix = 0
 class CreerDepartementView(APIView):
     """
     POST /api/departements/creer/
@@ -5227,21 +5092,14 @@ class CreerDepartementView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Récupérer les données
-        data = request.data.copy()
-        if isinstance(data, dict):
-            # Si c'est un dict, le traiter directement
-            pass
-        
-        # Gérer les champs multipart
-        nom = data.get('nom', '').strip()
+        nom = request.data.get('nom', '').strip()
         if not nom:
             return Response(
                 {"detail": "Le nom du département est obligatoire."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        parcours_id = data.get('parcours_id')
+        parcours_id = request.data.get('parcours_id')
         if parcours_id:
             parcours = get_object_or_404(Parcours, pk=parcours_id, admin=profile)
         else:
@@ -5253,23 +5111,23 @@ class CreerDepartementView(APIView):
             parcours = parcours_qs.first()
 
         def _b(key, default=False):
-            v = data.get(key, default)
+            v = request.data.get(key, default)
             if isinstance(v, str):
                 return v.lower() in ('true', '1', 'yes')
             return bool(v)
 
         def _i(key, default=0):
             try:
-                return int(data.get(key, default) or default)
+                return int(request.data.get(key, default) or default)
             except (ValueError, TypeError):
                 return default
 
         def _s(key, default=''):
-            v = data.get(key, default)
+            v = request.data.get(key, default)
             return v if v else default
 
         # Récupérer les niveaux accessibles
-        niveaux_accessibles = data.get('niveaux_accessibles', [])
+        niveaux_accessibles = request.data.get('niveaux_accessibles', [])
         if isinstance(niveaux_accessibles, str):
             try:
                 niveaux_accessibles = json.loads(niveaux_accessibles)
@@ -5283,6 +5141,25 @@ class CreerDepartementView(APIView):
         prix_presentiel = _i('prix_presentiel')
         type_parc = parcours.type_parcours
         
+        # ✅ CORRECTION : S'assurer que le type de département est cohérent avec le parcours
+        if type_parc == 'prepa':
+            # Forcer les flags pour les concours
+            est_prepa_concours = True
+            est_formation_metier = False
+            est_formation_classique = False
+        elif type_parc == 'formation':
+            est_prepa_concours = False
+            est_formation_metier = _b('est_formation_metier')
+            est_formation_classique = _b('est_formation_classique')
+            if not est_formation_metier and not est_formation_classique:
+                return Response({
+                    "detail": "Veuillez sélectionner au moins un type de formation (Métier ou Classique)."
+                }, status=400)
+        else:
+            est_prepa_concours = False
+            est_formation_metier = False
+            est_formation_classique = False
+        
         kwargs = {
             'nom': nom,
             'parcours': parcours,
@@ -5294,19 +5171,21 @@ class CreerDepartementView(APIView):
             'mode': _s('mode', 'hybride'),
             'acces_restreint': _b('acces_restreint'),
             'niveaux_accessibles': ','.join(niveaux_accessibles) if niveaux_accessibles else '',
+            'est_prepa_concours': est_prepa_concours,
+            'est_formation_metier': est_formation_metier,
+            'est_formation_classique': est_formation_classique,
         }
 
         if request.FILES.get('image'):
             kwargs['image'] = request.FILES['image']
 
         # === PARCOURS PRÉPA CONCOURS ===
-        if type_parc == 'prepa' or _b('est_prepa_concours'):
+        if type_parc == 'prepa':
             kwargs.update({
-                'est_prepa_concours': True,
                 'nom_concours': _s('nom_concours'),
                 'organisme_concours': _s('organisme_concours'),
-                'date_limite_inscription': data.get('date_limite_inscription') or None,
-                'date_examen': data.get('date_examen') or None,
+                'date_limite_inscription': request.data.get('date_limite_inscription') or None,
+                'date_examen': request.data.get('date_examen') or None,
                 'arrete_ministeriel': _s('arrete_ministeriel'),
                 'places_disponibles': _i('places_disponibles') or None,
                 'debouches': _s('debouches'),
@@ -5314,17 +5193,7 @@ class CreerDepartementView(APIView):
 
         # === PARCOURS FORMATION ===
         elif type_parc == 'formation':
-            est_metier = _b('est_formation_metier')
-            est_classique = _b('est_formation_classique')
-            
-            if not est_metier and not est_classique:
-                return Response({
-                    "detail": "Veuillez sélectionner au moins un type de formation (Métier ou Classique)."
-                }, status=400)
-            
             kwargs.update({
-                'est_formation_metier': est_metier,
-                'est_formation_classique': est_classique,
                 'duree_formation': _s('duree_formation'),
                 'mode': _s('mode', 'hybride'),
                 'certificat_delivre': _s('certificat_delivre'),
@@ -5335,18 +5204,9 @@ class CreerDepartementView(APIView):
                 'est_certifiante': _b('est_certifiante'),
             })
 
-        # ⚠️ Si prix = 0, on avertit l'admin mais on valide automatiquement
-        if prix == 0:
-            kwargs['est_valide'] = True  # Pas besoin de validation admin
-            kwargs['est_actif'] = True
-        else:
-            kwargs['est_valide'] = True
-            kwargs['est_actif'] = True
-
         # === CRÉATION DU DÉPARTEMENT ===
         departement = Departement.objects.create(**kwargs)
 
-        # Si accès restreint, l'admin a déjà été notifié dans la réponse
         enregistrer_activite(
             user=request.user,
             action='department_created',
@@ -5354,28 +5214,17 @@ class CreerDepartementView(APIView):
             data={
                 'departement': departement.nom,
                 'parcours': parcours.nom,
+                'type': type_parc,
                 'prix': kwargs.get('prix', 0),
-                'prix_presentiel': kwargs.get('prix_presentiel', 0),
-                'acces_restreint': kwargs.get('acces_restreint', False),
             },
             objet_id=departement.id,
             objet_type='Departement',
         )
 
-        # Message d'avertissement si prix = 0
-        message = "Département créé avec succès."
-        if prix == 0:
-            message = "Département gratuit créé avec succès. Les apprenants y auront accès sans paiement."
-
         return Response(
-            {
-                **DepartementSerializer(departement, context={'request': request}).data,
-                'message': message
-            },
+            DepartementSerializer(departement, context={'request': request}).data,
             status=status.HTTP_201_CREATED
         )
-
-
 # 5. Vue pour la mise à jour d'un département (admin)
 class AdminUpdateDepartementView(APIView):
     """
@@ -5701,16 +5550,11 @@ class HistoriqueStatsView(APIView):
 # APPRENANT — PRÉPA CONCOURS/FORMATION
 # GET /api/apprenant/prepa-concours/
 
-# ═══════════════════════════════════════════════════════════════════════════
-# APPRENANT - PRÉPA CONCOURS/FORMATION (avec filtre par niveau)
-# ═══════════════════════════════════════════════════════════════════════════
-
-class ApprenantConcoursFormationsView(APIView):
+#class ApprenantConcoursFormationsView(APIView):
     """
-    GET /api/apprenant/prepa-concours/   (type=prepa)
-    GET /api/apprenant/formations/       (type=formation)
-    
-    Retourne les concours et formations accessibles selon le niveau de l'apprenant.
+    GET /api/apprenant/prepa-concours/
+    Retourne les concours (prépa) accessibles selon le niveau de l'apprenant.
+    EXCLUSIVEMENT les concours (type_parcours='prepa')
     """
     permission_classes = [IsAuthenticated]
 
@@ -5719,20 +5563,13 @@ class ApprenantConcoursFormationsView(APIView):
         if not profile or profile.user_type != 'apprenant':
             return Response({"detail": "Accès réservé aux apprenants"}, status=403)
         
-        type_parcours = request.query_params.get('type', 'prepa')
         niveau_apprenant = (profile.niveau or '').strip().lower()
         
-        # Récupérer les départements selon le type
-        if type_parcours == 'prepa':
-            depts = Departement.objects.filter(
-                parcours__type_parcours='prepa',
-                est_actif=True,
-            ).select_related('parcours', 'cadre__user')
-        else:
-            depts = Departement.objects.filter(
-                parcours__type_parcours='formation',
-                est_actif=True,
-            ).select_related('parcours', 'cadre__user')
+        # ✅ CORRECTION : Filtrer EXCLUSIVEMENT les parcours de type 'prepa'
+        depts = Departement.objects.filter(
+            parcours__type_parcours='prepa',  # ← CORRECTION ICI
+            est_actif=True,
+        ).select_related('parcours', 'cadre__user')
 
         resultats = []
         for dept in depts:
@@ -5764,64 +5601,8 @@ class ApprenantConcoursFormationsView(APIView):
             resultats.append(self._serialiser_departement(dept, cours_data, request))
         
         return Response(resultats)
-
-    def _serialiser_departement(self, dept, cours_data, request):
-        """Sérialise un département avec ses cours."""
-        image_url = None
-        if dept.image:
-            try:
-                image_url = request.build_absolute_uri(dept.image.url)
-            except Exception:
-                pass
-
-        statut = 'ACTIF' if dept.est_actif else 'INACTIF'
-
-        return {
-            'id': dept.id,
-            'nom': dept.nom,
-            'description': dept.description,
-            'image_url': image_url,
-            'couleur': dept.couleur or '#135F74',
-            'prix': dept.prix,
-            'prix_presentiel': dept.prix_presentiel,  # ✅ Ajout du prix présentiel
-            'type': dept.type_departement,
-            'statut': statut,
-            'progression': 0.0,
-            'progression_moyenne': 0.0,
-            'cours': cours_data,
-            'nb_cours': len(cours_data),
-            'niveaux_cibles': dept.niveaux_accessibles or dept.niveaux_cibles or '',
-            'niveaux_accessibles': dept.get_niveaux_accessibles_list(),
-            'date_limite_inscription': dept.date_limite_inscription.isoformat() if dept.date_limite_inscription else None,
-            'date_examen': dept.date_examen.isoformat() if dept.date_examen else None,
-            'duree_formation': dept.duree_formation or '',
-            'mode': dept.mode or '',
-            'mode_label': {
-                'presentiel': 'Présentiel',
-                'distance': 'À distance',
-                'hybride': 'Hybride',
-            }.get(dept.mode, ''),
-            'certificat_delivre': dept.certificat_delivre or '',
-            'prerequis': dept.prerequis or '',
-            'objectifs': dept.objectifs or '',
-            'domaine': dept.domaine or '',
-            'ville': dept.ville or '',
-            'est_certifiante': dept.est_certifiante,
-            'est_formation_metier': dept.est_formation_metier,
-            'est_formation_classique': dept.est_formation_classique,
-            'est_prepa_concours': dept.est_prepa_concours,
-            'nom_concours': dept.nom_concours or '',
-            'organisme_concours': dept.organisme_concours or '',
-            'arrete_ministeriel': dept.arrete_ministeriel or '',
-            'places_disponibles': dept.places_disponibles,
-            'debouches': dept.debouches or '',
-            'acces_restreint': dept.acces_restreint,
-            'prix_presentiel': dept.prix_presentiel,
-            'cadre': {
-                'nom': dept.cadre.user.username if dept.cadre else '',
-            } if dept.cadre else None,
-        }
     
+
 # ═══════════════════════════════════════════════════════════════════════════
 # OLYMPIADES POUR APPRENANT (avec filtre par niveau)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5863,6 +5644,7 @@ class ApprenantFormationsAPIView(APIView):
     """
     GET /api/apprenant/formations/
     Retourne les departements (formations) avec champs enrichis.
+    EXCLUSIVEMENT les formations (type_parcours='formation')
     """
     permission_classes = [IsAuthenticated]
 
@@ -5874,8 +5656,11 @@ class ApprenantFormationsAPIView(APIView):
         type_filter = request.query_params.get('type', 'all')
         nom_parcours = request.query_params.get('parcours', profile.cursus)
 
-        # ✅ Supprimer est_valide
-        qs = Departement.objects.filter(est_actif=True).select_related('parcours', 'cadre__user')
+        # ✅ CORRECTION : Filtrer EXCLUSIVEMENT les parcours de type 'formation'
+        qs = Departement.objects.filter(
+            est_actif=True,
+            parcours__type_parcours='formation'  # ← CORRECTION ICI
+        ).select_related('parcours', 'cadre__user')
 
         if nom_parcours:
             qs = qs.filter(parcours__nom=nom_parcours)
@@ -5897,7 +5682,7 @@ class ApprenantFormationsAPIView(APIView):
 
         result = [_serialise_departement_detail(d, prog_map=prog_map, include_cours=True, user=request.user) for d in qs]
         return Response(result, status=200)
-    
+
 
 class ApprenantDepartementDetailView(APIView):
     """GET /api/apprenant/departement/<pk>/ — detail complet"""

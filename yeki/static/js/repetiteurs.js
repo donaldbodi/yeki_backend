@@ -1,6 +1,6 @@
 // static/js/repetiteurs.js
 
-// Navigation scroll effect (identique à landing-page)
+// Navigation scroll effect
 window.addEventListener('scroll', function() {
   const navbar = document.getElementById('navbar');
   if (window.scrollY > 50) {
@@ -29,6 +29,8 @@ const API_BASE_URL = 'https://yeki.pythonanywhere.com/api';
 
 // Éléments DOM
 const searchInput = document.getElementById('searchInput');
+const niveauInput = document.getElementById('niveauInput');
+const villeInput = document.getElementById('villeInput');
 const searchBtn = document.getElementById('searchBtn');
 const resultsGrid = document.getElementById('resultsGrid');
 const resultsHeader = document.getElementById('resultsHeader');
@@ -36,11 +38,10 @@ const resultsCount = document.getElementById('resultsCount');
 const loadingState = document.getElementById('loadingState');
 const emptyState = document.getElementById('emptyState');
 
-// Récupérer le token depuis localStorage
+// Récupérer le token depuis localStorage ou cookies
 function getToken() {
   const token = localStorage.getItem('token');
   if (token) return token;
-  // Essayer de récupérer depuis les cookies
   const cookies = document.cookie.split(';');
   for (let cookie of cookies) {
     const [name, value] = cookie.trim().split('=');
@@ -51,15 +52,16 @@ function getToken() {
 
 // Récupérer les paramètres de recherche
 function getSearchParams() {
-  // Récupérer depuis les champs de formulaire
-  const ville = document.querySelector('#villeInput')?.value || '';
-  const niveau = document.querySelector('#niveauInput')?.value || '';
-  return { ville, niveau };
+  return {
+    ville: villeInput?.value || '',
+    niveau: niveauInput?.value || ''
+  };
 }
 
 // Rechercher les répétiteurs
 async function rechercherRepetiteurs(matiere) {
   if (!matiere || matiere.trim() === '') {
+    showMessage('Veuillez entrer une matière', 'warning');
     return;
   }
 
@@ -81,14 +83,15 @@ async function rechercherRepetiteurs(matiere) {
     // Construire l'URL avec les paramètres
     let url = `${API_BASE_URL}/repetiteurs/search/?matiere=${encodeURIComponent(matiere)}`;
     
-    // Ajouter les paramètres supplémentaires
     const params = getSearchParams();
-    if (params.ville) {
-      url += `&ville=${encodeURIComponent(params.ville)}`;
+    if (params.ville && params.ville.trim()) {
+      url += `&ville=${encodeURIComponent(params.ville.trim())}`;
     }
-    if (params.niveau) {
-      url += `&niveau=${encodeURIComponent(params.niveau)}`;
+    if (params.niveau && params.niveau.trim()) {
+      url += `&niveau=${encodeURIComponent(params.niveau.trim())}`;
     }
+
+    console.log('URL de recherche:', url);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -99,11 +102,11 @@ async function rechercherRepetiteurs(matiere) {
       const data = await response.json();
       afficherResultats(data, matiere);
     } else {
-      // En cas d'erreur, afficher un message
+      const errorData = await response.json().catch(() => ({}));
       emptyState.style.display = 'block';
       emptyState.innerHTML = `
         <i class="fas fa-exclamation-triangle"></i>
-        <p>Erreur ${response.status}: ${response.statusText}</p>
+        <p>Erreur ${response.status}: ${errorData.message || response.statusText}</p>
         <p style="font-size: 0.8rem; margin-top: 8px;">Veuillez vous reconnecter.</p>
         <button onclick="window.location.href='/web-login/'" style="margin-top: 16px; padding: 8px 24px; background: #2884a0; color: white; border: none; border-radius: 8px; cursor: pointer;">
           Se connecter
@@ -136,45 +139,66 @@ function afficherResultats(data, matiere) {
   resultsHeader.style.display = 'flex';
   resultsCount.textContent = `${repetiteurs.length} répétiteur${repetiteurs.length > 1 ? 's' : ''} trouvé${repetiteurs.length > 1 ? 's' : ''} pour "${matiere}"`;
   
-  resultsGrid.innerHTML = repetiteurs.map(rep => `
-    <div class="repetiteur-card">
-      <div class="card-header">
-        <div class="avatar">${getInitials(rep.nom)}</div>
-        <div>
-          <h3>${escapeHtml(rep.nom)}</h3>
-          <p>@${escapeHtml(rep.username)}</p>
-          ${rep.ville ? `<p style="font-size: 0.7rem; color: #64748b;"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(rep.ville)}</p>` : ''}
+  resultsGrid.innerHTML = repetiteurs.map(rep => {
+    // Vérifier si le numéro WhatsApp est valide
+    const hasWhatsApp = rep.whatsapp && rep.whatsapp.trim() !== '';
+    const cleanNumber = hasWhatsApp ? cleanPhoneNumber(rep.whatsapp) : '';
+    
+    return `
+      <div class="repetiteur-card">
+        <div class="card-header">
+          <div class="avatar">${getInitials(rep.nom)}</div>
+          <div>
+            <h3>${escapeHtml(rep.nom)}</h3>
+            <p>@${escapeHtml(rep.username)}</p>
+            ${rep.ville ? `<p style="font-size: 0.7rem; color: #64748b;"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(rep.ville)}</p>` : ''}
+          </div>
         </div>
-      </div>
-      <div class="matiere-badge">
-        <i class="fas fa-graduation-cap"></i> ${escapeHtml(rep.matiere)}
-      </div>
-      ${rep.matieres && rep.matieres.length > 1 ? `
-        <div style="margin-bottom: 10px; font-size: 0.7rem; color: #64748b;">
-          <i class="fas fa-book"></i> ${rep.matieres.join(', ')}
+        <div class="matiere-badge">
+          <i class="fas fa-graduation-cap"></i> ${escapeHtml(rep.matiere)}
         </div>
-      ` : ''}
-      <div class="prix">
-        <i class="fas fa-tag"></i> ${rep.tarif} FCFA/mois
+        ${rep.matieres && rep.matieres.length > 1 ? `
+          <div style="margin-bottom: 10px; font-size: 0.7rem; color: #64748b;">
+            <i class="fas fa-book"></i> ${rep.matieres.join(', ')}
+          </div>
+        ` : ''}
+        <div class="prix">
+          <i class="fas fa-tag"></i> ${rep.tarif || 5000} FCFA/mois
+        </div>
+        ${hasWhatsApp ? `
+          <button class="btn-whatsapp" onclick="contacterWhatsApp('${cleanNumber}', '${escapeHtml(rep.nom)}', '${escapeHtml(rep.matiere)}'); return false;">
+            <i class="fab fa-whatsapp"></i> Contacter sur WhatsApp
+          </button>
+        ` : `
+          <div class="btn-whatsapp disabled">
+            <i class="fas fa-phone-slash"></i> Numéro non disponible
+          </div>
+        `}
       </div>
-      <a href="#" class="btn-whatsapp" onclick="contacterWhatsApp('${rep.whatsapp}', '${escapeHtml(rep.nom)}', '${escapeHtml(rep.matiere)}'); return false;">
-        <i class="fab fa-whatsapp"></i> Contacter sur WhatsApp
-      </a>
-    </div>
-  `).join('');
+    `;
+  }).join('');
+}
+
+// Nettoyer le numéro de téléphone
+function cleanPhoneNumber(numero) {
+  if (!numero) return '';
+  let clean = numero.replace(/[^0-9+]/g, '');
+  // Ajouter l'indicatif Cameroun si nécessaire
+  if (!clean.startsWith('+237') && clean.startsWith('6') && clean.length === 9) {
+    clean = '+237' + clean;
+  }
+  return clean;
 }
 
 // Contacter via WhatsApp
 function contacterWhatsApp(numero, nom, matiere) {
-  // Nettoyer le numéro
-  let cleanNumber = numero.replace(/[^0-9+]/g, '');
-  if (!cleanNumber.startsWith('+237') && cleanNumber.startsWith('6')) {
-    cleanNumber = '+237' + cleanNumber;
+  if (!numero || numero.trim() === '') {
+    showMessage('Numéro WhatsApp non disponible', 'error');
+    return;
   }
-  
-  // Récupérer le niveau et la ville depuis les champs
-  const niveau = document.querySelector('#niveauInput')?.value || 'votre niveau';
-  const ville = document.querySelector('#villeInput')?.value || 'votre ville';
+
+  const niveau = niveauInput?.value?.trim() || 'votre niveau';
+  const ville = villeInput?.value?.trim() || 'votre ville';
   
   const message = encodeURIComponent(
     `Bonjour ${nom},\n\n` +
@@ -186,7 +210,8 @@ function contacterWhatsApp(numero, nom, matiere) {
     `Cordialement.`
   );
   
-  window.open(`https://wa.me/${cleanNumber}?text=${message}`, '_blank');
+  const url = `https://wa.me/${numero}?text=${message}`;
+  window.open(url, '_blank');
 }
 
 // Helper: Initiales
@@ -207,37 +232,101 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Ajouter des champs de formulaire pour niveau et ville
-function addExtraFields() {
-  const searchSection = document.querySelector('.search-section');
-  const searchBox = document.querySelector('.search-box');
+// Afficher un message
+function showMessage(message, type = 'info') {
+  const existing = document.querySelector('.toast-message');
+  if (existing) existing.remove();
   
-  if (searchBox && !document.querySelector('#extraFields')) {
-    const extraDiv = document.createElement('div');
-    extraDiv.id = 'extraFields';
-    extraDiv.style.cssText = 'display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;';
-    extraDiv.innerHTML = `
-      <input type="text" id="niveauInput" class="search-input" placeholder="Niveau (ex: Terminale)" style="flex: 1; min-width: 120px; padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 0.9rem;">
-      <input type="text" id="villeInput" class="search-input" placeholder="Ville (ex: Yaoundé)" style="flex: 1; min-width: 120px; padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 0.9rem;">
-    `;
-    searchBox.parentNode.insertBefore(extraDiv, searchBox.nextSibling);
+  const toast = document.createElement('div');
+  toast.className = 'toast-message';
+  toast.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    border-radius: 8px;
+    color: white;
+    font-weight: 500;
+    z-index: 1000;
+    animation: slideDown 0.3s ease;
+    max-width: 90%;
+    text-align: center;
+    background: ${type === 'error' ? '#dc2626' : type === 'warning' ? '#f59e0b' : '#2884a0'};
+  `;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// Ajouter le style pour l'animation
+const style = document.createElement('style');
+style.textContent = `
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+`;
+document.head.appendChild(style);
+
+// Charger les préférences utilisateur
+async function chargerPreferences() {
+  const token = getToken();
+  if (!token) return;
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/profil/me/`, {
+      headers: { 'Authorization': `Token ${token}` }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.niveau) niveauInput.value = data.niveau;
+      if (data.ville) villeInput.value = data.ville;
+    }
+  } catch (error) {
+    console.error('Erreur lors du chargement des préférences:', error);
   }
 }
 
 // Événements
 document.addEventListener('DOMContentLoaded', function() {
-  // Ajouter les champs supplémentaires
-  addExtraFields();
+  // Charger les préférences utilisateur
+  chargerPreferences();
   
   // Événements de recherche
   searchBtn.addEventListener('click', () => {
     const matiere = searchInput.value.trim();
     if (matiere) {
       rechercherRepetiteurs(matiere);
+    } else {
+      showMessage('Veuillez entrer une matière', 'warning');
     }
   });
 
   searchInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      const matiere = searchInput.value.trim();
+      if (matiere) {
+        rechercherRepetiteurs(matiere);
+      }
+    }
+  });
+
+  niveauInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      const matiere = searchInput.value.trim();
+      if (matiere) {
+        rechercherRepetiteurs(matiere);
+      }
+    }
+  });
+
+  villeInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
       const matiere = searchInput.value.trim();
       if (matiere) {
