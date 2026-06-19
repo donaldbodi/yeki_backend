@@ -7141,39 +7141,55 @@ class EnseignantAdminDashboardEnrichiView(APIView):
 # ---------------------------
 # Dashboard selon rôle
 # ---------------------------
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
-    user = Profile.objects.get(user=request.user)
-    role = getattr(user, "user_type", None)
+    try:
+        user = request.user
+        profile = Profile.objects.get(user=user)
+    except Profile.DoesNotExist:
+        return Response({'error': 'Profil introuvable'}, status=status.HTTP_404_NOT_FOUND)
+    
+    role = getattr(profile, "user_type", None)
 
-    data = {"role": role, "nom": getattr(user.user, "name", getattr(user.user, "username", ""))}
+    data = {
+        "role": role, 
+        "nom": f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username
+    }
 
-    if role == "admin":
-        parcours = Parcours.objects.select_related("admin").all()
-        data["parcours"] = ParcoursSerializer(parcours, many=True).data
+    try:
+        if role == "admin":
+            parcours = Parcours.objects.select_related("admin").all()
+            data["parcours"] = ParcoursSerializer(parcours, many=True).data
 
-    elif role == "enseignant_admin":
-        parcours = Parcours.objects.filter(admin=user)
-        data["parcours"] = ParcoursSerializer(parcours, many=True).data
+        elif role == "enseignant_admin":
+            parcours = Parcours.objects.filter(admin=profile)
+            data["parcours"] = ParcoursSerializer(parcours, many=True).data
 
-    elif role == "enseignant_cadre":
-        departements = Departement.objects.filter(cadre=user)
-        data["departements"] = DepartementSerializer(departements, many=True).data
+        elif role == "enseignant_cadre":
+            departements = Departement.objects.filter(cadre=profile)
+            data["departements"] = DepartementSerializer(departements, many=True).data
 
-    elif role == "enseignant_principal":
-        cours = Cours.objects.filter(enseignant_principal=user)
-        data["cours"] = CoursSerializer(cours, many=True).data
+        elif role == "enseignant_principal":
+            cours = Cours.objects.filter(enseignant_principal=profile)
+            data["cours"] = CoursSerializer(cours, many=True).data
 
-    elif role == "enseignant":
-        cours = user.cours_secondaires.all()
-        data["cours"] = CoursSerializer(cours, many=True).data
+        elif role == "enseignant":
+            cours = profile.cours_secondaires.all()
+            data["cours"] = CoursSerializer(cours, many=True).data
 
-    else:
-        return Response({'error': 'Rôle non géré ici.'}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            return Response({'error': 'Rôle non géré ici.'}, status=status.HTTP_403_FORBIDDEN)
 
-    return Response(data, status=status.HTTP_200_OK)
-
+        return Response(data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response(
+            {'error': f'Erreur lors du chargement des données: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
 
 # ---------------------------
 # Landing page

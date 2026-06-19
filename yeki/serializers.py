@@ -383,7 +383,6 @@ class DepartementSerializer(serializers.ModelSerializer):
             "duree_formation", "certificat_delivre", "prerequis",
             "objectifs", "domaine", "ville", "est_certifiante",
             "acces_restreint", "apprenants_autorises",
-            "est_valide", "est_refuse", "motif_refus", "valide_le",
             "demandes_acces"
         ]
     
