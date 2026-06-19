@@ -5745,6 +5745,7 @@ class ApprenantConcoursFormationsView(APIView):
                 'places_disponibles': dept.places_disponibles,
                 'debouches': dept.debouches or '',
                 'date_examen': dept.date_examen,
+                'mode': dept.mode or '',
                 'date_limite_inscription': dept.date_limite_inscription,
             })
         # Champs spécifiques aux formations
@@ -5766,7 +5767,6 @@ class ApprenantConcoursFormationsView(APIView):
                 'domaine': dept.domaine or '',
                 'ville': dept.ville or '',
                 'est_certifiante': dept.est_certifiante,
-                'mode_formation': dept.mode_formation or 'hybride',
             })
         else:
             # Parcours autre (cursus) - champs par défaut
