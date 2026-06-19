@@ -5576,7 +5576,7 @@ class HistoriqueStatsView(APIView):
 # APPRENANT — PRÉPA CONCOURS/FORMATION
 # GET /api/apprenant/prepa-concours/
 
-#class ApprenantConcoursFormationsView(APIView):
+class ApprenantConcoursFormationsView(APIView):
     """
     GET /api/apprenant/prepa-concours/
     Retourne les concours (prépa) accessibles selon le niveau de l'apprenant.
