@@ -4339,6 +4339,10 @@ def liste_enseignants(request):
 # ADMIN GÉNÉRAL — Dashboard
 # GET /api/admin-general/dashboard/
 # ───────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Dashboard
+# GET /api/admin-general/dashboard/
+# ───────────────────────────────────────────────────────────────────────────
 class AdminGeneralDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -4348,6 +4352,7 @@ class AdminGeneralDashboardView(APIView):
         except Profile.DoesNotExist:
             return Response({"detail": "Profil introuvable."}, status=404)
 
+        # ✅ Vérification stricte : seul l'admin général peut accéder
         if profile.user_type != 'admin':
             return Response(
                 {"detail": "Accès réservé à l'administrateur général."},
@@ -4421,14 +4426,35 @@ class AdminGeneralDashboardView(APIView):
             or profile.user.username
         )
 
+        # Top enseignants (optionnel)
+        top_enseignants = []
+        try:
+            from django.db.models import Avg
+            enseignants = Profile.objects.filter(
+                user_type__in=['enseignant_principal', 'enseignant']
+            ).annotate(
+                score_moyen=Avg('cours_principaux__exercices__evaluationexercice__score')
+            ).order_by('-score_moyen')[:10]
+            
+            for e in enseignants:
+                if e.score_moyen:
+                    top_enseignants.append({
+                        "id": e.id,
+                        "nom": _nom_profil(e),
+                        "role": e.user_type,
+                        "score": round(e.score_moyen / 20 * 20, 1) if e.score_moyen else 0,
+                    })
+        except Exception:
+            pass
+
         return Response({
             "nom": nom_complet,
             "stats": stats,
             "parcours": parcours_data,
             "departements": depts_data,
-            "top_enseignants": [],
+            "top_enseignants": top_enseignants,
         }, status=status.HTTP_200_OK)
-
+    
 
 # ───────────────────────────────────────────────────────────────────────────
 # ADMIN GÉNÉRAL — Créer un parcours
