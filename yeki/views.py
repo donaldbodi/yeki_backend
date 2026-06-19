@@ -3655,7 +3655,7 @@ class EnseignantCadreDashboardView(APIView):
                 "est_formation_metier": dept.est_formation_metier,
                 "est_formation_classique": dept.est_formation_classique,
                 "duree_formation": dept.duree_formation,
-                "mode_formation": dept.mode_formation,
+                "mode": dept.mode,
                 "certificat_delivre": dept.certificat_delivre,
                 "ville": dept.ville,
                 "domaine": dept.domaine,
