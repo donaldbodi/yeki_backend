@@ -1,6 +1,6 @@
 // static/js/repetiteurs.js
 
-// Navigation scroll effect
+// Navigation scroll effect (identique à landing-page)
 window.addEventListener('scroll', function() {
   const navbar = document.getElementById('navbar');
   if (window.scrollY > 50) {
@@ -36,12 +36,10 @@ const resultsCount = document.getElementById('resultsCount');
 const loadingState = document.getElementById('loadingState');
 const emptyState = document.getElementById('emptyState');
 
-// Récupérer le token depuis le localStorage ou les cookies
+// Récupérer le token depuis localStorage
 function getToken() {
-  // Essayer de récupérer depuis localStorage
   const token = localStorage.getItem('token');
   if (token) return token;
-  
   // Essayer de récupérer depuis les cookies
   const cookies = document.cookie.split(';');
   for (let cookie of cookies) {
@@ -49,6 +47,14 @@ function getToken() {
     if (name === 'token') return value;
   }
   return null;
+}
+
+// Récupérer les paramètres de recherche
+function getSearchParams() {
+  // Récupérer depuis les champs de formulaire
+  const ville = document.querySelector('#villeInput')?.value || '';
+  const niveau = document.querySelector('#niveauInput')?.value || '';
+  return { ville, niveau };
 }
 
 // Rechercher les répétiteurs
@@ -72,8 +78,19 @@ async function rechercherRepetiteurs(matiere) {
   }
 
   try {
-    // Appel API
-    const response = await fetch(`${API_BASE_URL}/repetiteurs/search/?matiere=${encodeURIComponent(matiere)}`, {
+    // Construire l'URL avec les paramètres
+    let url = `${API_BASE_URL}/repetiteurs/search/?matiere=${encodeURIComponent(matiere)}`;
+    
+    // Ajouter les paramètres supplémentaires
+    const params = getSearchParams();
+    if (params.ville) {
+      url += `&ville=${encodeURIComponent(params.ville)}`;
+    }
+    if (params.niveau) {
+      url += `&niveau=${encodeURIComponent(params.niveau)}`;
+    }
+
+    const response = await fetch(url, {
       method: 'GET',
       headers: headers,
     });
@@ -82,12 +99,25 @@ async function rechercherRepetiteurs(matiere) {
       const data = await response.json();
       afficherResultats(data, matiere);
     } else {
-      // En cas d'erreur API, afficher des données de démonstration
-      afficherResultatsDemo(matiere);
+      // En cas d'erreur, afficher un message
+      emptyState.style.display = 'block';
+      emptyState.innerHTML = `
+        <i class="fas fa-exclamation-triangle"></i>
+        <p>Erreur ${response.status}: ${response.statusText}</p>
+        <p style="font-size: 0.8rem; margin-top: 8px;">Veuillez vous reconnecter.</p>
+        <button onclick="window.location.href='/web-login/'" style="margin-top: 16px; padding: 8px 24px; background: #2884a0; color: white; border: none; border-radius: 8px; cursor: pointer;">
+          Se connecter
+        </button>
+      `;
     }
   } catch (error) {
     console.error('Erreur:', error);
-    afficherResultatsDemo(matiere);
+    emptyState.style.display = 'block';
+    emptyState.innerHTML = `
+      <i class="fas fa-wifi"></i>
+      <p>Erreur de connexion au serveur</p>
+      <p style="font-size: 0.8rem; margin-top: 8px;">Vérifiez votre connexion internet.</p>
+    `;
   } finally {
     loadingState.style.display = 'none';
   }
@@ -134,64 +164,6 @@ function afficherResultats(data, matiere) {
   `).join('');
 }
 
-// Données de démonstration (si l'API n'est pas encore disponible)
-function afficherResultatsDemo(matiere) {
-  const repetiteursDemo = [
-    {
-      nom: "M. Kamga François",
-      username: "kamga_francois",
-      matiere: matiere,
-      matieres: [matiere],
-      tarif: 5000,
-      whatsapp: "237691234567",
-      ville: "Yaoundé"
-    },
-    {
-      nom: "Mme Ngo Mbarga",
-      username: "ngo_mbarga",
-      matiere: matiere,
-      matieres: [matiere],
-      tarif: 5000,
-      whatsapp: "237698765432",
-      ville: "Douala"
-    },
-    {
-      nom: "M. Tchinda Pierre",
-      username: "tchinda_pierre",
-      matiere: matiere,
-      matieres: [matiere],
-      tarif: 5000,
-      whatsapp: "237697654321",
-      ville: "Yaoundé"
-    }
-  ];
-
-  resultsHeader.style.display = 'flex';
-  resultsCount.textContent = `${repetiteursDemo.length} répétiteur${repetiteursDemo.length > 1 ? 's' : ''} trouvé${repetiteursDemo.length > 1 ? 's' : ''} pour "${matiere}" (version démo)`;
-  
-  resultsGrid.innerHTML = repetiteursDemo.map(rep => `
-    <div class="repetiteur-card">
-      <div class="card-header">
-        <div class="avatar">${getInitials(rep.nom)}</div>
-        <div>
-          <h3>${escapeHtml(rep.nom)}</h3>
-          <p>@${escapeHtml(rep.username)}</p>
-          ${rep.ville ? `<p style="font-size: 0.7rem; color: #64748b;"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(rep.ville)}</p>` : ''}
-        </div>
-      </div>
-      <div class="matiere-badge">
-        <i class="fas fa-graduation-cap"></i> ${escapeHtml(rep.matiere)}
-      </div>
-      <div class="prix">
-        <i class="fas fa-tag"></i> ${rep.tarif} FCFA/mois
-      </div>
-      <a href="#" class="btn-whatsapp" onclick="contacterWhatsApp('${rep.whatsapp}', '${escapeHtml(rep.nom)}', '${escapeHtml(rep.matiere)}'); return false;">
-        <i class="fab fa-whatsapp"></i> Contacter sur WhatsApp
-      </a>
-    </div>
-  `).join('');
-}
-
 // Contacter via WhatsApp
 function contacterWhatsApp(numero, nom, matiere) {
   // Nettoyer le numéro
@@ -200,8 +172,18 @@ function contacterWhatsApp(numero, nom, matiere) {
     cleanNumber = '+237' + cleanNumber;
   }
   
+  // Récupérer le niveau et la ville depuis les champs
+  const niveau = document.querySelector('#niveauInput')?.value || 'votre niveau';
+  const ville = document.querySelector('#villeInput')?.value || 'votre ville';
+  
   const message = encodeURIComponent(
-    `Bonjour ${nom},\n\nJe souhaite prendre des cours particuliers en ${matiere} avec vous via Yéki.\nTarif : 5000 FCFA/mois.\n\nPouvez-vous me donner plus d'informations ?\n\nCordialement.`
+    `Bonjour ${nom},\n\n` +
+    `Je souhaite prendre des cours particuliers en ${matiere} avec vous via Yéki.\n` +
+    `Niveau : ${niveau}\n` +
+    `Ville : ${ville}\n` +
+    `Tarif : 5000 FCFA/mois.\n\n` +
+    `Pouvez-vous me donner plus d'informations sur vos disponibilités ?\n\n` +
+    `Cordialement.`
   );
   
   window.open(`https://wa.me/${cleanNumber}?text=${message}`, '_blank');
@@ -225,31 +207,54 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Événements
-searchBtn.addEventListener('click', () => {
-  const matiere = searchInput.value.trim();
-  if (matiere) {
-    rechercherRepetiteurs(matiere);
+// Ajouter des champs de formulaire pour niveau et ville
+function addExtraFields() {
+  const searchSection = document.querySelector('.search-section');
+  const searchBox = document.querySelector('.search-box');
+  
+  if (searchBox && !document.querySelector('#extraFields')) {
+    const extraDiv = document.createElement('div');
+    extraDiv.id = 'extraFields';
+    extraDiv.style.cssText = 'display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;';
+    extraDiv.innerHTML = `
+      <input type="text" id="niveauInput" class="search-input" placeholder="Niveau (ex: Terminale)" style="flex: 1; min-width: 120px; padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 0.9rem;">
+      <input type="text" id="villeInput" class="search-input" placeholder="Ville (ex: Yaoundé)" style="flex: 1; min-width: 120px; padding: 10px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 0.9rem;">
+    `;
+    searchBox.parentNode.insertBefore(extraDiv, searchBox.nextSibling);
   }
-});
+}
 
-searchInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') {
+// Événements
+document.addEventListener('DOMContentLoaded', function() {
+  // Ajouter les champs supplémentaires
+  addExtraFields();
+  
+  // Événements de recherche
+  searchBtn.addEventListener('click', () => {
     const matiere = searchInput.value.trim();
     if (matiere) {
       rechercherRepetiteurs(matiere);
     }
-  }
-});
+  });
 
-// Matières populaires
-document.querySelectorAll('.matiere-chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    const matiere = chip.getAttribute('data-matiere');
-    if (matiere) {
-      searchInput.value = matiere;
-      rechercherRepetiteurs(matiere);
+  searchInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      const matiere = searchInput.value.trim();
+      if (matiere) {
+        rechercherRepetiteurs(matiere);
+      }
     }
+  });
+
+  // Matières populaires
+  document.querySelectorAll('.matiere-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const matiere = chip.getAttribute('data-matiere');
+      if (matiere) {
+        searchInput.value = matiere;
+        rechercherRepetiteurs(matiere);
+      }
+    });
   });
 });
 
