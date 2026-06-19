@@ -1,7 +1,6 @@
 <!-- templates/repetiteurs.html -->
 
 {% load static %}
-<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
@@ -23,6 +22,7 @@
     <div class="nav-links">
       <a href="/#features">Fonctionnalités</a>
       <a href="/#about">À propos</a>
+      <a href="{% url 'repetiteurs' %}">Répétiteurs</a>
       <a href="/#download">Télécharger</a>
       <a href="/#faq">FAQ</a>
       <a href="/web-login/" class="btn-web">
@@ -42,6 +42,7 @@
 <div class="mobile-menu" id="mobileMenu">
   <a href="/#features">Fonctionnalités</a>
   <a href="/#about">À propos</a>
+  <a href="{% url 'repetiteurs' %}">Répétiteurs</a>
   <a href="/#download">Télécharger</a>
   <a href="/#faq">FAQ</a>
   <a href="/web-login/">Version Web</a>
