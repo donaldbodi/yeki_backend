@@ -413,17 +413,23 @@ class DepartementSerializer(serializers.ModelSerializer):
                 pass
         return []
     
-# serializers.py - Ajouter DepartementUpdateSerializer
-
 class DepartementUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer pour la mise à jour partielle d'un département.
-    Tous les champs sont optionnels pour PATCH.
-    """
     niveaux_accessibles = serializers.ListField(
         child=serializers.CharField(), 
         required=False,
         allow_empty=True
+    )
+    
+    # ✅ Traitement spécifique pour les dates
+    date_limite_inscription = serializers.DateField(
+        required=False, 
+        allow_null=True,
+        input_formats=['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '']  # Accepte les chaînes vides
+    )
+    date_examen = serializers.DateField(
+        required=False, 
+        allow_null=True,
+        input_formats=['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '']
     )
     
     class Meta:
@@ -452,8 +458,6 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             # Champs spécifiques optionnels
             'nom_concours': {'required': False, 'allow_blank': True},
             'organisme_concours': {'required': False, 'allow_blank': True},
-            'date_limite_inscription': {'required': False, 'allow_null': True},
-            'date_examen': {'required': False, 'allow_null': True},
             'arrete_ministeriel': {'required': False, 'allow_blank': True},
             'places_disponibles': {'required': False, 'allow_null': True},
             'debouches': {'required': False, 'allow_blank': True},
