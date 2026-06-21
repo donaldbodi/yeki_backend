@@ -250,14 +250,6 @@ urlpatterns = [
     path('wallet/payer/',        WalletPayerView.as_view(),     name='wallet-payer'),
     path('wallet/verifier-iap/', WalletVerifierIAPView.as_view(), name='wallet-verifier-iap'),
 
-    # ── ADMIN : Dashboard enrichi ─────────────────────────────────
-    # Extension du dashboard existant avec olympiades + formations
-    path(
-        'enseignant/admin/dashboard/enrichi/',
-        EnseignantAdminDashboardEnrichiView.as_view(),
-        name='admin-dashboard-enrichi',
-    ),
-
     path('latest-version/', latest_version, name='latest-version'),
 
     # Admin - Refus olympiade
@@ -331,6 +323,22 @@ urlpatterns = [
     path('olympiades/<int:olympiade_id>/payer-participation/', 
          PayerParticipationOlympiadeView.as_view(), 
          name='payer-participation-olympiade'),
+
+    # Admin général - Gestion des enseignants
+    path('admin-general/enseignants/attente/', 
+         AdminGeneralEnseignantsAttenteView.as_view(), 
+         name='admin-general-enseignants-attente'),
+    path('admin-general/enseignants/<int:profile_id>/activer/', 
+         AdminGeneralActiverEnseignantView.as_view(), 
+         name='admin-general-activer-enseignant'),
+    path('admin-general/enseignants/<int:profile_id>/changer-type/', 
+         AdminGeneralChangerTypeEnseignantView.as_view(), 
+         name='admin-general-changer-type-enseignant'),
+    
+    # Admin général - Modifier parcours
+    path('parcours/<int:parcours_id>/modifier/', 
+         AdminGeneralModifierParcoursView.as_view(), 
+         name='parcours-modifier-admin'),
 
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

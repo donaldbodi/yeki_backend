@@ -27,7 +27,7 @@ import logging
 
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Sum, Avg
+from django.db.models import Count, Sum, Avg, Q
 
 from .models import *
 from .serializers import *
@@ -58,7 +58,389 @@ def _nom_profil(profile):
     n = f"{profile.user.first_name} {profile.user.last_name}".strip()
     return n or profile.user.username
 
-# views.py - Ajouter/modifier la classe RepetiteursSearchView
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Liste des enseignants en attente d'activation
+# GET /api/admin-general/enseignants/attente/
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralEnseignantsAttenteView(APIView):
+    """
+    Retourne la liste des enseignants (tous types confondus) dont le compte
+    est en attente d'activation (is_active=False).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Récupérer tous les profils enseignants inactifs (is_active=False)
+        enseignants = Profile.objects.filter(
+            user_type__in=['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin'],
+            is_active=False
+        ).select_related('user').order_by('-user__date_joined')
+
+        data = []
+        for e in enseignants:
+            data.append({
+                "id": e.id,
+                "username": e.user.username,
+                "email": e.user.email,
+                "nom": f"{e.user.first_name} {e.user.last_name}".strip() or e.user.username,
+                "user_type": e.user_type,
+                "date_joined": e.user.date_joined.isoformat(),
+                "bio": e.bio or '',
+                "phone": e.phone or '',
+            })
+
+        return Response(data, status=status.HTTP_200_OK)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Activer un compte enseignant
+# POST /api/admin-general/enseignants/<profile_id>/activer/
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralActiverEnseignantView(APIView):
+    """
+    Active un compte enseignant (is_active=True) et envoie un email de confirmation.
+    L'enseignant reçoit un email avec son mot de passe (si disponible) et ses identifiants.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, profile_id):
+        try:
+            profile_admin = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile_admin.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        enseignant = get_object_or_404(Profile, pk=profile_id)
+
+        # Vérifier que c'est bien un enseignant
+        if enseignant.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if enseignant.is_active:
+            return Response(
+                {"detail": "Ce compte est déjà actif."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Activer le compte
+        enseignant.is_active = True
+        enseignant.save(update_fields=['is_active'])
+
+        # Envoyer l'email de confirmation
+        try:
+            _envoyer_email_activation_enseignant(enseignant)
+        except Exception as e:
+            # Log l'erreur mais ne pas bloquer l'activation
+            import logging
+            logging.getLogger(__name__).error(f"Erreur envoi email activation: {e}")
+
+        # Enregistrer dans l'historique
+        enregistrer_activite(
+            user=request.user,
+            action='teacher_activated',
+            description=f"Compte enseignant « {_nom_profil(enseignant)} » activé ({enseignant.user_type})",
+            data={
+                'enseignant_id': enseignant.id,
+                'enseignant_nom': _nom_profil(enseignant),
+                'enseignant_email': enseignant.user.email,
+                'user_type': enseignant.user_type,
+            },
+            objet_id=enseignant.id,
+            objet_type='Profile',
+        )
+
+        return Response({
+            "detail": "Compte enseignant activé avec succès. Un email de confirmation a été envoyé.",
+            "enseignant_id": enseignant.id,
+            "nom": _nom_profil(enseignant),
+            "email": enseignant.user.email,
+            "user_type": enseignant.user_type,
+        }, status=status.HTTP_200_OK)
+
+
+def _envoyer_email_activation_enseignant(profile):
+    """
+    Envoie un email de confirmation à l'enseignant après activation.
+    """
+    user = profile.user
+    nom = f"{user.first_name} {user.last_name}".strip() or user.username
+
+    sujet = "✅ Votre compte Yéki est activé"
+
+    message_texte = f"""
+Bonjour {nom},
+
+Félicitations ! Votre compte enseignant a été activé par l'administrateur Yéki.
+
+Vous pouvez maintenant vous connecter à la plateforme avec vos identifiants.
+
+Identifiant : {user.username}
+Email : {user.email}
+
+Si vous avez oublié votre mot de passe, utilisez la fonction "Mot de passe oublié" sur la page de connexion.
+
+— L'équipe Yéki
+"""
+
+    message_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }}
+    .container {{ max-width: 480px; margin: 40px auto; background: white;
+                  border-radius: 16px; overflow: hidden;
+                  box-shadow: 0 4px 20px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #2884A9, #2A657D);
+               padding: 32px 24px; text-align: center; }}
+    .header h1 {{ color: white; margin: 0; font-size: 22px; }}
+    .header p  {{ color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px; }}
+    .body   {{ padding: 32px 24px; text-align: center; }}
+    .greeting {{ color: #1E293B; font-size: 15px; margin-bottom: 24px; }}
+    .credentials {{ background: #F1F5F9; border-radius: 12px; padding: 20px; margin: 0 auto;
+                    display: inline-block; min-width: 200px; text-align: left; }}
+    .credentials div {{ padding: 4px 0; color: #1E293B; }}
+    .credentials strong {{ color: #2884A9; }}
+    .note {{ color: #94A3B8; font-size: 11px; margin-top: 28px;
+             border-top: 1px solid #E2E8F0; padding-top: 16px; }}
+    .footer {{ background: #F8FAFC; padding: 16px; text-align: center;
+               color: #94A3B8; font-size: 11px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✅ Compte activé</h1>
+      <p>Vous pouvez maintenant accéder à Yéki</p>
+    </div>
+    <div class="body">
+      <p class="greeting">Bonjour <strong>{nom}</strong>,<br>
+      Votre compte enseignant a été activé par l'administrateur Yéki.</p>
+
+      <div class="credentials">
+        <div><strong>Identifiant :</strong> {user.username}</div>
+        <div><strong>Email :</strong> {user.email}</div>
+      </div>
+
+      <p class="note">
+        Si vous avez oublié votre mot de passe, utilisez la fonction "Mot de passe oublié"
+        sur la page de connexion.
+      </p>
+    </div>
+    <div class="footer">© Yeki — Plateforme éducative</div>
+  </div>
+</body>
+</html>
+"""
+
+    send_mail(
+        subject=sujet,
+        message=message_texte,
+        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@yeki.app'),
+        recipient_list=[user.email],
+        html_message=message_html,
+        fail_silently=False,
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Changer le type d'un enseignant
+# PATCH /api/admin-general/enseignants/<profile_id>/changer-type/
+# Body: { "user_type": "enseignant_principal" }
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralChangerTypeEnseignantView(APIView):
+    """
+    Change le type d'un enseignant (enseignant → enseignant_principal, etc.)
+    Valide que le compte est actif (is_active=True).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, profile_id):
+        try:
+            profile_admin = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile_admin.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        enseignant = get_object_or_404(Profile, pk=profile_id)
+
+        # Vérifier que c'est bien un enseignant
+        if enseignant.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not enseignant.is_active:
+            return Response(
+                {"detail": "Le compte enseignant doit d'abord être activé."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        nouveau_type = request.data.get('user_type', '').strip()
+        types_valides = ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+
+        if nouveau_type not in types_valides:
+            return Response(
+                {"detail": f"Type invalide. Valeurs: {types_valides}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ancien_type = enseignant.user_type
+        enseignant.user_type = nouveau_type
+        enseignant.save(update_fields=['user_type'])
+
+        # Enregistrer dans l'historique
+        enregistrer_activite(
+            user=request.user,
+            action='teacher_type_changed',
+            description=f"Type enseignant modifié : {ancien_type} → {nouveau_type} pour {_nom_profil(enseignant)}",
+            data={
+                'enseignant_id': enseignant.id,
+                'enseignant_nom': _nom_profil(enseignant),
+                'ancien_type': ancien_type,
+                'nouveau_type': nouveau_type,
+                'email': enseignant.user.email,
+            },
+            objet_id=enseignant.id,
+            objet_type='Profile',
+        )
+
+        return Response({
+            "detail": "Type enseignant modifié avec succès.",
+            "enseignant_id": enseignant.id,
+            "nom": _nom_profil(enseignant),
+            "ancien_type": ancien_type,
+            "nouveau_type": nouveau_type,
+        }, status=status.HTTP_200_OK)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Modifier un parcours
+# PATCH /api/parcours/<parcours_id>/modifier/
+# Body: { "nom": "Nouveau nom", "description": "Nouvelle description", "type_parcours": "cursus" }
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralModifierParcoursView(APIView):
+    """
+    Modifie un parcours (nom, description, type_parcours).
+    Réservé à l'administrateur général.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, parcours_id):
+        try:
+            profile_admin = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile_admin.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        parcours = get_object_or_404(Parcours, pk=parcours_id)
+
+        data = request.data
+        updates = {}
+        message = []
+
+        # Nom
+        if 'nom' in data:
+            nouveau_nom = data['nom'].strip()
+            if not nouveau_nom:
+                return Response(
+                    {"detail": "Le nom ne peut pas être vide."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if nouveau_nom != parcours.nom:
+                updates['nom'] = nouveau_nom
+                message.append(f"Nom: {parcours.nom} → {nouveau_nom}")
+
+        # Description
+        if 'description' in data:
+            nouvelle_desc = data['description'].strip()
+            if nouvelle_desc != parcours.description:
+                updates['description'] = nouvelle_desc
+                message.append("Description modifiée")
+
+        # Type de parcours
+        if 'type_parcours' in data:
+            nouveau_type = data['type_parcours'].strip()
+            types_valides = ['cursus', 'prepa', 'formation', 'autre']
+            if nouveau_type not in types_valides:
+                return Response(
+                    {"detail": f"Type de parcours invalide. Valeurs: {types_valides}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if nouveau_type != parcours.type_parcours:
+                updates['type_parcours'] = nouveau_type
+                message.append(f"Type: {parcours.type_parcours} → {nouveau_type}")
+
+        if not updates:
+            return Response(
+                {"detail": "Aucune modification spécifiée."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Appliquer les modifications
+        for key, value in updates.items():
+            setattr(parcours, key, value)
+        parcours.save()
+
+        # Enregistrer dans l'historique
+        enregistrer_activite(
+            user=request.user,
+            action='parcours_modified',
+            description=f"Parcours « {parcours.nom} » modifié",
+            data={
+                'parcours_id': parcours.id,
+                'parcours_nom': parcours.nom,
+                'modifications': message,
+            },
+            objet_id=parcours.id,
+            objet_type='Parcours',
+        )
+
+        return Response({
+            "detail": "Parcours modifié avec succès.",
+            "parcours": {
+                "id": parcours.id,
+                "nom": parcours.nom,
+                "description": parcours.description,
+                "type_parcours": parcours.type_parcours,
+            },
+            "modifications": message,
+        }, status=status.HTTP_200_OK)
+    
 
 class RepetiteursSearchView(APIView):
     """
@@ -4327,27 +4709,6 @@ def liste_enseignants(request):
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-# new
-
-# ═══════════════════════════════════════════════════════════════════════════
-# BLOC À AJOUTER DANS views.py
-# Coller ces classes dans views.py (avant ou après les vues existantes)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-# ───────────────────────────────────────────────────────────────────────────
-# ADMIN GÉNÉRAL — Dashboard
-# GET /api/admin-general/dashboard/
-# ───────────────────────────────────────────────────────────────────────────
-# ───────────────────────────────────────────────────────────────────────────
-# ADMIN GÉNÉRAL — Dashboard
-# GET /api/admin-general/dashboard/
-# ───────────────────────────────────────────────────────────────────────────
-# ───────────────────────────────────────────────────────────────────────────
-# ADMIN GÉNÉRAL — Dashboard (VERSION CORRIGÉE)
-# GET /api/admin-general/dashboard/
-# ───────────────────────────────────────────────────────────────────────────
-
 # ───────────────────────────────────────────────────────────────────────────
 # ADMIN GÉNÉRAL — Dashboard (VERSION ULTIME CORRIGÉE)
 # GET /api/admin-general/dashboard/
@@ -4648,12 +5009,20 @@ class ListeEnseignantsParRoleView(APIView):
         ]
         return Response(data, status=status.HTTP_200_OK)
 
-
 # ───────────────────────────────────────────────────────────────────────────
-# ENSEIGNANT ADMIN — Dashboard
+# ENSEIGNANT ADMIN — Dashboard (VERSION CORRIGÉE)
 # GET /api/enseignant/admin/dashboard/
 # ───────────────────────────────────────────────────────────────────────────
 class EnseignantAdminDashboardView(APIView):
+    """
+    GET /api/enseignant/admin/dashboard/
+    
+    Dashboard complet pour l'enseignant_admin incluant :
+    - Départements du parcours
+    - Cadres du parcours
+    - Départements et olympiades en attente de validation
+    - Statistiques globales
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -4713,6 +5082,11 @@ class EnseignantAdminDashboardView(APIView):
                         "nb_apprenants": nb_app,
                     }
 
+            # Déterminer le statut de validation
+            statut_validation = "valide"
+            if dept.cadre is None:
+                statut_validation = "attente"
+            
             dept_info = {
                 "id": dept.id,
                 "nom": dept.nom,
@@ -4724,53 +5098,63 @@ class EnseignantAdminDashboardView(APIView):
                 "nb_apprenants": nb_app,
                 "nb_inscrits": nb_app,  # Alias pour le frontend
                 "prix": dept.prix,
+                "prix_presentiel": dept.prix_presentiel,
+                "couleur": dept.couleur,
                 "taux_moyen": 0,
                 "cadre": cadre_data,
-                "couleur": dept.couleur,
+                "statut_validation": statut_validation,
+                "est_actif": dept.est_actif,
+                "acces_restreint": dept.acces_restreint,
+                # Champs spécifiques au type
+                "est_prepa_concours": dept.est_prepa_concours,
+                "est_formation_metier": dept.est_formation_metier,
+                "est_formation_classique": dept.est_formation_classique,
+                "nom_concours": dept.nom_concours,
+                "organisme_concours": dept.organisme_concours,
+                "date_limite_inscription": dept.date_limite_inscription,
+                "date_examen": dept.date_examen,
+                "duree_formation": dept.duree_formation,
+                "mode": dept.mode,
+                "certificat_delivre": dept.certificat_delivre,
+                "domaine": dept.domaine,
+                "ville": dept.ville,
+                "est_certifiante": dept.est_certifiante,
             }
             departements_data.append(dept_info)
 
-            # ⚠️ CORRECTION : Détecter les départements en attente de validation
-            if not dept.est_valide and not dept.est_refuse:
-                statut_validation = "attente"
-            elif dept.est_refuse:
-                statut_validation = "refuse"
-            else:
-                statut_validation = "valide"
-            
-            dept_info["statut_validation"] = statut_validation
-
-            # Ajouter aux départements en attente
-            if statut_validation in ["attente", "refuse"]:
+            # Ajouter aux départements en attente si pas de cadre
+            if dept.cadre is None:
                 departements_en_attente.append(dept_info)
 
-        # ⚠️ CORRECTION : Récupérer les olympiades en attente (gratuites, non publiées)
         olympiades_en_attente = []
+        
         olympiades_attente_qs = Olympiade.objects.filter(
             organisateur__departements_cadre__parcours=parcours_qs,
+            prix_global=0,
             devoir__est_publie=False,
         ).distinct().select_related('organisateur__user', 'devoir')
 
-        # Exclure celles déjà refusées (sauf si l'admin veut les voir)
         for o in olympiades_attente_qs:
-            # Vérifier si les prix sont vides (= gratuite)
-            est_gratuite = not o.prix_1er and not o.prix_2eme and not o.prix_3eme
+            statut = "refuse" if o.est_refusee else "attente"
             
-            if est_gratuite:
-                olympiades_en_attente.append({
-                    "id": o.id,
-                    "titre": o.titre,
-                    "matiere": o.matiere,
-                    "niveau": o.niveau,
-                    "edition": o.edition,
-                    "statut_validation": "refuse" if o.est_refusee else "attente",
-                    "motif_refus": o.motif_refus if o.est_refusee else "",
-                    "cadre": {
-                        "id": o.organisateur.id,
-                        "nom": _nom_profil(o.organisateur),
-                    } if o.organisateur else None,
-                    "date_creation": o.created_at.isoformat() if hasattr(o, 'created_at') else None,
-                })
+            olympiades_en_attente.append({
+                "id": o.id,
+                "titre": o.titre,
+                "matiere": o.matiere,
+                "niveau": o.niveau,
+                "edition": o.edition,
+                "statut_validation": statut,
+                "motif_refus": o.motif_refus if o.est_refusee else "",
+                "cadre": {
+                    "id": o.organisateur.id,
+                    "nom": _nom_profil(o.organisateur),
+                } if o.organisateur else None,
+                "date_creation": o.created_at.isoformat() if hasattr(o, 'created_at') else None,
+                "niveaux_accessibles": o.get_niveaux_accessibles_list(),
+                "prix_global": o.prix_global,
+                "est_validee": o.est_validee,
+                "est_refusee": o.est_refusee,
+            })
 
         # ── Stats globales ───────────────────────────────────────
         stats = {
@@ -7078,113 +7462,6 @@ class WalletVerifierIAPView(APIView):
         view.request = request
         view.format_kwarg = None
         return view._google_play(request)
-
-
-# ══════════════════════════════════════════════════════════════════
-# ENSEIGNANT ADMIN — DASHBOARD ENRICHI (avec olympiades + formations)
-# GET /api/enseignant/admin/dashboard/enrichi/
-#
-# Extension du dashboard existant (EnseignantAdminDashboardView)
-# qui ajoute les olympiades en attente et les stats de formations.
-# ══════════════════════════════════════════════════════════════════
-
-
-class EnseignantAdminDashboardEnrichiView(APIView):
-    """
-    GET /api/enseignant/admin/dashboard/enrichi/
-    Dashboard complet pour l'enseignant_admin incluant :
-    - Départements (= concours / formations) du parcours
-    - Olympiades en attente de validation
-    - Stats globales
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != 'enseignant_admin':
-            return Response({"detail": "Accès refusé."}, status=403)
-
-        try:
-            parcours = Parcours.objects.prefetch_related(
-                'departements__cours',
-                'departements__cadre__user',
-            ).get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        # ── Départements ─────────────────────────────────────────
-        departements_data = []
-        cadres_dict = {}
-
-        for dept in parcours.departements.all():
-            nb_cours  = dept.cours.count()
-            nb_app    = sum(c.nb_apprenants for c in dept.cours.all())
-
-            # Olympiades de ce département
-            olympiades_dept = Olympiade.objects.filter(
-                organisateur__departements_cadre=dept
-            )
-            nb_olympiades_total    = olympiades_dept.count()
-            nb_olympiades_attente  = olympiades_dept.filter(
-                devoir__est_publie=False
-            ).count()
-
-            cadre_data = None
-            if dept.cadre:
-                cadre_data = {
-                    "id":    dept.cadre.id,
-                    "nom":   _nom_profil(dept.cadre),
-                    "email": dept.cadre.user.email,
-                }
-                if dept.cadre.id not in cadres_dict:
-                    cadres_dict[dept.cadre.id] = {
-                        "id":             dept.cadre.id,
-                        "nom":            cadre_data["nom"],
-                        "email":          dept.cadre.user.email,
-                        "nb_cours":       nb_cours,
-                        "nb_apprenants":  nb_app,
-                        "departement":    {"id": dept.id, "nom": dept.nom},
-                    }
-
-            departements_data.append({
-                "id":                     dept.id,
-                "nom":                    dept.nom,
-                "parcours":               parcours.nom,
-                "parcours_id":            parcours.id,
-                "nb_cours":               nb_cours,
-                "nb_apprenants":          nb_app,
-                "nb_olympiades":          nb_olympiades_total,
-                "nb_olympiades_attente":  nb_olympiades_attente,
-                "cadre":                  cadre_data,
-            })
-
-        # ── Olympiades en attente de validation ──────────────────
-        olympiades_attente = Olympiade.objects.filter(
-            organisateur__departements_cadre__parcours=parcours,
-            devoir__est_publie=False,
-        ).distinct().values('id', 'titre', 'matiere', 'date_debut_olympiade')
-
-        # ── Stats globales ───────────────────────────────────────
-        stats = {
-            "nb_departements":        len(departements_data),
-            "nb_cours":               sum(d["nb_cours"] for d in departements_data),
-            "nb_apprenants":          sum(d["nb_apprenants"] for d in departements_data),
-            "nb_enseignants":         len(cadres_dict),
-            "nb_olympiades_attente":  len(olympiades_attente),
-            "nb_deps_sans_cadre":     sum(
-                1 for d in departements_data if d["cadre"] is None
-            ),
-        }
-
-        return Response({
-            "nom":              _nom_profil(profile),
-            "nom_parcours":     parcours.nom,
-            "id_parcours":      parcours.id,
-            "stats":            stats,
-            "departements":     departements_data,
-            "cadres":           list(cadres_dict.values()),
-            "olympiades_a_valider": list(olympiades_attente),
-        })
 
 
 # ---------------------------

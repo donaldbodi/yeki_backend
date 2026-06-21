@@ -1131,6 +1131,12 @@ class HistoriqueActivite(models.Model):
     """
 
     ACTION_CHOICES = [
+
+        # ── Admin general ───────────────────────────────────────────────
+        ('teacher_activated',    'Enseignant activé'),
+        ('teacher_type_changed', 'Type enseignant modifié'),
+        ('parcours_modified',    'Parcours modifié'),
+
         # ── Cours ───────────────────────────────────────────────
         ('course_created',       'Cours créé'),
         ('course_modified',      'Cours modifié'),
