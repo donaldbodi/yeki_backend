@@ -762,7 +762,7 @@ class RecalculerClassementView(APIView):
 
 
 # ═══════════════════════════════════════════════════════════════
-# ENDPOINT : Liste des niveaux disponibles pour les formations
+# ENDPOINT : Liste des niveaux disponibles
 # GET /api/niveaux/
 # ═══════════════════════════════════════════════════════════════
 
@@ -776,17 +776,8 @@ class ListeNiveauxView(APIView):
     def get(self, request):
         # Récupérer tous les niveaux distincts depuis les cours existants
         niveaux = Cours.objects.values_list('niveau', flat=True).distinct().order_by('niveau')
-
-        # Ajouter les niveaux prédéfinis s'ils n'existent pas
-        niveaux_predfinis = [
-            '6ème', '5ème', '4ème', '3ème',
-            'Seconde', 'Première', 'Terminale',
-            'Licence 1', 'Licence 2', 'Licence 3',
-            'Master 1', 'Master 2',
-            'Débutant', 'Intermédiaire', 'Avancé',
-        ]
         
-        resultats = list(niveaux) + [n for n in niveaux_predfinis if n not in niveaux]
+        resultats = list(niveaux)
         
         return Response(sorted(resultats))
 
@@ -5013,6 +5004,7 @@ class ListeEnseignantsParRoleView(APIView):
 # ENSEIGNANT ADMIN — Dashboard (VERSION CORRIGÉE)
 # GET /api/enseignant/admin/dashboard/
 # ───────────────────────────────────────────────────────────────────────────
+
 class EnseignantAdminDashboardView(APIView):
     """
     GET /api/enseignant/admin/dashboard/
@@ -5020,7 +5012,8 @@ class EnseignantAdminDashboardView(APIView):
     Dashboard complet pour l'enseignant_admin incluant :
     - Départements du parcours
     - Cadres du parcours
-    - Départements et olympiades en attente de validation
+    - Départements (sans validation)
+    - Olympiades en attente de validation (prix_global = 0)
     - Statistiques globales
     """
     permission_classes = [IsAuthenticated]
@@ -5049,7 +5042,6 @@ class EnseignantAdminDashboardView(APIView):
                 "stats": {},
                 "departements": [],
                 "cadres": [],
-                "departements_en_attente": [],
                 "olympiades_en_attente": [],
                 "nom_parcours": "",
                 "id_parcours": 0,
@@ -5059,7 +5051,6 @@ class EnseignantAdminDashboardView(APIView):
         # ── Départements ─────────────────────────────────────────
         departements_data = []
         cadres_dict = {}
-        departements_en_attente = []
 
         for dept in parcours_qs.departements.all():
             nb_cours = dept.cours.count()
@@ -5081,11 +5072,6 @@ class EnseignantAdminDashboardView(APIView):
                         "nb_cours": nb_cours,
                         "nb_apprenants": nb_app,
                     }
-
-            # Déterminer le statut de validation
-            statut_validation = "valide"
-            if dept.cadre is None:
-                statut_validation = "attente"
             
             dept_info = {
                 "id": dept.id,
@@ -5102,7 +5088,6 @@ class EnseignantAdminDashboardView(APIView):
                 "couleur": dept.couleur,
                 "taux_moyen": 0,
                 "cadre": cadre_data,
-                "statut_validation": statut_validation,
                 "est_actif": dept.est_actif,
                 "acces_restreint": dept.acces_restreint,
                 # Champs spécifiques au type
@@ -5119,13 +5104,12 @@ class EnseignantAdminDashboardView(APIView):
                 "domaine": dept.domaine,
                 "ville": dept.ville,
                 "est_certifiante": dept.est_certifiante,
+                # ✅ Ajout du niveau_formation
+                "niveau_formation": dept.niveau_formation if hasattr(dept, 'niveau_formation') else None,
             }
             departements_data.append(dept_info)
 
-            # Ajouter aux départements en attente si pas de cadre
-            if dept.cadre is None:
-                departements_en_attente.append(dept_info)
-
+        # ── Olympiades en attente (prix_global = 0, non publiées) ────
         olympiades_en_attente = []
         
         olympiades_attente_qs = Olympiade.objects.filter(
@@ -5162,7 +5146,7 @@ class EnseignantAdminDashboardView(APIView):
             "nb_cours": sum(d["nb_cours"] for d in departements_data),
             "nb_apprenants": sum(d["nb_apprenants"] for d in departements_data),
             "nb_enseignants": len(cadres_dict),
-            "nb_en_attente": len(departements_en_attente) + len(olympiades_en_attente),
+            "nb_olympiades_attente": len(olympiades_en_attente),
         }
 
         return Response({
@@ -5173,10 +5157,8 @@ class EnseignantAdminDashboardView(APIView):
             "type_parcours": parcours_qs.type_parcours,
             "departements": departements_data,
             "cadres": list(cadres_dict.values()),
-            "departements_en_attente": departements_en_attente,
             "olympiades_en_attente": olympiades_en_attente,
         })
-
 
 # ───────────────────────────────────────────────────────────────────────────
 # ENSEIGNANT ADMIN — Créer un département
@@ -5608,9 +5590,7 @@ class CreerDepartementView(APIView):
         prix_presentiel = _i('prix_presentiel')
         type_parc = parcours.type_parcours
         
-        # ✅ CORRECTION : S'assurer que le type de département est cohérent avec le parcours
         if type_parc == 'prepa':
-            # Forcer les flags pour les concours
             est_prepa_concours = True
             est_formation_metier = False
             est_formation_classique = False
@@ -5631,7 +5611,7 @@ class CreerDepartementView(APIView):
             'nom': nom,
             'parcours': parcours,
             'description': _s('description'),
-            'couleur': _s('couleur', '#2884A0'),
+            'couleur': '#2884A0',  # Couleur par défaut, retirée du formulaire
             'prix': prix,
             'prix_presentiel': prix_presentiel,
             'est_actif': True,
@@ -5642,6 +5622,13 @@ class CreerDepartementView(APIView):
             'est_formation_metier': est_formation_metier,
             'est_formation_classique': est_formation_classique,
         }
+
+        # ✅ Ajout du champ niveau_formation pour les formations métier
+        if type_parc == 'formation' and est_formation_metier:
+            niveau_formation = request.data.get('niveau_formation', 'debutant')
+            if niveau_formation not in ['debutant', 'intermediaire', 'avance']:
+                niveau_formation = 'debutant'
+            kwargs['niveau_formation'] = niveau_formation
 
         if request.FILES.get('image'):
             kwargs['image'] = request.FILES['image']
@@ -5692,7 +5679,10 @@ class CreerDepartementView(APIView):
             DepartementSerializer(departement, context={'request': request}).data,
             status=status.HTTP_201_CREATED
         )
-# 5. Vue pour la mise à jour d'un département (admin)
+    
+
+# views.py - Corriger AdminUpdateDepartementView
+
 class AdminUpdateDepartementView(APIView):
     """
     PATCH /api/admin/departements/<pk>/update/
@@ -5735,6 +5725,18 @@ class AdminUpdateDepartementView(APIView):
                 niveaux = []
             data['niveaux_accessibles'] = ','.join(niveaux)
 
+        # ✅ Retirer couleur du traitement
+        if 'couleur' in data:
+            # On ignore la couleur
+            data.pop('couleur')
+
+        # ✅ Si c'est une formation métier, gérer niveau_formation
+        if departement.est_formation_metier and 'niveau_formation' in data:
+            niveau = data.get('niveau_formation', 'debutant')
+            if niveau not in ['debutant', 'intermediaire', 'avance']:
+                niveau = 'debutant'
+            data['niveau_formation'] = niveau
+
         serializer = DepartementCreateSerializer(
             departement, 
             data=data, 
@@ -5756,6 +5758,7 @@ class AdminUpdateDepartementView(APIView):
                 status=200
             )
         
+        # ✅ Retourner les erreurs détaillées pour debug
         return Response(serializer.errors, status=400)
 
 

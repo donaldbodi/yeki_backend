@@ -143,6 +143,18 @@ class Departement(models.Model):
         related_name='departements_cadre'
     )
 
+    niveau_formation = models.CharField(
+        max_length=20,
+        choices=[
+            ('debutant', 'Débutant'),
+            ('intermediaire', 'Intermédiaire'),
+            ('avance', 'Avancé'),
+        ],
+        blank=True,
+        default='debutant',
+        help_text="Niveau de la formation (pour les formations métier)"
+    )
+
     # ── Présentation visuelle (tous les types) ────────────────────
     description = models.TextField(blank=True, help_text="Description détaillée")
     image       = models.ImageField(
