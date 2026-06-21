@@ -5681,8 +5681,6 @@ class CreerDepartementView(APIView):
         )
     
 
-# views.py - Corriger AdminUpdateDepartementView
-
 class AdminUpdateDepartementView(APIView):
     """
     PATCH /api/admin/departements/<pk>/update/
@@ -5725,19 +5723,12 @@ class AdminUpdateDepartementView(APIView):
                 niveaux = []
             data['niveaux_accessibles'] = ','.join(niveaux)
 
-        # ✅ Retirer couleur du traitement
+        # Retirer couleur du traitement (pas de champ couleur dans le modèle)
         if 'couleur' in data:
-            # On ignore la couleur
             data.pop('couleur')
 
-        # ✅ Si c'est une formation métier, gérer niveau_formation
-        if departement.est_formation_metier and 'niveau_formation' in data:
-            niveau = data.get('niveau_formation', 'debutant')
-            if niveau not in ['debutant', 'intermediaire', 'avance']:
-                niveau = 'debutant'
-            data['niveau_formation'] = niveau
-
-        serializer = DepartementCreateSerializer(
+        # Utiliser DepartementUpdateSerializer pour la mise à jour
+        serializer = DepartementUpdateSerializer(
             departement, 
             data=data, 
             partial=True,
@@ -5758,9 +5749,11 @@ class AdminUpdateDepartementView(APIView):
                 status=200
             )
         
-        # ✅ Retourner les erreurs détaillées pour debug
-        return Response(serializer.errors, status=400)
-
+        # Retourner les erreurs détaillées pour debug
+        return Response({
+            'detail': 'Erreur de validation',
+            'errors': serializer.errors
+        }, status=400)
 
 # 6. Vue pour l'apprenant - Vérifier l'accès à un département
 class VerifierAccesDepartementView(APIView):
@@ -6416,97 +6409,6 @@ class AdminRefuserOlympiadeView(APIView):
             "est_refusee": True,
         })
 
-class AdminValiderDepartementGratuitView(APIView):
-    """
-    POST /api/admin/departements/<pk>/valider/
-    Valide un département gratuit créé par un cadre.
-    """
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, pk):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != 'enseignant_admin':
-            return Response({"detail": "Accès refusé."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        departement = get_object_or_404(Departement, pk=pk, parcours=parcours)
-        
-        # Vérifier que le département est gratuit
-        if departement.prix > 0:
-            return Response(
-                {"detail": "Ce département est payant, validation automatique déjà effectuée."},
-                status=400
-            )
-        
-        departement.est_valide = True
-        departement.est_refuse = False
-        departement.est_actif = True
-        departement.valide_le = timezone.now()
-        departement.save()
-        
-        enregistrer_activite(
-            user=request.user,
-            action='department_validated',
-            description=f"Département gratuit « {departement.nom} » validé",
-            objet_id=departement.id,
-            objet_type='Departement',
-        )
-        
-        return Response({
-            "detail": "Département validé avec succès. Il est maintenant visible.",
-            "id": departement.id,
-            "est_valide": True,
-        })
-
-
-class AdminRefuserDepartementView(APIView):
-    """
-    POST /api/admin/departements/<pk>/refuser/
-    Refuse un département gratuit.
-    """
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, pk):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != 'enseignant_admin':
-            return Response({"detail": "Accès refusé."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        departement = get_object_or_404(Departement, pk=pk, parcours=parcours)
-        
-        motif = request.data.get('motif', 'Refusé par l\'administrateur.')
-        
-        departement.est_refuse = True
-        departement.est_valide = False
-        departement.motif_refus = motif
-        departement.save()
-        
-        enregistrer_activite(
-            user=request.user,
-            action='department_rejected',
-            description=f"Département « {departement.nom} » refusé. Motif : {motif}",
-            objet_id=departement.id,
-            objet_type='Departement',
-        )
-        
-        return Response({
-            "detail": "Département refusé.",
-            "id": departement.id,
-            "est_refuse": True,
-            "motif": motif,
-        })
-
-
 # views.py - Ajouter
 
 class ApprenantsParDepartementView(APIView):
@@ -6539,156 +6441,6 @@ class ApprenantsParDepartementView(APIView):
         } for a in apprenants]
         
         return Response(data)
-    
-
-# ══════════════════════════════════════════════════════════════════
-# ENSEIGNANT ADMIN — DÉPARTEMENTS À VALIDER (formations/concours)
-# GET  /api/admin/departements/a-valider/
-# POST /api/admin/departements/<pk>/valider/
-#
-# L'enseignant_admin peut voir les départements récemment créés dans
-# son parcours, activer ou désactiver un département.
-# Un département "non validé" signifie que ses cours ne sont pas
-# encore accessibles aux apprenants.
-# On s'appuie sur le fait qu'un cours non publié (Devoir.est_publie=False)
-# ou un département sans cours actif est considéré "en attente".
-#
-# Pour ne PAS modifier models.py, on utilise le champ :
-#   Departement.cadre = None  →  département sans cadre = en attente d'activation
-#   Valider = assigner un cadre + activer
-#   OU : pour les formations à prix=0, l'admin doit explicitement activer
-#        en publiant tous les devoirs du département.
-# ══════════════════════════════════════════════════════════════════
-
-class AdminDepartementsAValiderView(APIView):
-    """
-    GET /api/admin/departements/a-valider/
-    Retourne les départements du parcours sans cadre assigné
-    (= créés par l'admin mais pas encore activés) + ceux dont
-    les devoirs/cours sont en attente de publication.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != 'enseignant_admin':
-            return Response({"detail": "Accès refusé."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        # Départements du parcours sans cadre assigné
-        deps_sans_cadre = Departement.objects.filter(
-            parcours=parcours, cadre__isnull=True
-        ).prefetch_related('cours')
-
-        # Départements dont certains devoirs ne sont pas encore publiés
-        deps_avec_devoirs_attente = Departement.objects.filter(
-            parcours=parcours,
-            cours__devoirs__est_publie=False,
-        ).distinct().prefetch_related('cours', 'cadre__user')
-
-        # Union des deux ensembles
-        all_ids = set(
-            list(deps_sans_cadre.values_list('id', flat=True)) +
-            list(deps_avec_devoirs_attente.values_list('id', flat=True))
-        )
-        departements = Departement.objects.filter(
-            id__in=all_ids
-        ).select_related('cadre__user', 'parcours')
-
-        result = []
-        for dept in departements:
-            nb_cours     = dept.cours.count()
-            nb_devoirs_attente = Devoir.objects.filter(
-                cours_lie__departement=dept, est_publie=False
-            ).count()
-            cadre_data = None
-            if dept.cadre:
-                cadre_data = {
-                    "id":    dept.cadre.id,
-                    "nom":   _nom_profil(dept.cadre),
-                    "email": dept.cadre.user.email,
-                }
-            result.append({
-                "id":                  dept.id,
-                "nom":                 dept.nom,
-                "cadre":               cadre_data,
-                "nb_cours":            nb_cours,
-                "nb_devoirs_attente":  nb_devoirs_attente,
-                "statut":              "sans_cadre" if not dept.cadre else "devoirs_en_attente",
-            })
-
-        return Response(result)
-
-
-class AdminValiderDepartementView(APIView):
-    """
-    POST /api/admin/departements/<pk>/valider/
-    Body : { "cadre_id": 12 }          → assigner un cadre au département
-           { "publier_devoirs": true }  → publier tous les devoirs du département
-           { "desactiver": true }       → retirer le cadre (désactiver)
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != 'enseignant_admin':
-            return Response({"detail": "Accès refusé."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        dept = get_object_or_404(Departement, pk=pk, parcours=parcours)
-
-        actions_effectuees = []
-
-        # 1. Assigner un cadre
-        cadre_id = request.data.get('cadre_id')
-        if cadre_id:
-            cadre = get_object_or_404(
-                Profile, pk=cadre_id, user_type='enseignant_cadre'
-            )
-            dept.cadre = cadre
-            dept.save(update_fields=['cadre'])
-            actions_effectuees.append(f"Cadre assigné : {_nom_profil(cadre)}")
-            enregistrer_activite(
-                user=request.user,
-                action='cadre_assigned',
-                description=f"Cadre « {_nom_profil(cadre)} » assigné au dept « {dept.nom} »",
-                objet_id=dept.id,
-                objet_type='Departement',
-            )
-
-        # 2. Publier tous les devoirs du département
-        if request.data.get('publier_devoirs'):
-            nb = Devoir.objects.filter(
-                cours_lie__departement=dept, est_publie=False
-            ).update(est_publie=True)
-            actions_effectuees.append(f"{nb} devoir(s) publié(s)")
-
-        # 3. Désactiver (retirer le cadre)
-        if request.data.get('desactiver'):
-            dept.cadre = None
-            dept.save(update_fields=['cadre'])
-            actions_effectuees.append("Département désactivé (cadre retiré)")
-
-        if not actions_effectuees:
-            return Response(
-                {"detail": "Aucune action spécifiée (cadre_id, publier_devoirs, desactiver)."},
-                status=400,
-            )
-
-        return Response({
-            "detail":   "Actions effectuées.",
-            "actions":  actions_effectuees,
-            "dept_id":  dept.id,
-            "dept_nom": dept.nom,
-        })
 
 
 # ══════════════════════════════════════════════════════════════════

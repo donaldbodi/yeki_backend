@@ -151,13 +151,11 @@ urlpatterns = [
          YekiIAChatAvecHistoriqueView.as_view(), 
          name='ia-chat'),
 
-
     # ── PAIEMENT ──────────────────────────────────────────────────
     # GET /api/paiements/historique/
     path('paiements/historique/', HistoriquePaiementsView.as_view(), name='paiements-historique'),
     # GET /api/abonnement/statut/
     path('abonnement/statut/', StatutAbonnementView.as_view(), name='abonnement-statut'),
-
 
     # ── HISTORIQUE ────────────────────────────────────────────────
     path('historique/', HistoriqueActiviteView.as_view(), name='historique'),
@@ -207,21 +205,6 @@ urlpatterns = [
         name='admin-valider-olympiade',
     ),
 
-    # ── ADMIN : Validation départements ──────────────────────────
-    # Liste des départements sans cadre ou avec devoirs en attente
-    path(
-        'admin/departements/a-valider/',
-        AdminDepartementsAValiderView.as_view(),
-        name='admin-departements-a-valider',
-    ),
-    # Valider un département : assigner cadre, publier devoirs, désactiver
-    # Body: {"cadre_id": 12} | {"publier_devoirs": true} | {"desactiver": true}
-    path(
-        'admin/departements/<int:pk>/valider/',
-        AdminValiderDepartementView.as_view(),
-        name='admin-valider-departement',
-    ),
-
     # ── YEKI IA ──────────────────────────────────────────────────
     # Chat direct avec Yeki IA dans le contexte d'un cours
     path(
@@ -254,10 +237,6 @@ urlpatterns = [
 
     # Admin - Refus olympiade
     path('admin/olympiades/<int:pk>/refuser/', AdminRefuserOlympiadeView.as_view(), name='admin-refuser-olympiade'),
-    
-    # Admin - Validation/Refus département gratuit
-    path('admin/departements/<int:pk>/valider/', AdminValiderDepartementGratuitView.as_view(), name='admin-valider-departement'),
-    path('admin/departements/<int:pk>/refuser/', AdminRefuserDepartementView.as_view(), name='admin-refuser-departement'),
     
     # Cadre - Apprenants par département
     path('departements/<int:departement_id>/apprenants/', ApprenantsParDepartementView.as_view(), name='departement-apprenants'),
@@ -294,7 +273,6 @@ urlpatterns = [
     path('classement/recalculer/', 
          RecalculerClassementView.as_view(), 
          name='recalculer-classement'),
-
 
     path('departements/<int:departement_id>/demander-acces/', 
          DemandeAccesFormationView.as_view(), 

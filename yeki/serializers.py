@@ -383,7 +383,8 @@ class DepartementSerializer(serializers.ModelSerializer):
             "duree_formation", "certificat_delivre", "prerequis",
             "objectifs", "domaine", "ville", "est_certifiante",
             "acces_restreint", "apprenants_autorises",
-            "demandes_acces"
+            "demandes_acces",
+            "niveau_formation"
         ]
     
     def get_niveaux_accessibles(self, obj):
@@ -411,6 +412,96 @@ class DepartementSerializer(serializers.ModelSerializer):
             except Profile.DoesNotExist:
                 pass
         return []
+    
+# serializers.py - Ajouter DepartementUpdateSerializer
+
+class DepartementUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer pour la mise à jour partielle d'un département.
+    Tous les champs sont optionnels pour PATCH.
+    """
+    niveaux_accessibles = serializers.ListField(
+        child=serializers.CharField(), 
+        required=False,
+        allow_empty=True
+    )
+    
+    class Meta:
+        model = Departement
+        fields = [
+            'nom', 'description', 'prix', 'prix_presentiel',
+            'est_prepa_concours', 'nom_concours', 'organisme_concours',
+            'date_limite_inscription', 'date_examen', 'arrete_ministeriel',
+            'places_disponibles', 'debouches', 'mode',
+            'est_formation_metier', 'est_formation_classique',
+            'duree_formation', 'certificat_delivre', 'prerequis',
+            'objectifs', 'domaine', 'ville', 'est_certifiante',
+            'acces_restreint', 'niveaux_accessibles', 'niveau_formation'
+        ]
+        extra_kwargs = {
+            'nom': {'required': False},
+            'description': {'required': False, 'allow_blank': True},
+            'prix': {'required': False},
+            'prix_presentiel': {'required': False},
+            'est_prepa_concours': {'required': False},
+            'est_formation_metier': {'required': False},
+            'est_formation_classique': {'required': False},
+            'acces_restreint': {'required': False},
+            'mode': {'required': False, 'allow_blank': True},
+            'niveau_formation': {'required': False, 'allow_blank': True},
+            # Champs spécifiques optionnels
+            'nom_concours': {'required': False, 'allow_blank': True},
+            'organisme_concours': {'required': False, 'allow_blank': True},
+            'date_limite_inscription': {'required': False, 'allow_null': True},
+            'date_examen': {'required': False, 'allow_null': True},
+            'arrete_ministeriel': {'required': False, 'allow_blank': True},
+            'places_disponibles': {'required': False, 'allow_null': True},
+            'debouches': {'required': False, 'allow_blank': True},
+            'duree_formation': {'required': False, 'allow_blank': True},
+            'certificat_delivre': {'required': False, 'allow_blank': True},
+            'prerequis': {'required': False, 'allow_blank': True},
+            'objectifs': {'required': False, 'allow_blank': True},
+            'domaine': {'required': False, 'allow_blank': True},
+            'ville': {'required': False, 'allow_blank': True},
+            'est_certifiante': {'required': False},
+        }
+    
+    def validate(self, data):
+        # Validation spécifique pour le type de formation
+        instance = self.instance
+        if instance and instance.parcours.type_parcours == 'formation':
+            est_metier = data.get('est_formation_metier', instance.est_formation_metier)
+            est_classique = data.get('est_formation_classique', instance.est_formation_classique)
+            if not est_metier and not est_classique:
+                raise serializers.ValidationError(
+                    "Veuillez sélectionner au moins un type de formation (Métier ou Classique)"
+                )
+            
+            # Vérifier niveau_formation pour les formations métier
+            if est_metier:
+                niveau = data.get('niveau_formation', instance.niveau_formation)
+                if niveau and niveau not in ['debutant', 'intermediaire', 'avance']:
+                    raise serializers.ValidationError(
+                        "Niveau de formation invalide. Choisissez: debutant, intermediaire, avance"
+                    )
+        return data
+    
+    def update(self, instance, validated_data):
+        # Gérer les niveaux accessibles séparément
+        niveaux_accessibles = validated_data.pop('niveaux_accessibles', None)
+        
+        # Mettre à jour les autres champs
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        
+        if niveaux_accessibles is not None:
+            if isinstance(niveaux_accessibles, list):
+                instance.niveaux_accessibles = ','.join(niveaux_accessibles)
+            else:
+                instance.niveaux_accessibles = niveaux_accessibles
+        
+        instance.save()
+        return instance
 
 class DemandeAccesSerializer(serializers.ModelSerializer):
     apprenant_nom = serializers.SerializerMethodField()
@@ -440,7 +531,8 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
             'est_formation_metier', 'est_formation_classique',
             'duree_formation', 'certificat_delivre', 'prerequis',
             'objectifs', 'domaine', 'ville', 'est_certifiante',
-            'acces_restreint', 'niveaux_accessibles'
+            'acces_restreint', 'niveaux_accessibles',
+            'niveau_formation'  # ✅ AJOUTÉ
         ]
         extra_kwargs = {
             'description': {'required': False, 'allow_blank': True},
@@ -453,6 +545,7 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
             'est_formation_metier': {'required': False, 'default': False},
             'est_formation_classique': {'required': False, 'default': False},
             'acces_restreint': {'required': False, 'default': False},
+            'niveau_formation': {'required': False, 'allow_blank': True, 'default': 'debutant'},
         }
     
     def validate(self, data):
@@ -465,6 +558,14 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "Veuillez sélectionner au moins un type de formation (Métier ou Classique)"
                 )
+            
+            # Vérifier que niveau_formation est valide pour les formations métier
+            if est_metier:
+                niveau = data.get('niveau_formation', 'debutant')
+                if niveau not in ['debutant', 'intermediaire', 'avance']:
+                    raise serializers.ValidationError(
+                        "Niveau de formation invalide. Choisissez: debutant, intermediaire, avance"
+                    )
         return data
     
     def create(self, validated_data):
@@ -483,7 +584,7 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
             instance.niveaux_accessibles = ','.join(niveaux_accessibles)
         instance.save()
         return instance
-
+    
 class ApprenantDepartementDetailSerializer(serializers.ModelSerializer):
     est_accessible = serializers.SerializerMethodField()
     demande_statut = serializers.SerializerMethodField()
