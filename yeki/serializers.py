@@ -419,7 +419,7 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True
     )
-    
+
     # ✅ Traitement spécifique pour les dates
     date_limite_inscription = serializers.DateField(
         required=False, 

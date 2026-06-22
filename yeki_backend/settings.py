@@ -154,17 +154,15 @@ EMAIL_BACKEND       = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST          = 'smtp.gmail.com'
 EMAIL_PORT          = 587
 EMAIL_USE_TLS       = True
-EMAIL_HOST_USER     = 'mdonabodi99@gmail.com'       # ← votre email Gmail
-EMAIL_HOST_PASSWORD = 'Moment4lives'           # ← mot de passe d'application Gmail
-DEFAULT_FROM_EMAIL  = 'Yéki <mdonabodi99@gmail.com>'
+#EMAIL_HOST_USER     = 'mdonabodi99@gmail.com'       # ← votre email Gmail
+#EMAIL_HOST_PASSWORD = 'Moment4lives'           # ← mot de passe d'application Gmail
+DEFAULT_FROM_EMAIL  = 'mdonabodi99@gmail.com'
 
-# ── Pour les tests (affiche les emails dans la console) ────────────────────
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # ── Sur PythonAnywhere (variables d'environnement recommandées) ────────────
 
-EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+#EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '')
+#EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 # CinetPay
 CINETPAY_API_KEY = os.environ.get('CINETPAY_API_KEY', '105602915965f9bc03546e76.59333046')

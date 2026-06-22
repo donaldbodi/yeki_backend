@@ -58,6 +58,477 @@ def _nom_profil(profile):
     n = f"{profile.user.first_name} {profile.user.last_name}".strip()
     return n or profile.user.username
 
+
+# views.py - Ajouter/Modifier les vues pour l'admin général
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Liste complète des enseignants avec filtres
+# GET /api/admin-general/enseignants/
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralEnseignantsListView(APIView):
+    """
+    GET /api/admin-general/enseignants/
+    Retourne la liste complète des enseignants avec filtres.
+    
+    Query params:
+    - search: recherche par nom, email, username
+    - user_type: filtre par type d'enseignant
+    - parcours_id: filtre par parcours
+    - departement_id: filtre par département
+    - cours_id: filtre par cours
+    - is_active: true/false
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Base queryset - tous les enseignants
+        enseignants = Profile.objects.filter(
+            user_type__in=['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        ).select_related('user').order_by('-user__date_joined')
+
+        # ── Filtres ──────────────────────────────────────────────
+        search = request.query_params.get('search', '').strip()
+        if search:
+            enseignants = enseignants.filter(
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(user__username__icontains=search) |
+                Q(user__email__icontains=search)
+            )
+
+        user_type = request.query_params.get('user_type', '')
+        if user_type and user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            enseignants = enseignants.filter(user_type=user_type)
+
+        is_active = request.query_params.get('is_active')
+        if is_active is not None:
+            if is_active.lower() == 'true':
+                enseignants = enseignants.filter(is_active=True)
+            elif is_active.lower() == 'false':
+                enseignants = enseignants.filter(is_active=False)
+
+        # Filtres par parcours, département, cours
+        parcours_id = request.query_params.get('parcours_id')
+        if parcours_id:
+            enseignants = enseignants.filter(
+                Q(parcours_admin__id=parcours_id) |
+                Q(departements_cadre__parcours__id=parcours_id) |
+                Q(cours_principal__departement__parcours__id=parcours_id) |
+                Q(cours_secondaires__departement__parcours__id=parcours_id)
+            ).distinct()
+
+        departement_id = request.query_params.get('departement_id')
+        if departement_id:
+            enseignants = enseignants.filter(
+                Q(departements_cadre__id=departement_id) |
+                Q(cours_principal__departement__id=departement_id) |
+                Q(cours_secondaires__departement__id=departement_id)
+            ).distinct()
+
+        cours_id = request.query_params.get('cours_id')
+        if cours_id:
+            enseignants = enseignants.filter(
+                Q(cours_principal__id=cours_id) |
+                Q(cours_secondaires__id=cours_id)
+            ).distinct()
+
+        # ── Construction de la réponse ──────────────────────────
+        data = []
+        for e in enseignants:
+            # Récupérer les parcours, départements, cours de l'enseignant
+            parcours_list = []
+            departements_list = []
+            cours_list = []
+
+            # Parcours où il est admin
+            for p in Parcours.objects.filter(admin=e):
+                parcours_list.append({'id': p.id, 'nom': p.nom})
+
+            # Départements où il est cadre
+            for d in Departement.objects.filter(cadre=e):
+                departements_list.append({'id': d.id, 'nom': d.nom})
+                if d.parcours:
+                    parcours_list.append({'id': d.parcours.id, 'nom': d.parcours.nom})
+
+            # Cours où il est principal
+            for c in Cours.objects.filter(enseignant_principal=e):
+                cours_list.append({'id': c.id, 'titre': c.titre, 'niveau': c.niveau})
+                if c.departement:
+                    departements_list.append({'id': c.departement.id, 'nom': c.departement.nom})
+                    if c.departement.parcours:
+                        parcours_list.append({'id': c.departement.parcours.id, 'nom': c.departement.parcours.nom})
+
+            # Cours où il est secondaire
+            for c in e.cours_secondaires.all():
+                cours_list.append({'id': c.id, 'titre': c.titre, 'niveau': c.niveau})
+                if c.departement:
+                    departements_list.append({'id': c.departement.id, 'nom': c.departement.nom})
+                    if c.departement.parcours:
+                        parcours_list.append({'id': c.departement.parcours.id, 'nom': c.departement.parcours.nom})
+
+            # Éliminer les doublons
+            parcours_unique = {p['id']: p for p in parcours_list}.values()
+            departements_unique = {d['id']: d for d in departements_list}.values()
+            cours_unique = {c['id']: c for c in cours_list}.values()
+
+            data.append({
+                "id": e.id,
+                "username": e.user.username,
+                "email": e.user.email,
+                "nom": _nom_profil(e),
+                "user_type": e.user_type,
+                "user_type_label": dict(Profile.USER_TYPES).get(e.user_type, e.user_type),
+                "is_active": e.is_active,
+                "date_joined": e.user.date_joined.isoformat(),
+                "last_login": e.user.last_login.isoformat() if e.user.last_login else None,
+                "bio": e.bio or '',
+                "phone": e.phone or '',
+                "avatar": request.build_absolute_uri(e.avatar.url) if e.avatar else None,
+                "parcours": list(parcours_unique),
+                "departements": list(departements_unique),
+                "cours": list(cours_unique),
+            })
+
+        return Response({
+            "total": len(data),
+            "enseignants": data
+        }, status=status.HTTP_200_OK)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Désactiver un compte enseignant
+# POST /api/admin-general/enseignants/<profile_id>/desactiver/
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralDesactiverEnseignantView(APIView):
+    """
+    Désactive un compte enseignant (is_active=False).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, profile_id):
+        try:
+            profile_admin = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile_admin.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        enseignant = get_object_or_404(Profile, pk=profile_id)
+
+        if enseignant.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not enseignant.is_active:
+            return Response(
+                {"detail": "Ce compte est déjà désactivé."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        enseignant.is_active = False
+        enseignant.save(update_fields=['is_active'])
+
+        # Envoyer un email de notification
+        try:
+            _envoyer_email_desactivation_enseignant(enseignant)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Erreur envoi email désactivation: {e}")
+
+        enregistrer_activite(
+            user=request.user,
+            action='teacher_deactivated',
+            description=f"Compte enseignant « {_nom_profil(enseignant)} » désactivé",
+            data={
+                'enseignant_id': enseignant.id,
+                'enseignant_nom': _nom_profil(enseignant),
+                'enseignant_email': enseignant.user.email,
+                'user_type': enseignant.user_type,
+            },
+            objet_id=enseignant.id,
+            objet_type='Profile',
+        )
+
+        return Response({
+            "detail": "Compte enseignant désactivé avec succès.",
+            "enseignant_id": enseignant.id,
+            "nom": _nom_profil(enseignant),
+            "is_active": False,
+        }, status=status.HTTP_200_OK)
+
+
+def _envoyer_email_desactivation_enseignant(profile):
+    """Envoie un email de notification de désactivation."""
+    user = profile.user
+    nom = f"{user.first_name} {user.last_name}".strip() or user.username
+
+    sujet = "ℹ️ Votre compte Yéki a été désactivé"
+
+    message_texte = f"""
+Bonjour {nom},
+
+Votre compte enseignant sur Yéki a été désactivé par l'administrateur.
+
+Vous ne pouvez plus vous connecter à la plateforme.
+Pour toute question, veuillez contacter le support.
+
+— L'équipe Yéki
+"""
+
+    message_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }}
+    .container {{ max-width: 480px; margin: 40px auto; background: white;
+                  border-radius: 16px; overflow: hidden;
+                  box-shadow: 0 4px 20px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #2884A9, #2A657D);
+               padding: 32px 24px; text-align: center; }}
+    .header h1 {{ color: white; margin: 0; font-size: 22px; }}
+    .header p  {{ color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px; }}
+    .body   {{ padding: 32px 24px; text-align: center; }}
+    .greeting {{ color: #1E293B; font-size: 15px; margin-bottom: 24px; }}
+    .note {{ color: #94A3B8; font-size: 11px; margin-top: 28px;
+             border-top: 1px solid #E2E8F0; padding-top: 16px; }}
+    .footer {{ background: #F8FAFC; padding: 16px; text-align: center;
+               color: #94A3B8; font-size: 11px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>ℹ️ Compte désactivé</h1>
+      <p>Votre accès a été suspendu</p>
+    </div>
+    <div class="body">
+      <p class="greeting">Bonjour <strong>{nom}</strong>,<br>
+      Votre compte enseignant a été désactivé par l'administrateur Yéki.</p>
+
+      <p class="note">
+        Vous ne pouvez plus vous connecter à la plateforme.<br>
+        Pour toute question, veuillez contacter le support.
+      </p>
+    </div>
+    <div class="footer">© Yeki — Plateforme éducative</div>
+  </div>
+</body>
+</html>
+"""
+
+    send_mail(
+        subject=sujet,
+        message=message_texte,
+        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@yeki.app'),
+        recipient_list=[user.email],
+        html_message=message_html,
+        fail_silently=False,
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ADMIN GÉNÉRAL — Changer le type d'un enseignant (avec email)
+# PATCH /api/admin-general/enseignants/<profile_id>/changer-type/
+# Body: { "user_type": "enseignant_principal" }
+# ───────────────────────────────────────────────────────────────────────────
+class AdminGeneralChangerTypeEnseignantView(APIView):
+    """
+    Change le type d'un enseignant et envoie un email de notification.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, profile_id):
+        try:
+            profile_admin = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile_admin.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        enseignant = get_object_or_404(Profile, pk=profile_id)
+
+        # Vérifier que c'est bien un enseignant
+        if enseignant.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not enseignant.is_active:
+            return Response(
+                {"detail": "Le compte enseignant doit d'abord être activé."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        nouveau_type = request.data.get('user_type', '').strip()
+        types_valides = ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+
+        if nouveau_type not in types_valides:
+            return Response(
+                {"detail": f"Type invalide. Valeurs: {types_valides}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ancien_type = enseignant.user_type
+        if ancien_type == nouveau_type:
+            return Response(
+                {"detail": "Le type est déjà identique."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        enseignant.user_type = nouveau_type
+        enseignant.save(update_fields=['user_type'])
+
+        # Envoyer un email de notification
+        try:
+            _envoyer_email_changement_type_enseignant(enseignant, ancien_type, nouveau_type)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Erreur envoi email changement type: {e}")
+
+        # Enregistrer dans l'historique
+        enregistrer_activite(
+            user=request.user,
+            action='teacher_type_changed',
+            description=f"Type enseignant modifié : {dict(Profile.USER_TYPES).get(ancien_type, ancien_type)} → {dict(Profile.USER_TYPES).get(nouveau_type, nouveau_type)} pour {_nom_profil(enseignant)}",
+            data={
+                'enseignant_id': enseignant.id,
+                'enseignant_nom': _nom_profil(enseignant),
+                'ancien_type': ancien_type,
+                'nouveau_type': nouveau_type,
+                'email': enseignant.user.email,
+            },
+            objet_id=enseignant.id,
+            objet_type='Profile',
+        )
+
+        # Ajouter une réponse avec les labels pour le frontend
+        return Response({
+            "detail": "Type enseignant modifié avec succès. Un email de notification a été envoyé.",
+            "enseignant_id": enseignant.id,
+            "nom": _nom_profil(enseignant),
+            "ancien_type": ancien_type,
+            "ancien_type_label": dict(Profile.USER_TYPES).get(ancien_type, ancien_type),
+            "nouveau_type": nouveau_type,
+            "nouveau_type_label": dict(Profile.USER_TYPES).get(nouveau_type, nouveau_type),
+        }, status=status.HTTP_200_OK)
+
+
+def _envoyer_email_changement_type_enseignant(profile, ancien_type, nouveau_type):
+    """Envoie un email de notification pour le changement de type."""
+    user = profile.user
+    nom = f"{user.first_name} {user.last_name}".strip() or user.username
+
+    type_labels = {
+        'enseignant': 'Enseignant',
+        'enseignant_principal': 'Enseignant Principal',
+        'enseignant_cadre': 'Enseignant Cadre',
+        'enseignant_admin': 'Enseignant Administrateur',
+    }
+
+    ancien_label = type_labels.get(ancien_type, ancien_type)
+    nouveau_label = type_labels.get(nouveau_type, nouveau_type)
+
+    sujet = "📋 Votre grade Yéki a été modifié"
+
+    message_texte = f"""
+Bonjour {nom},
+
+L'administrateur Yéki a modifié votre grade sur la plateforme.
+
+Ancien grade : {ancien_label}
+Nouveau grade : {nouveau_label}
+
+Connectez-vous pour voir les nouvelles fonctionnalités accessibles avec votre nouveau grade.
+
+— L'équipe Yéki
+"""
+
+    message_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }}
+    .container {{ max-width: 480px; margin: 40px auto; background: white;
+                  border-radius: 16px; overflow: hidden;
+                  box-shadow: 0 4px 20px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #2884A9, #2A657D);
+               padding: 32px 24px; text-align: center; }}
+    .header h1 {{ color: white; margin: 0; font-size: 22px; }}
+    .header p  {{ color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px; }}
+    .body   {{ padding: 32px 24px; text-align: center; }}
+    .greeting {{ color: #1E293B; font-size: 15px; margin-bottom: 24px; }}
+    .grade-box {{ background: #F1F5F9; border-radius: 12px; padding: 20px; margin: 0 auto;
+                  display: inline-block; min-width: 200px; text-align: left; }}
+    .grade-box div {{ padding: 4px 0; color: #1E293B; }}
+    .grade-box strong {{ color: #2884A9; }}
+    .note {{ color: #94A3B8; font-size: 11px; margin-top: 28px;
+             border-top: 1px solid #E2E8F0; padding-top: 16px; }}
+    .footer {{ background: #F8FAFC; padding: 16px; text-align: center;
+               color: #94A3B8; font-size: 11px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📋 Grade mis à jour</h1>
+      <p>Votre rôle sur la plateforme a changé</p>
+    </div>
+    <div class="body">
+      <p class="greeting">Bonjour <strong>{nom}</strong>,<br>
+      L'administrateur Yéki a modifié votre grade.</p>
+
+      <div class="grade-box">
+        <div><strong>Ancien grade :</strong> {ancien_label}</div>
+        <div><strong>Nouveau grade :</strong> {nouveau_label}</div>
+      </div>
+
+      <p class="note">
+        Connectez-vous pour découvrir les nouvelles fonctionnalités accessibles.
+      </p>
+    </div>
+    <div class="footer">© Yeki — Plateforme éducative</div>
+  </div>
+</body>
+</html>
+"""
+
+    send_mail(
+        subject=sujet,
+        message=message_texte,
+        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@yeki.app'),
+        recipient_list=[user.email],
+        html_message=message_html,
+        fail_silently=False,
+    )
+
 # ───────────────────────────────────────────────────────────────────────────
 # ADMIN GÉNÉRAL — Liste des enseignants en attente d'activation
 # GET /api/admin-general/enseignants/attente/
@@ -4546,15 +5017,22 @@ class CreerOlympiadeParCadreView(APIView):
                 status=400
             )
 
-        # ── Calcul du prix global ─────────────────────────────────
-        # Récupérer le nombre d'apprenants du département
+        # ── Calcul du prix global (tarification progressive) ─────────────────
         nb_apprenants = Profile.objects.filter(
             user_type='apprenant',
             cursus=departement.parcours.nom,
             is_active=True
         ).count()
-        
-        prix_global = nb_apprenants * PRIX_MINIMUM_OLYMPIADE
+
+        # Tarification progressive
+        if nb_apprenants <= 50:
+            prix_global = nb_apprenants * 100
+        elif nb_apprenants <= 100:
+            prix_global = int(nb_apprenants * 100 * 0.8)
+        elif nb_apprenants <= 200:
+            prix_global = int(nb_apprenants * 100 * 0.6)
+        else:
+            prix_global = int(nb_apprenants * 100 * 0.5)
 
         # ── Création de l'olympiade ───────────────────────────────
         olympiade = Olympiade.objects.create(
@@ -4668,7 +5146,180 @@ class CreerOlympiadeParCadreView(APIView):
             "en_attente_validation": besoin_validation or prix_global > 0,
             "detail": message_detail,
         }, status=status.HTTP_201_CREATED)
+
+# views.py - Ajouter CadreModifierOlympiadeView
+
+class CadreModifierOlympiadeView(APIView):
+    """
+    PATCH /api/olympiades/<olympiade_id>/modifier/
+    Modifie une olympiade qui n'a pas encore de devoir lié.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, olympiade_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=403
+            )
+
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+
+        # Vérifier que le cadre est l'organisateur
+        if olympiade.organisateur != profile:
+            return Response(
+                {"detail": "Vous n'êtes pas l'organisateur de cette olympiade."},
+                status=403
+            )
+
+        # Vérifier que l'olympiade n'a pas de devoir lié
+        if olympiade.devoir:
+            return Response(
+                {"detail": "Cette olympiade a déjà un devoir lié. Elle ne peut plus être modifiée."},
+                status=400
+            )
+
+        # Vérifier que l'olympiade n'est pas validée
+        if olympiade.est_validee:
+            return Response(
+                {"detail": "Cette olympiade est déjà validée. Elle ne peut plus être modifiée."},
+                status=400
+            )
+
+        data = request.data
+        updates = {}
+
+        # Champs modifiables
+        if 'titre' in data:
+            updates['titre'] = data['titre'].strip()
+        if 'description' in data:
+            updates['description'] = data['description'].strip()
+        if 'matiere' in data:
+            updates['matiere'] = data['matiere'].strip()
+        if 'niveau' in data:
+            updates['niveau'] = data['niveau'].strip()
+        if 'edition' in data:
+            updates['edition'] = data['edition'].strip()
+        if 'date_ouverture_inscription' in data:
+            from django.utils.dateparse import parse_datetime
+            updates['date_ouverture_inscription'] = parse_datetime(data['date_ouverture_inscription'])
+        if 'date_cloture_inscription' in data:
+            from django.utils.dateparse import parse_datetime
+            updates['date_cloture_inscription'] = parse_datetime(data['date_cloture_inscription'])
+        if 'date_debut_olympiade' in data:
+            from django.utils.dateparse import parse_datetime
+            updates['date_debut_olympiade'] = parse_datetime(data['date_debut_olympiade'])
+        if 'date_fin_olympiade' in data:
+            from django.utils.dateparse import parse_datetime
+            updates['date_fin_olympiade'] = parse_datetime(data['date_fin_olympiade'])
+        if 'duree_minutes' in data:
+            updates['duree_minutes'] = int(data['duree_minutes'])
+        if 'nb_questions' in data:
+            updates['nb_questions'] = int(data['nb_questions'])
+        if 'max_focus_perdu' in data:
+            updates['max_focus_perdu'] = int(data['max_focus_perdu'])
+        if 'melanger_questions' in data:
+            updates['melanger_questions'] = data['melanger_questions']
+        if 'melanger_choix' in data:
+            updates['melanger_choix'] = data['melanger_choix']
+        if 'une_seule_session' in data:
+            updates['une_seule_session'] = data['une_seule_session']
+        if 'prix_1er' in data:
+            updates['prix_1er'] = data['prix_1er'].strip()
+        if 'prix_2eme' in data:
+            updates['prix_2eme'] = data['prix_2eme'].strip()
+        if 'prix_3eme' in data:
+            updates['prix_3eme'] = data['prix_3eme'].strip()
+        if 'recompense' in data:
+            updates['recompense'] = data['recompense'].strip()
+        if 'niveaux_accessibles' in data:
+            niveaux = data['niveaux_accessibles']
+            if isinstance(niveaux, list):
+                updates['niveaux_accessibles'] = ','.join(niveaux)
+            else:
+                updates['niveaux_accessibles'] = niveaux
+        if 'demande_paiement_participants' in data:
+            updates['demande_paiement_participants'] = data['demande_paiement_participants']
+        if 'prix_participation' in data:
+            updates['prix_participation'] = int(data['prix_participation'])
+
+        if not updates:
+            return Response(
+                {"detail": "Aucune modification spécifiée."},
+                status=400
+            )
+
+        # Appliquer les modifications
+        for key, value in updates.items():
+            setattr(olympiade, key, value)
+        olympiade.save()
+
+        enregistrer_activite(
+            user=request.user,
+            action='olympiad_modified',
+            description=f"Olympiade « {olympiade.titre} » modifiée",
+            data={'olympiade': olympiade.titre, 'modifications': list(updates.keys())},
+            objet_id=olympiade.id,
+            objet_type='Olympiade',
+        )
+
+        return Response({
+            "detail": "Olympiade modifiée avec succès.",
+            "id": olympiade.id,
+            "titre": olympiade.titre,
+            "modifications": list(updates.keys()),
+        }, status=200)
+
+# views.py - Ajouter CadreDevoirsView
+
+class CadreDevoirsView(APIView):
+    """
+    GET /api/devoirs/cadre/mes-devoirs/
+    Retourne tous les devoirs créés par le cadre connecté.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=403
+            )
+
+        devoirs = Devoir.objects.filter(
+            cree_par=profile
+        ).order_by('-date_creation')
+
+        data = []
+        for d in devoirs:
+            data.append({
+                "id": d.id,
+                "titre": d.titre,
+                "description": d.description,
+                "type_devoir": d.type_devoir,
+                "matiere": d.matiere,
+                "niveau": d.niveau,
+                "date_debut": d.date_debut.isoformat(),
+                "date_limite": d.date_limite.isoformat(),
+                "est_publie": d.est_publie,
+                "nb_questions": d.questions.count(),
+                "note_sur": d.note_sur,
+                "est_lie_olympiade": hasattr(d, 'olympiade_config') and d.olympiade_config is not None,
+            })
+
+        return Response(data)
     
+
 # ---------------------------
 # Liste des enseignants cadres (light)
 # ---------------------------
@@ -4699,170 +5350,485 @@ def liste_enseignants(request):
     serializer = EnseignantSerializer(qs, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
+# views.py - Ajouter AdminGeneralModifierEnseignantView
+
+class AdminGeneralModifierEnseignantView(APIView):
+    """
+    PATCH /api/admin-general/enseignants/<profile_id>/modifier/
+    Body: { "user_type": "enseignant_principal", "is_active": true/false }
+
+    Modifie le type et/ou l'état d'activation d'un enseignant.
+    Envoie un email de confirmation en cas de changement de type.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, profile_id):
+        try:
+            profile_admin = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile_admin.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=403
+            )
+
+        enseignant = get_object_or_404(Profile, pk=profile_id)
+
+        # Vérifier que c'est bien un enseignant
+        if enseignant.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            return Response(
+                {"detail": "Cet utilisateur n'est pas un enseignant."},
+                status=400
+            )
+
+        data = request.data
+        ancien_type = enseignant.user_type
+        ancien_actif = enseignant.is_active
+        modifications = []
+
+        # ── Changer le type ─────────────────────────────────────
+        if 'user_type' in data:
+            nouveau_type = data['user_type'].strip()
+            types_valides = ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+            if nouveau_type not in types_valides:
+                return Response(
+                    {"detail": f"Type invalide. Valeurs: {types_valides}"},
+                    status=400
+                )
+            if nouveau_type != ancien_type:
+                enseignant.user_type = nouveau_type
+                modifications.append(f"Type: {ancien_type} → {nouveau_type}")
+                
+                # Envoyer un email de confirmation pour le changement de type
+                try:
+                    _envoyer_email_changement_type(enseignant, ancien_type, nouveau_type)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Erreur envoi email changement type: {e}")
+
+        # ── Activer/Désactiver ─────────────────────────────────
+        if 'is_active' in data:
+            nouvel_actif = bool(data['is_active'])
+            if nouvel_actif != ancien_actif:
+                enseignant.is_active = nouvel_actif
+                if nouvel_actif:
+                    modifications.append("Compte activé")
+                    try:
+                        _envoyer_email_activation_enseignant(enseignant)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).error(f"Erreur envoi email activation: {e}")
+                else:
+                    modifications.append("Compte désactivé")
+
+        if not modifications:
+            return Response(
+                {"detail": "Aucune modification spécifiée."},
+                status=400
+            )
+
+        enseignant.save(update_fields=['user_type', 'is_active'])
+
+        # Enregistrer dans l'historique
+        enregistrer_activite(
+            user=request.user,
+            action='teacher_modified',
+            description=f"Enseignant {_nom_profil(enseignant)} modifié : {', '.join(modifications)}",
+            data={
+                'enseignant_id': enseignant.id,
+                'enseignant_nom': _nom_profil(enseignant),
+                'modifications': modifications,
+                'ancien_type': ancien_type,
+                'nouveau_type': enseignant.user_type,
+                'ancien_actif': ancien_actif,
+                'nouveau_actif': enseignant.is_active,
+            },
+            objet_id=enseignant.id,
+            objet_type='Profile',
+        )
+
+        return Response({
+            "detail": "Enseignant modifié avec succès.",
+            "enseignant_id": enseignant.id,
+            "nom": _nom_profil(enseignant),
+            "user_type": enseignant.user_type,
+            "is_active": enseignant.is_active,
+            "modifications": modifications,
+        }, status=200)
+
+
+def _envoyer_email_changement_type(profile, ancien_type, nouveau_type):
+    """Envoie un email de confirmation pour le changement de type."""
+    user = profile.user
+    nom = f"{user.first_name} {user.last_name}".strip() or user.username
+
+    labels = {
+        'enseignant': 'Enseignant',
+        'enseignant_principal': 'Enseignant Principal',
+        'enseignant_cadre': 'Enseignant Cadre',
+        'enseignant_admin': 'Enseignant Administrateur',
+    }
+    ancien_label = labels.get(ancien_type, ancien_type)
+    nouveau_label = labels.get(nouveau_type, nouveau_type)
+
+    sujet = "📝 Votre grade d'enseignant a été modifié"
+
+    message_texte = f"""
+Bonjour {nom},
+
+L'administrateur général a modifié votre grade d'enseignant sur Yéki.
+
+Ancien grade : {ancien_label}
+Nouveau grade : {nouveau_label}
+
+Ce changement vous permet d'accéder à de nouvelles fonctionnalités sur la plateforme.
+
+— L'équipe Yéki
+"""
+
+    message_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }}
+    .container {{ max-width: 480px; margin: 40px auto; background: white;
+                  border-radius: 16px; overflow: hidden;
+                  box-shadow: 0 4px 20px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #2884A9, #2A657D);
+               padding: 32px 24px; text-align: center; }}
+    .header h1 {{ color: white; margin: 0; font-size: 22px; }}
+    .header p  {{ color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px; }}
+    .body   {{ padding: 32px 24px; text-align: center; }}
+    .greeting {{ color: #1E293B; font-size: 15px; margin-bottom: 24px; }}
+    .grade-box {{ background: #F1F5F9; border-radius: 12px; padding: 20px; margin: 0 auto;
+                  display: inline-block; min-width: 200px; text-align: left; }}
+    .grade-box div {{ padding: 4px 0; color: #1E293B; }}
+    .grade-box strong {{ color: #2884A9; }}
+    .note {{ color: #94A3B8; font-size: 11px; margin-top: 28px;
+             border-top: 1px solid #E2E8F0; padding-top: 16px; }}
+    .footer {{ background: #F8FAFC; padding: 16px; text-align: center;
+               color: #94A3B8; font-size: 11px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📝 Grade modifié</h1>
+      <p>Votre compte enseignant a été mis à jour</p>
+    </div>
+    <div class="body">
+      <p class="greeting">Bonjour <strong>{nom}</strong>,<br>
+      L'administrateur général a modifié votre grade d'enseignant sur Yéki.</p>
+
+      <div class="grade-box">
+        <div><strong>Ancien grade :</strong> {ancien_label}</div>
+        <div><strong>Nouveau grade :</strong> {nouveau_label}</div>
+      </div>
+
+      <p class="note">
+        Ce changement vous permet d'accéder à de nouvelles fonctionnalités sur la plateforme.
+      </p>
+    </div>
+    <div class="footer">© Yeki — Plateforme éducative</div>
+  </div>
+</body>
+</html>
+"""
+
+    send_mail(
+        subject=sujet,
+        message=message_texte,
+        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@yeki.app'),
+        recipient_list=[user.email],
+        html_message=message_html,
+        fail_silently=False,
+    )
+
+# views.py - Ajouter AdminGeneralSearchEnseignantsView
+
+class AdminGeneralSearchEnseignantsView(APIView):
+    """
+    GET /api/admin-general/enseignants/search/
+    Paramètres query :
+    - q: texte de recherche (nom, email, username)
+    - user_type: enseignant, enseignant_principal, enseignant_cadre, enseignant_admin
+    - is_active: true/false
+    - parcours_id: filtrer par parcours (admin du parcours)
+    - departement_id: filtrer par département (cadre)
+    - cours_id: filtrer par cours (enseignant principal)
+    - date_from, date_to: filtrer par date de création
+    
+    Retourne la liste des enseignants filtrés.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'admin':
+            return Response(
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=403
+            )
+
+        # Base queryset
+        qs = Profile.objects.filter(
+            user_type__in=['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        ).select_related('user').order_by('-user__date_joined')
+
+        # ── Filtres ──────────────────────────────────────────────
+        q = request.query_params.get('q', '').strip()
+        if q:
+            qs = qs.filter(
+                Q(user__username__icontains=q) |
+                Q(user__email__icontains=q) |
+                Q(user__first_name__icontains=q) |
+                Q(user__last_name__icontains=q) |
+                Q(bio__icontains=q)
+            )
+
+        user_type = request.query_params.get('user_type', '').strip()
+        if user_type and user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            qs = qs.filter(user_type=user_type)
+
+        is_active = request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() == 'true')
+
+        parcours_id = request.query_params.get('parcours_id')
+        if parcours_id:
+            qs = qs.filter(parcours_admin__id=parcours_id)
+
+        departement_id = request.query_params.get('departement_id')
+        if departement_id:
+            qs = qs.filter(departements_cadre__id=departement_id)
+
+        cours_id = request.query_params.get('cours_id')
+        if cours_id:
+            qs = qs.filter(
+                Q(cours_principal__id=cours_id) |
+                Q(cours_secondaires__id=cours_id)
+            )
+
+        date_from = request.query_params.get('date_from')
+        if date_from:
+            try:
+                from datetime import datetime
+                qs = qs.filter(user__date_joined__date__gte=datetime.strptime(date_from, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+
+        date_to = request.query_params.get('date_to')
+        if date_to:
+            try:
+                from datetime import datetime
+                qs = qs.filter(user__date_joined__date__lte=datetime.strptime(date_to, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+
+        # ── Pagination ───────────────────────────────────────────
+        try:
+            limit = min(int(request.query_params.get('limit', 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = int(request.query_params.get('offset', 0))
+        except (TypeError, ValueError):
+            offset = 0
+
+        total = qs.count()
+        qs = qs[offset:offset+limit]
+
+        data = []
+        for e in qs:
+            data.append({
+                "id": e.id,
+                "username": e.user.username,
+                "email": e.user.email,
+                "nom": _nom_profil(e),
+                "user_type": e.user_type,
+                "is_active": e.is_active,
+                "date_joined": e.user.date_joined.isoformat(),
+                "bio": e.bio or '',
+                "phone": e.phone or '',
+                "avatar": request.build_absolute_uri(e.avatar.url) if e.avatar else None,
+            })
+
+        return Response({
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "results": data,
+        }, status=200)
 
 # ───────────────────────────────────────────────────────────────────────────
 # ADMIN GÉNÉRAL — Dashboard (VERSION ULTIME CORRIGÉE)
 # GET /api/admin-general/dashboard/
 # ───────────────────────────────────────────────────────────────────────────
+
 class AdminGeneralDashboardView(APIView):
+    """
+    GET /api/admin-general/dashboard/
+    Dashboard complet pour l'administrateur général avec :
+    - Stats globales
+    - Liste des parcours
+    - Liste des départements
+    - Top enseignants
+    - Liste complète des enseignants (avec filtres)
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
-            # 1. Récupérer le profil
-            try:
-                profile = request.user.profile
-            except Profile.DoesNotExist:
-                return Response(
-                    {"detail": "Profil introuvable. Veuillez vérifier votre compte."},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
 
-            # 2. Vérifier le rôle
-            if profile.user_type != 'admin':
-                return Response(
-                    {"detail": "Accès réservé à l'administrateur général."},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-
-            # 3. Récupérer les données avec gestion d'erreurs
-            try:
-                # Parcours
-                parcours_qs = Parcours.objects.prefetch_related(
-                    'departements__cours', 'admin__user'
-                ).all()
-                
-                parcours_data = []
-                for p in parcours_qs:
-                    try:
-                        depts = p.departements.all()
-                        nb_depts = depts.count()
-                        nb_app = 0
-                        nb_cours = 0
-                        
-                        for d in depts:
-                            for c in d.cours.all():
-                                nb_app += c.nb_apprenants
-                                nb_cours += 1
-                        
-                        admin_data = None
-                        if p.admin:
-                            admin_data = {
-                                "id": p.admin.id,
-                                "nom": _nom_profil(p.admin),
-                                "username": p.admin.user.username,
-                                "email": p.admin.user.email,
-                            }
-                        
-                        parcours_data.append({
-                            "id": p.id,
-                            "nom": p.nom,
-                            "nb_departements": nb_depts,
-                            "nb_apprenants": nb_app,
-                            "nb_cours": nb_cours,
-                            "taux_moyen": 0,
-                            "enseignant_admin": admin_data,
-                        })
-                    except Exception as e:
-                        # Si un parcours particulier cause une erreur, on le saute
-                        continue
-
-                # Départements
-                departements_qs = Departement.objects.select_related(
-                    'parcours', 'cadre__user'
-                ).prefetch_related('cours').all()
-                
-                depts_data = []
-                for d in departements_qs:
-                    try:
-                        nb_cours = d.cours.count()
-                        nb_app = 0
-                        for c in d.cours.all():
-                            nb_app += c.nb_apprenants
-                        
-                        depts_data.append({
-                            "id": d.id,
-                            "nom": d.nom,
-                            "parcours": d.parcours.nom if d.parcours else "",
-                            "nb_cours": nb_cours,
-                            "nb_apprenants": nb_app,
-                            "taux_moyen": 0,
-                        })
-                    except Exception as e:
-                        continue
-
-                # Statistiques
-                try:
-                    stats = {
-                        "nb_parcours": Parcours.objects.count(),
-                        "nb_departements": Departement.objects.count(),
-                        "nb_cours": Cours.objects.count(),
-                        "nb_apprenants": Profile.objects.filter(user_type='apprenant').count(),
-                        "nb_enseignants": Profile.objects.filter(
-                            user_type__in=[
-                                'enseignant_admin', 'enseignant_cadre',
-                                'enseignant_principal', 'enseignant'
-                            ]
-                        ).count(),
-                        "nb_lecons": Lecon.objects.count(),
-                    }
-                except Exception:
-                    stats = {
-                        "nb_parcours": 0,
-                        "nb_departements": 0,
-                        "nb_cours": 0,
-                        "nb_apprenants": 0,
-                        "nb_enseignants": 0,
-                        "nb_lecons": 0,
-                    }
-
-                # Top enseignants
-                top_enseignants = []
-                try:
-                    from django.db.models import Avg
-                    enseignants = Profile.objects.filter(
-                        user_type__in=['enseignant_principal', 'enseignant']
-                    ).annotate(
-                        score_moyen=Avg('cours_principaux__exercices__evaluationexercice__score')
-                    ).order_by('-score_moyen')[:10]
-                    
-                    for e in enseignants:
-                        if e.score_moyen:
-                            top_enseignants.append({
-                                "id": e.id,
-                                "nom": _nom_profil(e),
-                                "role": e.user_type,
-                                "score": round(e.score_moyen / 20 * 20, 1) if e.score_moyen else 0,
-                            })
-                except Exception:
-                    pass
-
-                nom_complet = (
-                    f"{profile.user.first_name} {profile.user.last_name}".strip()
-                    or profile.user.username
-                )
-
-                return Response({
-                    "nom": nom_complet,
-                    "stats": stats,
-                    "parcours": parcours_data,
-                    "departements": depts_data,
-                    "top_enseignants": top_enseignants,
-                }, status=status.HTTP_200_OK)
-                
-            except Exception as e:
-                # Erreur dans le traitement des données
-                return Response(
-                    {"detail": f"Erreur lors du traitement des données: {str(e)}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-                
-        except Exception as e:
-            # Erreur générale
+        if profile.user_type != 'admin':
             return Response(
-                {"detail": f"Erreur serveur: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"detail": "Accès réservé à l'administrateur général."},
+                status=403
             )
+
+        # Parcours
+        parcours_qs = Parcours.objects.prefetch_related(
+            'departements__cours', 'admin__user'
+        ).all()
+        
+        parcours_data = []
+        for p in parcours_qs:
+            depts = p.departements.all()
+            nb_depts = depts.count()
+            nb_app = 0
+            nb_cours = 0
+            
+            for d in depts:
+                for c in d.cours.all():
+                    nb_app += c.nb_apprenants
+                    nb_cours += 1
+            
+            admin_data = None
+            if p.admin:
+                admin_data = {
+                    "id": p.admin.id,
+                    "nom": _nom_profil(p.admin),
+                    "username": p.admin.user.username,
+                    "email": p.admin.user.email,
+                    "user_type": p.admin.user_type,
+                }
+            
+            parcours_data.append({
+                "id": p.id,
+                "nom": p.nom,
+                "type_parcours": p.type_parcours,
+                "nb_departements": nb_depts,
+                "nb_apprenants": nb_app,
+                "nb_cours": nb_cours,
+                "taux_moyen": 0,
+                "enseignant_admin": admin_data,
+            })
+
+        # Départements
+        departements_qs = Departement.objects.select_related(
+            'parcours', 'cadre__user'
+        ).prefetch_related('cours').all()
+        
+        depts_data = []
+        for d in departements_qs:
+            nb_cours = d.cours.count()
+            nb_app = 0
+            for c in d.cours.all():
+                nb_app += c.nb_apprenants
+            
+            depts_data.append({
+                "id": d.id,
+                "nom": d.nom,
+                "parcours": d.parcours.nom if d.parcours else "",
+                "parcours_id": d.parcours.id if d.parcours else None,
+                "nb_cours": nb_cours,
+                "nb_apprenants": nb_app,
+                "taux_moyen": 0,
+                "cadre": {
+                    "id": d.cadre.id,
+                    "nom": _nom_profil(d.cadre),
+                } if d.cadre else None,
+            })
+
+        # Statistiques globales
+        stats = {
+            "nb_parcours": Parcours.objects.count(),
+            "nb_departements": Departement.objects.count(),
+            "nb_cours": Cours.objects.count(),
+            "nb_apprenants": Profile.objects.filter(user_type='apprenant').count(),
+            "nb_enseignants": Profile.objects.filter(
+                user_type__in=[
+                    'enseignant_admin', 'enseignant_cadre',
+                    'enseignant_principal', 'enseignant'
+                ]
+            ).count(),
+            "nb_lecons": Lecon.objects.count(),
+        }
+
+        # Top enseignants
+        from django.db.models import Avg
+        top_enseignants = []
+        enseignants_top = Profile.objects.filter(
+            user_type__in=['enseignant_principal', 'enseignant']
+        ).annotate(
+            score_moyen=Avg('cours_principaux__exercices__evaluationexercice__score')
+        ).order_by('-score_moyen')[:10]
+        
+        for e in enseignants_top:
+            if e.score_moyen:
+                top_enseignants.append({
+                    "id": e.id,
+                    "nom": _nom_profil(e),
+                    "role": e.user_type,
+                    "score": round(e.score_moyen / 20 * 20, 1) if e.score_moyen else 0,
+                })
+
+        # ✅ Liste complète des enseignants (tous types, triés par date de création)
+        enseignants = Profile.objects.filter(
+            user_type__in=['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        ).select_related('user').order_by('-user__date_joined')
+
+        enseignants_data = []
+        for e in enseignants:
+            enseignants_data.append({
+                "id": e.id,
+                "username": e.user.username,
+                "email": e.user.email,
+                "nom": _nom_profil(e),
+                "user_type": e.user_type,
+                "is_active": e.is_active,
+                "date_joined": e.user.date_joined.isoformat(),
+                "bio": e.bio or '',
+                "phone": e.phone or '',
+                "avatar": request.build_absolute_uri(e.avatar.url) if e.avatar else None,
+                # Informations supplémentaires
+                "parcours": None,  # Sera rempli si l'enseignant est admin d'un parcours
+                "departements": [],  # Sera rempli si cadre
+                "cours": [],  # Sera rempli si principal
+            })
+
+        nom_complet = _nom_profil(profile)
+
+        return Response({
+            "nom": nom_complet,
+            "stats": stats,
+            "parcours": parcours_data,
+            "departements": depts_data,
+            "top_enseignants": top_enseignants,
+            "enseignants": enseignants_data,
+        }, status=200)
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -5755,7 +6721,181 @@ class AdminUpdateDepartementView(APIView):
             'errors': serializer.errors
         }, status=400)
 
-# 6. Vue pour l'apprenant - Vérifier l'accès à un département
+# views.py - Ajouter CadreOlympiadesView
+
+class CadreOlympiadesView(APIView):
+    """
+    GET /api/olympiades/cadre/mes-olympiades/
+    Retourne toutes les olympiades créées par le cadre connecté.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=403
+            )
+
+        olympiades = Olympiade.objects.filter(
+            organisateur=profile
+        ).select_related('devoir').order_by('-created_at')
+
+        data = []
+        for o in olympiades:
+            data.append({
+                "id": o.id,
+                "titre": o.titre,
+                "matiere": o.matiere,
+                "niveau": o.niveau,
+                "edition": o.edition,
+                "statut": o.statut_auto,
+                "date_debut_olympiade": o.date_debut_olympiade.isoformat(),
+                "date_fin_olympiade": o.date_fin_olympiade.isoformat(),
+                "nb_inscrits": o.inscriptions.count(),
+                "nb_questions": o.nb_questions,
+                "duree_minutes": o.duree_minutes,
+                "prix_global": o.prix_global,
+                "est_validee": o.est_validee,
+                "est_refusee": o.est_refusee,
+                "devoir_id": o.devoir.id if o.devoir else None,
+                "est_publiee": o.devoir.est_publie if o.devoir else False,
+                "prix_1er": o.prix_1er,
+                "prix_2eme": o.prix_2eme,
+                "prix_3eme": o.prix_3eme,
+                "recompense": o.recompense,
+                "demande_paiement_participants": o.demande_paiement_participants,
+                "prix_participation": o.prix_participation,
+                "niveaux_accessibles": o.get_niveaux_accessibles_list(),
+                "melanger_questions": o.melanger_questions,
+                "melanger_choix": o.melanger_choix,
+                "une_seule_session": o.une_seule_session,
+                "max_focus_perdu": o.max_focus_perdu,
+                "description": o.description,
+                "created_at": o.created_at.isoformat() if hasattr(o, 'created_at') else None,
+            })
+
+        return Response(data)
+
+# views.py - Ajouter LierDevoirOlympiadeView
+
+class LierDevoirOlympiadeView(APIView):
+    """
+    POST /api/olympiades/<olympiade_id>/lier-devoir/
+    Body: { "devoir_id": 123 }
+
+    Lie un devoir existant à une olympiade.
+    Le cadre doit être l'organisateur de l'olympiade et le créateur du devoir.
+    Une fois lié, l'olympiade ne peut plus être modifiée.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, olympiade_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Accès réservé aux enseignants cadres."},
+                status=403
+            )
+
+        olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
+
+        # Vérifier que le cadre est l'organisateur
+        if olympiade.organisateur != profile:
+            return Response(
+                {"detail": "Vous n'êtes pas l'organisateur de cette olympiade."},
+                status=403
+            )
+
+        # Vérifier que l'olympiade n'a pas déjà un devoir lié
+        if olympiade.devoir:
+            return Response(
+                {"detail": "Cette olympiade a déjà un devoir lié. Elle ne peut plus être modifiée."},
+                status=400
+            )
+
+        devoir_id = request.data.get('devoir_id')
+        if not devoir_id:
+            return Response(
+                {"detail": "devoir_id est requis."},
+                status=400
+            )
+
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+
+        # Vérifier que le cadre a créé le devoir
+        if devoir.cree_par != profile:
+            return Response(
+                {"detail": "Vous n'êtes pas le créateur de ce devoir."},
+                status=403
+            )
+
+        # Vérifier que le devoir n'est pas déjà lié à une olympiade
+        if hasattr(devoir, 'olympiade_config') and devoir.olympiade_config:
+            return Response(
+                {"detail": "Ce devoir est déjà lié à une olympiade."},
+                status=400
+            )
+
+        # Lier le devoir à l'olympiade
+        olympiade.devoir = devoir
+        olympiade.save()
+
+        # Le devoir devient non modifiable
+        devoir.est_publie = False  # En attente de validation/paiement
+        devoir.save()
+
+        enregistrer_activite(
+            user=request.user,
+            action='olympiad_modified',
+            description=f"Devoir « {devoir.titre} » lié à l'olympiade « {olympiade.titre} »",
+            data={
+                'olympiade': olympiade.titre,
+                'devoir': devoir.titre,
+            },
+            objet_id=olympiade.id,
+            objet_type='Olympiade',
+        )
+
+        # Calculer le prix global avec la nouvelle tarification
+        nb_apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus=olympiade.organisateur.departements_cadre.first().parcours.nom,
+            is_active=True
+        ).count()
+        
+        # Tarification progressive
+        if nb_apprenants <= 50:
+            prix_global = nb_apprenants * 100
+        elif nb_apprenants <= 100:
+            prix_global = int(nb_apprenants * 100 * 0.8)
+        elif nb_apprenants <= 200:
+            prix_global = int(nb_apprenants * 100 * 0.6)
+        else:
+            prix_global = int(nb_apprenants * 100 * 0.5)
+
+        olympiade.prix_global = prix_global
+        olympiade.save(update_fields=['prix_global'])
+
+        return Response({
+            "detail": "Devoir lié avec succès à l'olympiade.",
+            "olympiade_id": olympiade.id,
+            "devoir_id": devoir.id,
+            "prix_global": prix_global,
+            "nb_apprenants": nb_apprenants,
+            "message": "L'olympiade est maintenant prête à être soumise. Veuillez procéder au paiement pour la valider."
+        }, status=200)
+
 class VerifierAccesDepartementView(APIView):
     """
     GET /api/apprenant/departement/<pk>/acces/
@@ -7334,6 +8474,7 @@ class RegisterView(APIView):
 # ---------------------------
 # Login
 # ---------------------------
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -7342,8 +8483,17 @@ class LoginView(APIView):
 
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            token, _ = Token.objects.get_or_create(user=user)
             profile = Profile.objects.get(user=user)
+            
+            # Vérifier si le compte est actif
+            if not profile.is_active:
+                return Response({
+                    'detail': 'Votre compte enseignant est en attente de validation par l\'administrateur.',
+                    'error_type': 'account_inactive',
+                    'role': profile.user_type,
+                }, status=403)
+
+            token, _ = Token.objects.get_or_create(user=user)
 
             return Response({
                 'token': token.key,
@@ -7353,11 +8503,10 @@ class LoginView(APIView):
                     'username': user.username,
                     'email': user.email,
                 }
-            }, status=status.HTTP_200_OK)
+            }, status=200)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
+        return Response(serializer.errors, status=400)
+    
 # ═══════════════════════════════════════════════════════════════════════════
 #  ADDITIONS À views.py — Gestion complète du mot de passe oublié
 #  Coller à la fin de votre views.py existant

@@ -288,9 +288,36 @@ urlpatterns = [
          name='verifier-acces'),
     
     # Admin - Mise à jour département
-    path('admin/departements/<int:pk>/update/', 
-         AdminUpdateDepartementView.as_view(), 
+    path('admin/departements/<int:pk>/update/',
+         AdminUpdateDepartementView.as_view(),
          name='admin-departement-update'),
+
+     path('admin-general/enseignants/search/', 
+         AdminGeneralSearchEnseignantsView.as_view(), 
+         name='admin-general-enseignants-search'),
+    path('admin-general/enseignants/<int:profile_id>/modifier/', 
+         AdminGeneralModifierEnseignantView.as_view(), 
+         name='admin-general-modifier-enseignant'),
+
+         # Olympiades du cadre
+    path('olympiades/cadre/mes-olympiades/', 
+         CadreOlympiadesView.as_view(), 
+         name='cadre-olympiades'),
+    
+    # Devoirs du cadre
+    path('devoirs/cadre/mes-devoirs/', 
+         CadreDevoirsView.as_view(), 
+         name='cadre-devoirs'),
+    
+    # Lier un devoir à une olympiade
+    path('olympiades/<int:olympiade_id>/lier-devoir/', 
+         LierDevoirOlympiadeView.as_view(), 
+         name='lier-devoir-olympiade'),
+    
+    # Modifier une olympiade (seulement si non liée)
+    path('olympiades/<int:olympiade_id>/modifier/', 
+         CadreModifierOlympiadeView.as_view(), 
+         name='modifier-olympiade'),
 
     # Paiement olympiade (cadre)
     path('olympiades/<int:olympiade_id>/payer/', 
