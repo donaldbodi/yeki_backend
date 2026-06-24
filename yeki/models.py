@@ -42,7 +42,7 @@ class Profile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} ({self.user_type})"
-    
+
 
 class PasswordResetOTP(models.Model):
     """
@@ -555,6 +555,51 @@ class Exercice(models.Model):
     etoiles = models.IntegerField()
     duree_minutes = models.IntegerField(default=10)  # durée examen
     tentatives_max = models.IntegerField(default=1)
+    module = models.ForeignKey(
+        Module, 
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='exercices',
+        help_text="Module auquel l'exercice est rattaché (optionnel)"
+    )
+    lecon = models.ForeignKey(
+        Lecon,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='exercices',
+        help_text="Leçon à laquelle l'exercice est rattaché (optionnel)"
+    )
+    type_exercice = models.CharField(
+        max_length=20,
+        choices=[
+            ('general', 'Général'),
+            ('module', 'Module'),
+            ('lecon', 'Leçon'),
+            ('epreuve', 'Épreuve'),
+        ],
+        default='general',
+        help_text="Type d'exercice pour le filtrage"
+    )
+    
+    # Pour les épreuves (ensemble d'exercices)
+    est_epreuve = models.BooleanField(default=False, help_text="True si c'est une épreuve composée d'exercices")
+    exercices_composes = models.ManyToManyField(
+        'self',
+        blank=True,
+        symmetrical=False,
+        related_name='epreuves_parentes',
+        help_text="Exercices composant cette épreuve"
+    )
+    
+    # Image pour l'énoncé
+    enonce_image = models.ImageField(
+        upload_to='exercices/enonces/',
+        null=True, blank=True,
+        help_text="Image pour l'énoncé (optionnel)"
+    )
+    
+    def __str__(self):
+        return f"{self.titre} ({self.get_type_exercice_display()})"
 
     @property
     def duree(self):
@@ -1118,6 +1163,15 @@ class LikeReponse(models.Model):
 
     class Meta:
         unique_together = ("reponse", "utilisateur")
+
+class ReponseImage(models.Model):
+    """Image jointe à une réponse du forum"""
+    reponse = models.ForeignKey(ReponseQuestion, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='forum/reponses/images/')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Image de réponse {self.reponse.id}"
 
         
 '''@receiver(post_save, sender=Lecon)

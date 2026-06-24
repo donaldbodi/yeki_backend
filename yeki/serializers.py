@@ -836,24 +836,234 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
         return question
 
 
+class ReponseSerializer(serializers.ModelSerializer):
+    auteur_nom = serializers.SerializerMethodField()
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
+    nb_likes = serializers.SerializerMethodField()
+    mon_like = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReponseQuestion
+        fields = [
+            "id", "contenu", "cree_le", "est_solution",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
+            "nb_likes", "mon_like", "image_url", "audio_url"
+        ]
+
+    def get_auteur_nom(self, obj):
+        user = obj.auteur
+        nom = f"{user.first_name} {user.last_name}".strip()
+        return nom if nom else user.username
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
+
+    def get_nb_likes(self, obj):
+        return obj.likes.count()
+
+    def get_mon_like(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(utilisateur=request.user).exists()
+        return False
+
+    def get_image_url(self, obj):
+        # Si la réponse a une image (modèle à étendre si nécessaire)
+        return None
+
+    def get_audio_url(self, obj):
+        # Si la réponse a un audio (modèle à étendre si nécessaire)
+        return None
+
+
+class QuestionForumDetailSerializer(serializers.ModelSerializer):
+    auteur_nom = serializers.SerializerMethodField()
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
+    nb_reponses = serializers.IntegerField(read_only=True)
+    reponses = ReponseSerializer(many=True, read_only=True)
+    image_url = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuestionForum
+        fields = [
+            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
+            "nb_reponses", "reponses",
+            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
+            "exercice_id", "exercice_titre",
+            "devoir_id", "devoir_titre",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
+            "image_url", "audio_url",
+        ]
+
+    def get_auteur_nom(self, obj):
+        user = obj.auteur
+        nom = f"{user.first_name} {user.last_name}".strip()
+        return nom if nom else user.username
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
+
+    def get_audio_url(self, obj):
+        if obj.audio:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.audio.url)
+            return obj.audio.url
+        return None
+
+
+class QuestionForumListSerializer(serializers.ModelSerializer):
+    auteur_nom = serializers.SerializerMethodField()
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
+    nb_reponses = serializers.IntegerField(read_only=True)
+    image_url = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuestionForum
+        fields = [
+            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
+            "nb_reponses",
+            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
+            "exercice_id", "exercice_titre",
+            "devoir_id", "devoir_titre",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
+            "image_url", "audio_url",
+        ]
+
+    def get_auteur_nom(self, obj):
+        user = obj.auteur
+        nom = f"{user.first_name} {user.last_name}".strip()
+        return nom if nom else user.username
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
+
+    def get_audio_url(self, obj):
+        if obj.audio:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.audio.url)
+            return obj.audio.url
+        return None
+
+
 class ExerciceSerializer(serializers.ModelSerializer):
     questions = QuestionSerializer(many=True, read_only=True)
+    module_nom = serializers.CharField(source='module.titre', read_only=True, allow_null=True)
+    lecon_nom = serializers.CharField(source='lecon.titre', read_only=True, allow_null=True)
+    enonce_image_url = serializers.SerializerMethodField()
+    exercices_composes_details = serializers.SerializerMethodField()
+    est_epreuve = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Exercice
-        fields = ["id", "titre", "enonce", "etoiles", "questions"]
+        fields = [
+            "id", "titre", "enonce", "etoiles", "questions", "duree_minutes", "tentatives_max",
+            "module", "module_nom", "lecon", "lecon_nom", "type_exercice", "est_epreuve",
+            "exercices_composes", "exercices_composes_details", "enonce_image_url",
+            "nb_questions"  # Calculé dynamiquement
+        ]
+
+    def get_enonce_image_url(self, obj):
+        if obj.enonce_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.enonce_image.url)
+            return obj.enonce_image.url
+        return None
+
+    def get_exercices_composes_details(self, obj):
+        if not obj.est_epreuve:
+            return []
+        return [
+            {
+                'id': ex.id,
+                'titre': ex.titre,
+                'nb_questions': ex.questions.count()
+            }
+            for ex in obj.exercices_composes.all()
+        ]
 
 
 class ExerciceCreateSerializer(serializers.ModelSerializer):
+    enonce_image = serializers.ImageField(required=False, allow_null=True)
+    exercices_composes = serializers.PrimaryKeyRelatedField(
+        queryset=Exercice.objects.all(),
+        many=True,
+        required=False
+    )
+
     class Meta:
-        model  = Exercice
-        fields = ['titre', 'enonce', 'etoiles', 'duree_minutes', 'tentatives_max']
+        model = Exercice
+        fields = [
+            'titre', 'enonce', 'etoiles', 'duree_minutes', 'tentatives_max',
+            'module', 'lecon', 'type_exercice', 'est_epreuve',
+            'exercices_composes', 'enonce_image'
+        ]
         extra_kwargs = {
-            'etoiles':        {'min_value': 1, 'max_value': 5},
-            'duree_minutes':  {'min_value': 1},
-            'tentatives_max': {'min_value': 1},
+            'type_exercice': {'required': False, 'default': 'general'},
+            'est_epreuve': {'required': False, 'default': False},
         }
 
+    def validate(self, data):
+        # Si c'est une épreuve, elle doit contenir des exercices
+        if data.get('est_epreuve', False):
+            exercices = data.get('exercices_composes', [])
+            if not exercices:
+                raise serializers.ValidationError(
+                    "Une épreuve doit contenir au moins un exercice."
+                )
+        return data
+
+    def create(self, validated_data):
+        exercices_composes = validated_data.pop('exercices_composes', [])
+        enonce_image = validated_data.pop('enonce_image', None)
+        
+        exercice = Exercice.objects.create(**validated_data)
+        
+        if enonce_image:
+            exercice.enonce_image = enonce_image
+            exercice.save()
+        
+        if exercices_composes:
+            exercice.exercices_composes.set(exercices_composes)
+            
+        return exercice
 
 class SessionSerializer(serializers.ModelSerializer):
     temps_restant = serializers.SerializerMethodField()
@@ -1205,97 +1415,6 @@ class ReponseSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             return obj.likes.filter(utilisateur=request.user).exists()
         return False
-
-
-# serializers.py - Mettre à jour les sérialiseurs QuestionForum
-
-class QuestionForumListSerializer(serializers.ModelSerializer):
-    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
-    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
-    auteur_est_enseignant = serializers.SerializerMethodField()
-    nb_reponses     = serializers.IntegerField(read_only=True)
-    image_url       = serializers.SerializerMethodField()
-    audio_url       = serializers.SerializerMethodField()
-    
-    class Meta:
-        model  = QuestionForum
-        fields = [
-            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
-            "nb_reponses",
-            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
-            "exercice_id", "exercice_titre",
-            "devoir_id", "devoir_titre",
-            "auteur_nom", "auteur_username", "auteur_est_enseignant",
-            "image_url", "audio_url",  # ⚠️ AJOUTÉ
-        ]
-
-    def get_auteur_est_enseignant(self, obj):
-        try:
-            profile = obj.auteur.profile
-            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
-        except:
-            return False
-
-    def get_image_url(self, obj):
-        if obj.image:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-            return obj.image.url
-        return None
-
-    def get_audio_url(self, obj):
-        if obj.audio:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.audio.url)
-            return obj.audio.url
-        return None
-
-
-class QuestionForumDetailSerializer(serializers.ModelSerializer):
-    auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
-    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
-    auteur_est_enseignant = serializers.SerializerMethodField()
-    nb_reponses     = serializers.IntegerField(read_only=True)
-    reponses        = ReponseSerializer(many=True, read_only=True)
-    image_url       = serializers.SerializerMethodField()
-    audio_url       = serializers.SerializerMethodField()
-
-    class Meta:
-        model  = QuestionForum
-        fields = [
-            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
-            "nb_reponses", "reponses",
-            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
-            "exercice_id", "exercice_titre",
-            "devoir_id", "devoir_titre",
-            "auteur_nom", "auteur_username", "auteur_est_enseignant",
-            "image_url", "audio_url",  # ⚠️ AJOUTÉ
-        ]
-
-    def get_auteur_est_enseignant(self, obj):
-        try:
-            profile = obj.auteur.profile
-            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
-        except:
-            return False
-
-    def get_image_url(self, obj):
-        if obj.image:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-            return obj.image.url
-        return None
-
-    def get_audio_url(self, obj):
-        if obj.audio:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.audio.url)
-            return obj.audio.url
-        return None
 
 
 class QuestionForumCreateSerializer(serializers.ModelSerializer):

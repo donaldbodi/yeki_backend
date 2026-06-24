@@ -27,7 +27,7 @@ import logging
 
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Sum, Avg, Q
+from django.db.models import F, Count, Sum, Avg, Q
 
 from .models import *
 from .serializers import *
@@ -1016,6 +1016,280 @@ def repetiteurs_page(request):
     """
     return render(request, 'repetiteurs.html')
 
+# views.py - Ajouter ces classes après les autres vues
+
+class PrincipalDashboardAPIView(APIView):
+    """
+    GET /api/principal/dashboard_stats/
+    Retourne les statistiques du dashboard pour l'enseignant principal.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_principal':
+            return Response(
+                {"detail": "Accès réservé aux enseignants principaux."},
+                status=403
+            )
+
+        # Récupérer les cours du principal
+        cours = Cours.objects.filter(enseignant_principal=profile)
+        cours_ids = cours.values_list('id', flat=True)
+
+        # Statistiques de base
+        nb_cours = cours.count()
+        nb_lecons = Lecon.objects.filter(cours__in=cours_ids).count()
+        nb_devoirs = Devoir.objects.filter(cours_lie__in=cours_ids).count()
+        
+        # Apprenants uniques
+        apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus__in=Departement.objects.filter(
+                cours__in=cours_ids
+            ).values_list('parcours__nom', flat=True)
+        ).distinct().count()
+
+        # Taux de rendu global
+        total_rendus = SoumissionDevoir.objects.filter(
+            devoir__cours_lie__in=cours_ids,
+            statut__in=['soumis', 'corrige', 'en_retard']
+        ).count()
+        total_attendu = nb_devoirs * apprenants
+        taux_rendu = (total_rendus / total_attendu * 100) if total_attendu > 0 else 0
+
+        # Moyenne globale
+        moyenne_globale = SoumissionDevoir.objects.filter(
+            devoir__cours_lie__in=cours_ids,
+            note__isnull=False
+        ).aggregate(Avg('note'))['note__avg'] or 0
+
+        # Retards
+        retards = SoumissionDevoir.objects.filter(
+            devoir__cours_lie__in=cours_ids,
+            soumis_le__gt=F('devoir__date_limite')
+        ).count()
+
+        # Apprenants à risque
+        apprenants_risque = []
+        for apprenant in apprenants:
+            # À implémenter avec une logique spécifique
+            pass
+
+        # Devoirs par cours
+        devoirs_par_cours = []
+        for c in cours:
+            devoirs = Devoir.objects.filter(cours_lie=c)
+            nb_devoirs_cours = devoirs.count()
+            apprenants_cours = Profile.objects.filter(
+                user_type='apprenant',
+                cursus=c.departement.parcours.nom
+            ).count()
+            
+            rendus_cours = SoumissionDevoir.objects.filter(
+                devoir__in=devoirs,
+                statut__in=['soumis', 'corrige', 'en_retard']
+            )
+            total_rendus_cours = rendus_cours.count()
+            total_attendu_cours = nb_devoirs_cours * apprenants_cours
+            taux_cours = (total_rendus_cours / total_attendu_cours * 100) if total_attendu_cours > 0 else 0
+            
+            # Détails des devoirs
+            details_devoirs = []
+            for devoir in devoirs:
+                rendus_devoir = rendus_cours.filter(devoir=devoir)
+                nb_rendus = rendus_devoir.count()
+                nb_retards = rendus_devoir.filter(
+                    soumis_le__gt=devoir.date_limite
+                ).count()
+                note_moyenne = rendus_devoir.filter(
+                    note__isnull=False
+                ).aggregate(Avg('note'))['note__avg'] or 0
+                
+                details_devoirs.append({
+                    'id': devoir.id,
+                    'titre': devoir.titre,
+                    'date_limite': devoir.date_limite.isoformat(),
+                    'nb_rendus': nb_rendus,
+                    'nb_retards': nb_retards,
+                    'taux_rendu': (nb_rendus / apprenants_cours * 100) if apprenants_cours > 0 else 0,
+                    'note_moyenne': round(note_moyenne, 1),
+                    'type_correction': getattr(devoir, 'type_correction', 'auto')
+                })
+            
+            devoirs_par_cours.append({
+                'cours_id': c.id,
+                'cours_titre': c.titre,
+                'nb_devoirs': nb_devoirs_cours,
+                'taux_rendu': round(taux_cours, 1),
+                'details_devoirs': details_devoirs
+            })
+
+        # Tendance des rendus (7 derniers jours)
+        tendance_rendus = []
+        for i in range(7):
+            date = timezone.now().date() - timedelta(days=i)
+            nb_rendus_jour = SoumissionDevoir.objects.filter(
+                devoir__cours_lie__in=cours_ids,
+                soumis_le__date=date,
+                statut__in=['soumis', 'corrige', 'en_retard']
+            ).count()
+            tendance_rendus.append({
+                'date': date.isoformat(),
+                'nb_rendus': nb_rendus_jour
+            })
+
+        return Response({
+            'nom': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username,
+            'stats': {
+                'nb_cours': nb_cours,
+                'nb_lecons': nb_lecons,
+                'nb_devoirs': nb_devoirs,
+                'nb_apprenants': apprenants,
+                'taux_rendu_global': round(taux_rendu, 1),
+                'moyenne_globale': round(moyenne_globale, 1),
+                'nb_retards': retards,
+            },
+            'devoirs_par_cours': devoirs_par_cours,
+            'apprenants_risque': apprenants_risque,
+            'tendance_rendus': tendance_rendus
+        })
+
+
+class PrincipalApprenantsCoursAPIView(APIView):
+    """
+    GET /api/principal/apprenants_cours/
+    Query param: ?cours_id=123
+    Retourne la liste des apprenants d'un cours avec leurs statistiques.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_principal':
+            return Response(
+                {"detail": "Accès réservé aux enseignants principaux."},
+                status=403
+            )
+
+        cours_id = request.query_params.get('cours_id')
+        if not cours_id:
+            return Response({"detail": "cours_id requis."}, status=400)
+
+        try:
+            cours = Cours.objects.get(id=cours_id, enseignant_principal=profile)
+        except Cours.DoesNotExist:
+            return Response({"detail": "Cours non trouvé ou non assigné."}, status=404)
+
+        # Récupérer les apprenants du cours via le parcours
+        apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus=cours.departement.parcours.nom,
+            is_active=True
+        ).select_related('user')
+
+        result = []
+        for apprenant in apprenants:
+            # Récupérer les soumissions de l'apprenant pour ce cours
+            soumissions = SoumissionDevoir.objects.filter(
+                devoir__cours_lie=cours,
+                utilisateur=apprenant.user
+            )
+            
+            nb_rendus = soumissions.filter(
+                statut__in=['soumis', 'corrige', 'en_retard']
+            ).count()
+            nb_devoirs_total = Devoir.objects.filter(cours_lie=cours).count()
+            taux_rendu = (nb_rendus / nb_devoirs_total * 100) if nb_devoirs_total > 0 else 0
+            
+            moyenne = soumissions.filter(
+                note__isnull=False
+            ).aggregate(Avg('note'))['note__avg'] or 0
+            
+            dernier_rendu = soumissions.order_by('-soumis_le').first()
+            
+            nb_retards = soumissions.filter(
+                soumis_le__gt=F('devoir__date_limite')
+            ).count()
+            
+            result.append({
+                'id': apprenant.id,
+                'nom': f"{apprenant.user.first_name} {apprenant.user.last_name}".strip() or apprenant.user.username,
+                'email': apprenant.user.email,
+                'taux_rendu': round(taux_rendu, 1),
+                'moyenne': round(moyenne, 1),
+                'dernier_rendu': dernier_rendu.soumis_le.isoformat() if dernier_rendu else None,
+                'nb_retards': nb_retards
+            })
+
+        return Response(result)
+
+
+class PrincipalRendusDevoirsAPIView(APIView):
+    """
+    GET /api/principal/rendus_devoirs/
+    Query param: ?devoir_id=123 (ou ?cours_id=123)
+    Retourne les détails des rendus pour un devoir ou un cours.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_principal':
+            return Response(
+                {"detail": "Accès réservé aux enseignants principaux."},
+                status=403
+            )
+
+        devoir_id = request.query_params.get('devoir_id')
+        cours_id = request.query_params.get('cours_id')
+
+        if not devoir_id and not cours_id:
+            return Response({"detail": "devoir_id ou cours_id requis."}, status=400)
+
+        soumissions = SoumissionDevoir.objects.all()
+
+        if devoir_id:
+            try:
+                devoir = Devoir.objects.get(id=devoir_id, cours_lie__enseignant_principal=profile)
+                soumissions = soumissions.filter(devoir=devoir)
+            except Devoir.DoesNotExist:
+                return Response({"detail": "Devoir non trouvé."}, status=404)
+        elif cours_id:
+            try:
+                cours = Cours.objects.get(id=cours_id, enseignant_principal=profile)
+                soumissions = soumissions.filter(devoir__cours_lie=cours)
+            except Cours.DoesNotExist:
+                return Response({"detail": "Cours non trouvé."}, status=404)
+
+        result = []
+        for s in soumissions.select_related('utilisateur', 'devoir'):
+            result.append({
+                'id': s.id,
+                'apprenant': f"{s.utilisateur.first_name} {s.utilisateur.last_name}".strip() or s.utilisateur.username,
+                'devoir': s.devoir.titre,
+                'date_rendu': s.soumis_le.isoformat() if s.soumis_le else None,
+                'note': s.note,
+                'est_en_retard': s.est_en_retard,
+                'statut': s.statut
+            })
+
+        return Response({
+            'rendus': result,
+            'total': len(result)
+        })
 
 class ClassementDepartementView(APIView):
     """
@@ -2090,13 +2364,210 @@ class LeconLikeView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+# views.py - Mettre à jour ListeExercicesCoursView et AjouterExerciceView
+
 class ListeExercicesCoursView(APIView):
+    """
+    GET /api/cours/<cours_id>/exercices/
+    Paramètres optionnels :
+    - module_id: filtrer par module
+    - lecon_id: filtrer par leçon
+    - type: general, module, lecon, epreuve
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, cours_id):
-        exercices = Exercice.objects.filter(cours_id=cours_id).prefetch_related("questions__choix")
-        serializer = ExerciceSerializer(exercices, many=True)
+        cours = get_object_or_404(Cours, pk=cours_id)
+        
+        # Base queryset
+        exercices = Exercice.objects.filter(cours=cours)
+        
+        # Filtres
+        module_id = request.query_params.get('module_id')
+        if module_id:
+            exercices = exercices.filter(module_id=module_id)
+        
+        lecon_id = request.query_params.get('lecon_id')
+        if lecon_id:
+            exercices = exercices.filter(lecon_id=lecon_id)
+        
+        type_exercice = request.query_params.get('type')
+        if type_exercice:
+            exercices = exercices.filter(type_exercice=type_exercice)
+        else:
+            # Par défaut, afficher tous les types sauf les épreuves (sauf si demandé)
+            if request.query_params.get('include_epreuves') != 'true':
+                exercices = exercices.exclude(est_epreuve=True)
+        
+        # Annoter avec le nombre de questions
+        from django.db.models import Count
+        exercices = exercices.annotate(nb_questions=Count('questions'))
+        
+        # Trier par date de création
+        exercices = exercices.order_by('-created_at')
+        
+        serializer = ExerciceSerializer(exercices, many=True, context={'request': request})
         return Response(serializer.data)
+
+
+class AjouterExerciceView(APIView):
+    """
+    POST /api/cours/<cours_id>/exercices/ajouter/
+    Body: { "titre": "...", "enonce": "...", "etoiles": 3, ... }
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut ajouter un exercice."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Copier les données pour les modifier
+        data = request.data.copy()
+        
+        # Gérer l'énoncé image
+        if 'enonce_image' in request.FILES:
+            data['enonce_image'] = request.FILES['enonce_image']
+        
+        serializer = ExerciceCreateSerializer(data=data)
+        if serializer.is_valid():
+            exercice = serializer.save(cours=cours)
+            
+            # Enregistrer dans l'historique
+            enregistrer_activite(
+                user=request.user,
+                action='exercise_created',
+                description=f"Exercice « {exercice.titre} » ajouté au cours « {cours.titre} »",
+                data={
+                    'exercice': exercice.titre,
+                    'cours': cours.titre,
+                    'etoiles': exercice.etoiles,
+                    'type': exercice.type_exercice,
+                },
+                objet_id=exercice.id,
+                objet_type='Exercice',
+            )
+            
+            cours.nb_devoirs += 1
+            cours.save(update_fields=['nb_devoirs'])
+            
+            # Retourner l'exercice créé avec ses données enrichies
+            return Response(
+                ExerciceSerializer(exercice, context={'request': request}).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ModifierExerciceView(APIView):
+    """
+    PATCH /api/exercices/<exercice_id>/modifier/
+    Modifie un exercice existant.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    @transaction.atomic
+    def patch(self, request, exercice_id):
+        exercice = get_object_or_404(Exercice, pk=exercice_id)
+        cours = exercice.cours
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut modifier un exercice."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Copier les données
+        data = request.data.copy()
+        
+        # Gérer l'énoncé image
+        if 'enonce_image' in request.FILES:
+            data['enonce_image'] = request.FILES['enonce_image']
+        
+        # Si enonce_image est null, supprimer l'image existante
+        if data.get('enonce_image') == 'null':
+            data['enonce_image'] = None
+
+        serializer = ExerciceCreateSerializer(exercice, data=data, partial=True)
+        if serializer.is_valid():
+            updated = serializer.save()
+            
+            enregistrer_activite(
+                user=request.user,
+                action='exercise_modified',
+                description=f"Exercice « {updated.titre} » modifié",
+                data={
+                    'exercice': updated.titre,
+                    'cours': cours.titre,
+                },
+                objet_id=updated.id,
+                objet_type='Exercice',
+            )
+            
+            return Response(
+                ExerciceSerializer(updated, context={'request': request}).data,
+                status=status.HTTP_200_OK,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SupprimerExerciceView(APIView):
+    """
+    DELETE /api/exercices/<exercice_id>/supprimer/
+    Supprime un exercice.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def delete(self, request, exercice_id):
+        exercice = get_object_or_404(Exercice, pk=exercice_id)
+        cours = exercice.cours
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut supprimer un exercice."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        enregistrer_activite(
+            user=request.user,
+            action='exercise_deleted',
+            description=f"Exercice « {exercice.titre} » supprimé du cours « {cours.titre} »",
+            data={
+                'exercice': exercice.titre,
+                'cours': cours.titre,
+            },
+            objet_type='Exercice',
+        )
+        
+        exercice.delete()
+        
+        # Mettre à jour le compteur
+        cours.nb_devoirs = max(0, cours.nb_devoirs - 1)
+        cours.save(update_fields=['nb_devoirs'])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SoumettreEvaluationView(APIView):
@@ -2370,44 +2841,6 @@ class ExerciceDetailView(APIView):
             "questions": questions_data
         }, status=status.HTTP_200_OK)
 
-
-class AjouterExerciceView(APIView):
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, cours_id):
-        cours = get_object_or_404(Cours, pk=cours_id)
-
-        try:
-            profile = request.user.profile
-        except Profile.DoesNotExist:
-            return Response({"detail": "Profil introuvable."}, status=404)
-
-        if cours.enseignant_principal != profile:
-            return Response(
-                {"detail": "Seul l'enseignant principal peut ajouter un exercice."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        serializer = ExerciceCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            exercice = serializer.save(cours=cours)
-            enregistrer_activite(
-       user=request.user,
-       action='exercise_created',
-       description=f"Exercice « {exercice.titre} » ajouté au cours « {cours.titre} »",
-       data={'exercice': exercice.titre, 'cours': cours.titre, 'etoiles': exercice.etoiles},
-       objet_id=exercice.id,
-       objet_type='Exercice',
-   )
-            cours.nb_devoirs += 1
-            cours.save(update_fields=['nb_devoirs'])
-            return Response(
-                ExerciceSerializer(exercice).data,
-                status=status.HTTP_201_CREATED,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
 
 class AjouterQuestionView(APIView):
 
@@ -2999,11 +3432,197 @@ class ResultatDevoirView(APIView):
             "detail":      detail,
         })
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. CRÉER UN DEVOIR LIÉ À UN COURS
+#    POST /api/cours/<cours_id>/devoirs/creer/
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  AJOUTS À views.py — Gestion complète des devoirs (enseignant principal)
-#  À coller dans votre views.py existant
-# ═══════════════════════════════════════════════════════════════════════════
+class DevoirsCoursView(APIView):
+    """
+    GET /api/cours/<cours_id>/devoirs/
+    Retourne les devoirs liés à un cours spécifique avec le statut de l'apprenant.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cours_id):
+        cours = get_object_or_404(Cours, pk=cours_id)
+        
+        # Récupérer tous les devoirs du cours, publiés ou non selon le rôle
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        # Vérifier si l'utilisateur est enseignant principal du cours
+        is_enseignant = (profile.user_type in ['enseignant_principal', 'enseignant_cadre', 'enseignant_admin', 'admin'] and 
+                         (cours.enseignant_principal == profile or 
+                          profile.user_type in ['enseignant_cadre', 'enseignant_admin', 'admin']))
+
+        # Base queryset
+        if is_enseignant:
+            # Enseignant: voir tous les devoirs (publiés ou non)
+            devoirs = Devoir.objects.filter(cours_lie=cours).order_by('-date_creation')
+        else:
+            # Apprenant: voir seulement les devoirs publiés
+            devoirs = Devoir.objects.filter(cours_lie=cours, est_publie=True).order_by('-date_creation')
+
+        result = []
+        for devoir in devoirs:
+            # Chercher la soumission de l'utilisateur
+            soumission = SoumissionDevoir.objects.filter(
+                devoir=devoir,
+                utilisateur=request.user,
+            ).first()
+
+            soumission_data = None
+            if soumission:
+                soumission_data = {
+                    'id': soumission.id,
+                    'statut': soumission.statut,
+                    'note': float(soumission.note) if soumission.note is not None else None,
+                    'soumis_le': soumission.soumis_le.isoformat() if soumission.soumis_le else None,
+                    'est_corrige': soumission.statut == 'corrige',
+                    'commentaire': soumission.commentaire or '',
+                }
+
+            # Pour l'enseignant: compter le nombre de soumissions
+            stats = None
+            if is_enseignant:
+                nb_soumissions = SoumissionDevoir.objects.filter(devoir=devoir).count()
+                nb_corriges = SoumissionDevoir.objects.filter(devoir=devoir, statut='corrige').count()
+                
+                # Moyenne des notes
+                notes = SoumissionDevoir.objects.filter(
+                    devoir=devoir, 
+                    note__isnull=False
+                ).values_list('note', flat=True)
+                moyenne = sum(notes) / len(notes) if notes else 0.0
+
+                stats = {
+                    'nb_soumissions': nb_soumissions,
+                    'nb_corriges': nb_corriges,
+                    'moyenne': round(moyenne, 2),
+                }
+
+            result.append({
+                'id': devoir.id,
+                'titre': devoir.titre,
+                'description': devoir.description,
+                'date_debut': devoir.date_debut.isoformat() if devoir.date_debut else None,
+                'date_limite': devoir.date_limite.isoformat() if devoir.date_limite else None,
+                'est_ouvert': devoir.est_ouvert,
+                'est_expire': devoir.est_expire,
+                'nb_questions': devoir.questions.count(),
+                'note_sur': float(devoir.note_sur),
+                'duree_minutes': devoir.duree_minutes,
+                'tentatives_max': devoir.tentatives_max,
+                'est_publie': devoir.est_publie,
+                'type_correction': getattr(devoir, 'type_correction', 'auto'),
+                'ma_soumission': soumission_data,
+                'stats': stats,
+            })
+
+        return Response(result)
+
+
+# serializers.py - Améliorer ReponseSerializer
+
+class ReponseSerializer(serializers.ModelSerializer):
+    auteur_nom = serializers.SerializerMethodField()
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
+    nb_likes = serializers.SerializerMethodField()
+    mon_like = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReponseQuestion
+        fields = [
+            "id", "contenu", "cree_le", "est_solution",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
+            "nb_likes", "mon_like", "image_url", "audio_url"
+        ]
+
+    def get_auteur_nom(self, obj):
+        user = obj.auteur
+        nom = f"{user.first_name} {user.last_name}".strip()
+        return nom if nom else user.username
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
+
+    def get_nb_likes(self, obj):
+        return obj.likes.count()
+
+    def get_mon_like(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return obj.likes.filter(utilisateur=request.user).exists()
+        return False
+
+    def get_image_url(self, obj):
+        # Si la réponse a une image (modèle à étendre si nécessaire)
+        return None
+
+    def get_audio_url(self, obj):
+        # Si la réponse a un audio (modèle à étendre si nécessaire)
+        return None
+
+
+class QuestionForumDetailSerializer(serializers.ModelSerializer):
+    auteur_nom = serializers.SerializerMethodField()
+    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
+    auteur_est_enseignant = serializers.SerializerMethodField()
+    nb_reponses = serializers.IntegerField(read_only=True)
+    reponses = ReponseSerializer(many=True, read_only=True)
+    image_url = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuestionForum
+        fields = [
+            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
+            "nb_reponses", "reponses",
+            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
+            "exercice_id", "exercice_titre",
+            "devoir_id", "devoir_titre",
+            "auteur_nom", "auteur_username", "auteur_est_enseignant",
+            "image_url", "audio_url",
+        ]
+
+    def get_auteur_nom(self, obj):
+        user = obj.auteur
+        nom = f"{user.first_name} {user.last_name}".strip()
+        return nom if nom else user.username
+
+    def get_auteur_est_enseignant(self, obj):
+        try:
+            profile = obj.auteur.profile
+            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
+        except:
+            return False
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
+
+    def get_audio_url(self, obj):
+        if obj.audio:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.audio.url)
+            return obj.audio.url
+        return None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. CRÉER UN DEVOIR LIÉ À UN COURS
@@ -3069,6 +3688,139 @@ class CreerDevoirCoursView(APIView):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+class DetailQuestionView(APIView):
+    """
+    GET /api/forum/questions/<pk>/ - Détail d'une question avec ses réponses
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            # Utiliser select_related et prefetch_related pour optimiser
+            question = QuestionForum.objects.select_related(
+                'auteur__profile'
+            ).prefetch_related(
+                'reponses__auteur__profile',
+                'reponses__likes'
+            ).annotate(
+                nb_reponses=Count("reponses")
+            ).get(pk=pk)
+        except QuestionForum.DoesNotExist:
+            return Response({"detail": "Question introuvable."}, status=404)
+
+        # Incrémenter les vues de manière atomique
+        QuestionForum.objects.filter(pk=pk).update(nb_vues=F('nb_vues') + 1)
+
+        # Forcer le rafraîchissement pour obtenir le nouveau nb_vues
+        question.refresh_from_db()
+
+        # Sérialiser
+        serializer = QuestionForumDetailSerializer(question, context={"request": request})
+        
+        # Vérifier que les réponses sont bien chargées
+        data = serializer.data
+        if 'reponses' in data:
+            # Trier les réponses par date (plus récentes en premier)
+            data['reponses'] = sorted(
+                data['reponses'],
+                key=lambda r: r.get('cree_le', ''),
+                reverse=True
+            )
+
+        return Response(data)
+
+    def delete(self, request, pk):
+        try:
+            question = QuestionForum.objects.get(pk=pk, auteur=request.user)
+        except QuestionForum.DoesNotExist:
+            return Response({"detail": "Question introuvable ou non autorisée."}, status=404)
+        question.delete()
+        return Response(status=204)
+
+
+class SoumettreDevoirFichierView(APIView):
+    """
+    POST /api/devoirs/<devoir_id>/soumettre-fichier/
+    Permet à un apprenant de soumettre un fichier PDF pour un devoir
+    de type correction manuelle.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @transaction.atomic
+    def post(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+
+        if not devoir.est_ouvert:
+            return Response(
+                {"detail": "Le devoir n'est plus accessible."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Vérifier les tentatives
+        nb_tentatives = SoumissionDevoir.objects.filter(
+            utilisateur=request.user,
+            devoir=devoir,
+            statut__in=["soumis", "corrige", "en_retard"]
+        ).count()
+
+        if nb_tentatives >= devoir.tentatives_max:
+            return Response(
+                {"detail": f"Nombre maximum de tentatives atteint ({devoir.tentatives_max})."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Récupérer ou créer la soumission
+        soum, created = SoumissionDevoir.objects.get_or_create(
+            utilisateur=request.user,
+            devoir=devoir,
+            defaults={
+                "statut": "en_cours",
+                "ip_address": _get_client_ip(request),
+                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
+            }
+        )
+
+        if not created and soum.statut in ["soumis", "corrige"]:
+            return Response(
+                {"detail": "Vous avez déjà soumis ce devoir."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Traiter le fichier uploadé
+        fichier = request.FILES.get('fichier')
+        if not fichier:
+            return Response(
+                {"detail": "Aucun fichier fourni."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not fichier.name.lower().endswith('.pdf'):
+            return Response(
+                {"detail": "Seuls les fichiers PDF sont acceptés."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Stocker le fichier dans la soumission
+        if hasattr(soum, 'fichier_soumis'):
+            soum.fichier_soumis = fichier
+        else:
+            # Fallback si le champ n'existe pas
+            from django.core.files.base import ContentFile
+            soum.fichier_soumis = fichier
+
+        now = timezone.now()
+        soum.statut    = 'en_retard' if soum.est_en_retard else 'soumis'
+        soum.soumis_le = now
+        soum.save()
+
+        return Response({
+            "statut":    soum.statut,
+            "message":   "Fichier soumis avec succès. En attente de correction.",
+            "soumis_le": soum.soumis_le.isoformat(),
+            "devoir_titre": devoir.titre,
+        })
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. MODIFIER UN DEVOIR
@@ -3341,77 +4093,6 @@ class CorrigerSoumissionView(APIView):
             "commentaire": soum.commentaire,
             "corrige_le":  soum.corrige_le.isoformat(),
         }, status=status.HTTP_200_OK)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 7. SOUMISSION APPRENANT AVEC FICHIER PDF (correction manuelle)
-#    POST /api/devoirs/<devoir_id>/soumettre-fichier/
-# ─────────────────────────────────────────────────────────────────────────────
-class SoumettreDevoirFichierView(APIView):
-    """
-    Permet à un apprenant de soumettre un fichier PDF pour un devoir
-    de type correction manuelle.
-    """
-    permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
-
-    @transaction.atomic
-    def post(self, request, devoir_id):
-        devoir = get_object_or_404(Devoir, pk=devoir_id)
-
-        if not devoir.est_ouvert:
-            return Response(
-                {"detail": "Le devoir n'est plus accessible."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Récupérer ou créer la soumission
-        soum, created = SoumissionDevoir.objects.get_or_create(
-            utilisateur=request.user,
-            devoir=devoir,
-            defaults={
-                "statut": "en_cours",
-                "ip_address": _get_client_ip(request),
-                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
-            }
-        )
-
-        if not created and soum.statut in ["soumis", "corrige"]:
-            return Response(
-                {"detail": "Vous avez déjà soumis ce devoir."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Traiter le fichier uploadé
-        fichier = request.FILES.get('fichier')
-        if not fichier:
-            return Response(
-                {"detail": "Aucun fichier fourni."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not fichier.name.lower().endswith('.pdf'):
-            return Response(
-                {"detail": "Seuls les fichiers PDF sont acceptés."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Stocker le fichier dans la soumission
-        # Assurez-vous que SoumissionDevoir a un champ `fichier_soumis`
-        if hasattr(soum, 'fichier_soumis'):
-            soum.fichier_soumis = fichier
-        
-        now = timezone.now()
-        soum.statut    = 'en_retard' if soum.est_en_retard else 'soumis'
-        soum.soumis_le = now
-        soum.save()
-
-        return Response({
-            "statut":    soum.statut,
-            "message":   "Fichier soumis avec succès. En attente de correction.",
-            "soumis_le": soum.soumis_le.isoformat(),
-        })
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 8. DÉTAIL D'UNE SOUMISSION AVEC SES RÉPONSES (pour l'enseignant)
@@ -4192,40 +4873,6 @@ class ListeQuestionsView(APIView):
             {"detail": "Erreur de validation", "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST
         )
-
-        
-# ─────────────────────────────────────────────────────────────────
-# GET  /api/forum/questions/<pk>/     → détail + réponses
-# DELETE /api/forum/questions/<pk>/   → supprimer (auteur seulement)
-# ─────────────────────────────────────────────────────────────────
-class DetailQuestionView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        try:
-            from django.db.models import Count
-            # Utiliser annotate pour avoir nb_reponses
-            question = QuestionForum.objects.annotate(
-                nb_reponses=Count("reponses")
-            ).select_related('auteur__profile').get(pk=pk)
-        except QuestionForum.DoesNotExist:
-            return Response({"detail": "Question introuvable."}, status=404)
-
-        # Incrémenter les vues
-        QuestionForum.objects.filter(pk=pk).update(nb_vues=question.nb_vues + 1)
-        question.refresh_from_db()
-
-        serializer = QuestionForumDetailSerializer(question, context={"request": request})
-        return Response(serializer.data)
-
-    def delete(self, request, pk):
-        try:
-            question = QuestionForum.objects.get(pk=pk, auteur=request.user)
-        except QuestionForum.DoesNotExist:
-            return Response(status=404)
-        question.delete()
-        return Response(status=204)
-
 
 # ─────────────────────────────────────────────────────────────────
 # PATCH /api/forum/questions/<pk>/resoudre/  → marquer comme résolue
