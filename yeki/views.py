@@ -7289,6 +7289,8 @@ class CreerDepartementView(APIView):
         )
     
 
+# views.py - CORRECTION de AdminUpdateDepartementView
+
 class AdminUpdateDepartementView(APIView):
     """
     PATCH /api/admin/departements/<pk>/update/
@@ -7296,6 +7298,7 @@ class AdminUpdateDepartementView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def patch(self, request, pk):
         try:
             profile = request.user.profile
@@ -7319,6 +7322,8 @@ class AdminUpdateDepartementView(APIView):
 
         data = request.data.copy()
         
+        # ── Validation et nettoyage des données ──────────────────
+        
         # Gérer les niveaux accessibles
         if 'niveaux_accessibles' in data:
             niveaux = data.get('niveaux_accessibles', [])
@@ -7329,13 +7334,31 @@ class AdminUpdateDepartementView(APIView):
                     niveaux = [n.strip() for n in niveaux.split(',') if n.strip()]
             elif not isinstance(niveaux, list):
                 niveaux = []
-            data['niveaux_accessibles'] = ','.join(niveaux)
+            # Le serializer attend une string, on convertit
+            data['niveaux_accessibles'] = ','.join(niveaux) if niveaux else ''
 
-        # Retirer couleur du traitement (pas de champ couleur dans le modèle)
-        if 'couleur' in data:
-            data.pop('couleur')
+        # Supprimer les champs qui ne sont pas dans le serializer
+        # Ces champs existent dans le modèle mais pas dans le serializer
+        champs_a_supprimer = ['couleur', 'created_at', 'image_url', 'type']
+        for champ in champs_a_supprimer:
+            if champ in data:
+                data.pop(champ)
 
-        # Utiliser DepartementUpdateSerializer pour la mise à jour
+        # Si le type de parcours est 'formation', valider les champs spécifiques
+        if departement.parcours.type_parcours == 'formation':
+            # Si est_formation_metier ou est_formation_classique sont présents
+            if 'est_formation_metier' not in data and 'est_formation_classique' not in data:
+                # Conserver les valeurs existantes
+                pass
+            else:
+                est_metier = data.get('est_formation_metier', departement.est_formation_metier)
+                est_classique = data.get('est_formation_classique', departement.est_formation_classique)
+                if not est_metier and not est_classique:
+                    return Response({
+                        "detail": "Veuillez sélectionner au moins un type de formation (Métier ou Classique)"
+                    }, status=400)
+
+        # ── Utiliser le serializer ────────────────────────────────
         serializer = DepartementUpdateSerializer(
             departement, 
             data=data, 

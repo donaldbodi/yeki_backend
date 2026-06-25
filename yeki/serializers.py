@@ -412,24 +412,26 @@ class DepartementSerializer(serializers.ModelSerializer):
             except Profile.DoesNotExist:
                 pass
         return []
-    
+
+
 class DepartementUpdateSerializer(serializers.ModelSerializer):
     niveaux_accessibles = serializers.ListField(
         child=serializers.CharField(), 
         required=False,
-        allow_empty=True
+        allow_empty=True,
+        help_text="Liste des niveaux accessibles"
     )
 
     # ✅ Traitement spécifique pour les dates
     date_limite_inscription = serializers.DateField(
         required=False, 
         allow_null=True,
-        input_formats=['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '']  # Accepte les chaînes vides
+        input_formats=['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%fZ', '']
     )
     date_examen = serializers.DateField(
         required=False, 
         allow_null=True,
-        input_formats=['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '']
+        input_formats=['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%fZ', '']
     )
     
     class Meta:
@@ -445,17 +447,16 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             'acces_restreint', 'niveaux_accessibles', 'niveau_formation'
         ]
         extra_kwargs = {
-            'nom': {'required': False},
+            'nom': {'required': False, 'allow_blank': False},
             'description': {'required': False, 'allow_blank': True},
-            'prix': {'required': False},
-            'prix_presentiel': {'required': False},
+            'prix': {'required': False, 'min_value': 0},
+            'prix_presentiel': {'required': False, 'min_value': 0},
             'est_prepa_concours': {'required': False},
             'est_formation_metier': {'required': False},
             'est_formation_classique': {'required': False},
             'acces_restreint': {'required': False},
             'mode': {'required': False, 'allow_blank': True},
             'niveau_formation': {'required': False, 'allow_blank': True},
-            # Champs spécifiques optionnels
             'nom_concours': {'required': False, 'allow_blank': True},
             'organisme_concours': {'required': False, 'allow_blank': True},
             'arrete_ministeriel': {'required': False, 'allow_blank': True},
