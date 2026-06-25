@@ -6424,13 +6424,12 @@ class AdminGeneralDashboardView(APIView):
             "nb_lecons": Lecon.objects.count(),
         }
 
-        # Top enseignants
         from django.db.models import Avg
         top_enseignants = []
         enseignants_top = Profile.objects.filter(
             user_type__in=['enseignant_principal', 'enseignant']
         ).annotate(
-            score_moyen=Avg('cours_principaux__exercices__evaluationexercice__score')
+            score_moyen=Avg('cours_principal__exercices__evaluationexercice__score')
         ).order_by('-score_moyen')[:10]
         
         for e in enseignants_top:
@@ -6460,10 +6459,6 @@ class AdminGeneralDashboardView(APIView):
                 "bio": e.bio or '',
                 "phone": e.phone or '',
                 "avatar": request.build_absolute_uri(e.avatar.url) if e.avatar else None,
-                # Informations supplémentaires
-                "parcours": None,  # Sera rempli si l'enseignant est admin d'un parcours
-                "departements": [],  # Sera rempli si cadre
-                "cours": [],  # Sera rempli si principal
             })
 
         nom_complet = _nom_profil(profile)
@@ -6476,7 +6471,7 @@ class AdminGeneralDashboardView(APIView):
             "top_enseignants": top_enseignants,
             "enseignants": enseignants_data,
         }, status=200)
-
+    
 
 # ───────────────────────────────────────────────────────────────────────────
 # ADMIN GÉNÉRAL — Créer un parcours
