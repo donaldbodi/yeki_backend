@@ -1016,7 +1016,6 @@ def repetiteurs_page(request):
     """
     return render(request, 'repetiteurs.html')
 
-# views.py - Ajouter ces classes après les autres vues
 
 class PrincipalDashboardAPIView(APIView):
     """
@@ -1046,12 +1045,16 @@ class PrincipalDashboardAPIView(APIView):
         nb_lecons = Lecon.objects.filter(cours__in=cours_ids).count()
         nb_devoirs = Devoir.objects.filter(cours_lie__in=cours_ids).count()
         
-        # Apprenants uniques
+        # Apprenants uniques - CORRECTION : utiliser Profile.objects.filter avec cursus
+        # Récupérer les noms de parcours des départements des cours
+        parcours_noms = Departement.objects.filter(
+            cours__in=cours_ids
+        ).values_list('parcours__nom', flat=True).distinct()
+        
         apprenants = Profile.objects.filter(
             user_type='apprenant',
-            cursus__in=Departement.objects.filter(
-                cours__in=cours_ids
-            ).values_list('parcours__nom', flat=True)
+            cursus__in=parcours_noms,
+            is_active=True
         ).distinct().count()
 
         # Taux de rendu global
@@ -1059,7 +1062,7 @@ class PrincipalDashboardAPIView(APIView):
             devoir__cours_lie__in=cours_ids,
             statut__in=['soumis', 'corrige', 'en_retard']
         ).count()
-        total_attendu = nb_devoirs * apprenants
+        total_attendu = nb_devoirs * apprenants if apprenants > 0 else 1
         taux_rendu = (total_rendus / total_attendu * 100) if total_attendu > 0 else 0
 
         # Moyenne globale
@@ -1074,20 +1077,53 @@ class PrincipalDashboardAPIView(APIView):
             soumis_le__gt=F('devoir__date_limite')
         ).count()
 
-        # Apprenants à risque
+        # Apprenants à risque (ceux avec taux de rendu < 50%)
         apprenants_risque = []
-        for apprenant in apprenants:
-            # À implémenter avec une logique spécifique
-            pass
+        for p in Profile.objects.filter(
+            user_type='apprenant',
+            cursus__in=parcours_noms,
+            is_active=True
+        ).select_related('user'):
+            # Compter les soumissions de cet apprenant pour les cours du principal
+            soumissions = SoumissionDevoir.objects.filter(
+                devoir__cours_lie__in=cours_ids,
+                utilisateur=p.user
+            )
+            nb_rendus = soumissions.filter(
+                statut__in=['soumis', 'corrige', 'en_retard']
+            ).count()
+            nb_devoirs_total = Devoir.objects.filter(cours_lie__in=cours_ids).count()
+            
+            if nb_devoirs_total > 0:
+                taux = (nb_rendus / nb_devoirs_total * 100)
+                if taux < 50:
+                    moyenne = soumissions.filter(
+                        note__isnull=False
+                    ).aggregate(Avg('note'))['note__avg'] or 0
+                    
+                    raison = "Taux de rendu faible" if taux < 30 else "Taux de rendu moyen"
+                    
+                    apprenants_risque.append({
+                        'id': p.id,
+                        'nom': p.user.last_name or '',
+                        'prenom': p.user.first_name or '',
+                        'email': p.user.email or '',
+                        'taux_rendu': round(taux, 1),
+                        'moyenne': round(moyenne, 1),
+                        'raison': raison,
+                    })
 
         # Devoirs par cours
         devoirs_par_cours = []
         for c in cours:
             devoirs = Devoir.objects.filter(cours_lie=c)
             nb_devoirs_cours = devoirs.count()
+            
+            # Compter les apprenants de ce cours
             apprenants_cours = Profile.objects.filter(
                 user_type='apprenant',
-                cursus=c.departement.parcours.nom
+                cursus=c.departement.parcours.nom if c.departement and c.departement.parcours else '',
+                is_active=True
             ).count()
             
             rendus_cours = SoumissionDevoir.objects.filter(
@@ -1095,7 +1131,7 @@ class PrincipalDashboardAPIView(APIView):
                 statut__in=['soumis', 'corrige', 'en_retard']
             )
             total_rendus_cours = rendus_cours.count()
-            total_attendu_cours = nb_devoirs_cours * apprenants_cours
+            total_attendu_cours = nb_devoirs_cours * apprenants_cours if apprenants_cours > 0 else 1
             taux_cours = (total_rendus_cours / total_attendu_cours * 100) if total_attendu_cours > 0 else 0
             
             # Détails des devoirs
@@ -1117,7 +1153,7 @@ class PrincipalDashboardAPIView(APIView):
                     'nb_rendus': nb_rendus,
                     'nb_retards': nb_retards,
                     'taux_rendu': (nb_rendus / apprenants_cours * 100) if apprenants_cours > 0 else 0,
-                    'note_moyenne': round(note_moyenne, 1),
+                    'note_moyenne': round(note_moyenne, 1) if note_moyenne else 0,
                     'type_correction': getattr(devoir, 'type_correction', 'auto')
                 })
             
@@ -1131,7 +1167,7 @@ class PrincipalDashboardAPIView(APIView):
 
         # Tendance des rendus (7 derniers jours)
         tendance_rendus = []
-        for i in range(7):
+        for i in range(6, -1, -1):
             date = timezone.now().date() - timedelta(days=i)
             nb_rendus_jour = SoumissionDevoir.objects.filter(
                 devoir__cours_lie__in=cours_ids,
@@ -1151,7 +1187,7 @@ class PrincipalDashboardAPIView(APIView):
                 'nb_devoirs': nb_devoirs,
                 'nb_apprenants': apprenants,
                 'taux_rendu_global': round(taux_rendu, 1),
-                'moyenne_globale': round(moyenne_globale, 1),
+                'moyenne_globale': round(moyenne_globale, 1) if moyenne_globale else 0,
                 'nb_retards': retards,
             },
             'devoirs_par_cours': devoirs_par_cours,
@@ -2364,8 +2400,6 @@ class LeconLikeView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-# views.py - Mettre à jour ListeExercicesCoursView et AjouterExerciceView
-
 class ListeExercicesCoursView(APIView):
     """
     GET /api/cours/<cours_id>/exercices/
@@ -2403,8 +2437,8 @@ class ListeExercicesCoursView(APIView):
         from django.db.models import Count
         exercices = exercices.annotate(nb_questions=Count('questions'))
         
-        # Trier par date de création
-        exercices = exercices.order_by('-created_at')
+        # CORRECTION : utiliser 'id' au lieu de 'created_at'
+        exercices = exercices.order_by('-id')
         
         serializer = ExerciceSerializer(exercices, many=True, context={'request': request})
         return Response(serializer.data)
@@ -3624,11 +3658,11 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
         return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. CRÉER UN DEVOIR LIÉ À UN COURS
-#    POST /api/cours/<cours_id>/devoirs/creer/
-# ─────────────────────────────────────────────────────────────────────────────
 class CreerDevoirCoursView(APIView):
+    """
+    POST /api/cours/<cours_id>/devoirs/creer/
+    Permet à l'enseignant principal de créer un devoir pour son cours.
+    """
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
@@ -3640,38 +3674,43 @@ class CreerDevoirCoursView(APIView):
         except Profile.DoesNotExist:
             return Response({"detail": "Profil introuvable."}, status=404)
 
+        # Vérifier que l'utilisateur est l'enseignant principal du cours
         if cours.enseignant_principal != profile:
             return Response(
-                {"detail": "Seul l'enseignant principal peut créer un devoir."},
+                {"detail": "Seul l'enseignant principal peut créer un devoir pour ce cours."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         data = request.data.copy()
-        data['type_devoir'] = data.get('type_devoir', 'cursus')
-        data['cours_lie']   = cours.id
-        data['est_publie']  = data.get('est_publie', True)
-
-        # Champ type_correction stocké dans description ou champ dédié
-        type_correction = data.pop('type_correction', 'auto')
+        data['cours_lie'] = cours.id
+        
+        # Définir les valeurs par défaut si non fournies
+        if 'type_devoir' not in data:
+            data['type_devoir'] = 'cursus'
+        if 'est_publie' not in data:
+            data['est_publie'] = False
+        if 'date_debut' not in data:
+            data['date_debut'] = timezone.now().isoformat()
+        if 'date_limite' not in data:
+            # Par défaut, 7 jours à partir de maintenant
+            data['date_limite'] = (timezone.now() + timedelta(days=7)).isoformat()
+        if 'duree_minutes' not in data:
+            data['duree_minutes'] = 60
+        if 'note_sur' not in data:
+            data['note_sur'] = 20
+        if 'tentatives_max' not in data:
+            data['tentatives_max'] = 1
+        if 'coefficient' not in data:
+            data['coefficient'] = 1.0
+        if 'type_correction' not in data:
+            data['type_correction'] = 'auto'
 
         serializer = DevoirCreateSerializer(data=data)
         if serializer.is_valid():
-            devoir = serializer.save()
-            enregistrer_activite(
-       user=request.user,
-       action='homework_created',
-       description=f"Devoir « {devoir.titre} » créé pour le cours « {cours.titre} »",
-       data={
-           'devoir':       devoir.titre,
-           'cours':        cours.titre,
-           'date_limite':  devoir.date_limite.strftime('%d/%m/%Y') if devoir.date_limite else '',
-           'nb_questions': devoir.questions.count(),
-       },
-       objet_id=devoir.id,
-       objet_type='Devoir',
-   )
-
+            devoir = serializer.save(cree_par=profile)
+            
             # Stocker type_correction (si champ existe dans le modèle)
+            type_correction = data.get('type_correction', 'auto')
             if hasattr(devoir, 'type_correction'):
                 devoir.type_correction = type_correction
                 devoir.save(update_fields=['type_correction'])
@@ -3682,11 +3721,181 @@ class CreerDevoirCoursView(APIView):
             ).count()
             cours.save(update_fields=['nb_devoirs'])
 
-            return Response(
-                _devoir_to_dict(devoir, request.user),
-                status=status.HTTP_201_CREATED,
+            enregistrer_activite(
+                user=request.user,
+                action='homework_created',
+                description=f"Devoir « {devoir.titre} » créé pour le cours « {cours.titre} »",
+                data={
+                    'devoir': devoir.titre,
+                    'cours': cours.titre,
+                    'date_limite': devoir.date_limite.strftime('%d/%m/%Y') if devoir.date_limite else '',
+                },
+                objet_id=devoir.id,
+                objet_type='Devoir',
             )
+
+            return Response({
+                'id': devoir.id,
+                'titre': devoir.titre,
+                'description': devoir.description,
+                'date_debut': devoir.date_debut.isoformat() if devoir.date_debut else None,
+                'date_limite': devoir.date_limite.isoformat() if devoir.date_limite else None,
+                'est_publie': devoir.est_publie,
+                'nb_questions': devoir.questions.count(),
+                'note_sur': float(devoir.note_sur),
+                'duree_minutes': devoir.duree_minutes,
+                'tentatives_max': devoir.tentatives_max,
+                'type_correction': getattr(devoir, 'type_correction', 'auto'),
+                'detail': 'Devoir créé avec succès.',
+            }, status=status.HTTP_201_CREATED)
+        
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ModifierDevoirView(APIView):
+    """
+    PATCH /api/devoirs/<devoir_id>/modifier/
+    Permet à l'enseignant principal de modifier un devoir.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        cours = devoir.cours_lie
+        if cours is None or cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal du cours peut modifier ce devoir."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data.copy()
+        type_correction = data.pop('type_correction', None)
+
+        # Champs modifiables
+        updatable_fields = [
+            'titre', 'description', 'type_devoir', 'matiere', 'niveau',
+            'enonce', 'date_debut', 'date_limite', 'duree_minutes',
+            'note_sur', 'coefficient', 'tentatives_max', 'est_publie',
+            'acces_restreint', 'concours_lie', 'formation_liee'
+        ]
+        
+        updates = {}
+        for field in updatable_fields:
+            if field in data:
+                updates[field] = data[field]
+
+        if not updates and type_correction is None:
+            return Response(
+                {"detail": "Aucune modification spécifiée."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Appliquer les modifications
+        for key, value in updates.items():
+            setattr(devoir, key, value)
+        
+        if type_correction and hasattr(devoir, 'type_correction'):
+            devoir.type_correction = type_correction
+        
+        devoir.save()
+
+        enregistrer_activite(
+            user=request.user,
+            action='homework_modified',
+            description=f"Devoir « {devoir.titre} » modifié",
+            data={
+                'devoir': devoir.titre,
+                'cours': cours.titre,
+                'modifications': list(updates.keys()),
+            },
+            objet_id=devoir.id,
+            objet_type='Devoir',
+        )
+
+        return Response({
+            'id': devoir.id,
+            'titre': devoir.titre,
+            'description': devoir.description,
+            'date_debut': devoir.date_debut.isoformat() if devoir.date_debut else None,
+            'date_limite': devoir.date_limite.isoformat() if devoir.date_limite else None,
+            'est_publie': devoir.est_publie,
+            'nb_questions': devoir.questions.count(),
+            'note_sur': float(devoir.note_sur),
+            'detail': 'Devoir modifié avec succès.',
+        }, status=status.HTTP_200_OK)
+
+# a verifier
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def enseignant_principal_cours(request):
+    """
+    GET /api/enseignant_principal/cours/
+    Retourne la liste des cours de l'enseignant principal connecté.
+    """
+    try:
+        profile = request.user.profile
+    except Profile.DoesNotExist:
+        return Response({"detail": "Profil introuvable."}, status=404)
+
+    if profile.user_type != 'enseignant_principal':
+        return Response(
+            {"detail": "Accès réservé aux enseignants principaux."},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    cours = Cours.objects.filter(
+        enseignant_principal=profile
+    ).select_related(
+        'departement',
+        'enseignant_principal__user'
+    ).prefetch_related(
+        'enseignants__user'
+    )
+
+    data = []
+    for c in cours:
+        enseignants_data = []
+        for e in c.enseignants.all():
+            enseignants_data.append({
+                'id': e.id,
+                'username': e.user.username,
+                'email': e.user.email,
+                'user': {
+                    'username': e.user.username,
+                    'email': e.user.email,
+                }
+            })
+        
+        data.append({
+            'id': c.id,
+            'titre': c.titre,
+            'niveau': c.niveau,
+            'description_brief': c.description_brief,
+            'color_code': c.color_code,
+            'icon_name': c.icon_name,
+            'nb_lecons': c.nb_lecons,
+            'nb_devoirs': c.nb_devoirs,
+            'nb_apprenants': c.nb_apprenants,
+            'departement': {
+                'id': c.departement.id,
+                'nom': c.departement.nom,
+            } if c.departement else None,
+            'enseignant_principal': {
+                'id': c.enseignant_principal.id,
+                'nom': f"{c.enseignant_principal.user.first_name} {c.enseignant_principal.user.last_name}".strip() or c.enseignant_principal.user.username,
+                'username': c.enseignant_principal.user.username,
+            } if c.enseignant_principal else None,
+            'enseignants': enseignants_data,
+        })
+
+    return Response(data, status=status.HTTP_200_OK)
 
 
 class DetailQuestionView(APIView):
@@ -7386,7 +7595,6 @@ class AdminUpdateDepartementView(APIView):
             'errors': serializer.errors
         }, status=400)
 
-# views.py - Ajouter CadreOlympiadesView
 
 class CadreOlympiadesView(APIView):
     """

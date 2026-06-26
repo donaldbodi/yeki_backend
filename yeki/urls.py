@@ -345,12 +345,13 @@ urlpatterns = [
     path('parcours/<int:parcours_id>/modifier/', 
          AdminGeneralModifierParcoursView.as_view(), 
          name='parcours-modifier-admin'),
+     path('cours/<int:cours_id>/devoirs/creer/', CreerDevoirCoursView.as_view(), name='devoir-creer'),
 
      # Dans urls.py, ajouter ces lignes après les autres endpoints
      path('principal/dashboard_stats/', PrincipalDashboardAPIView.as_view(), name='principal-dashboard-stats'),
      path('principal/apprenants_cours/', PrincipalApprenantsCoursAPIView.as_view(), name='principal-apprenants-cours'),
      path('principal/rendus_devoirs/', PrincipalRendusDevoirsAPIView.as_view(), name='principal-rendus-devoirs'),
-
+     path('enseignant_principal/cours/', enseignant_principal_cours, name='enseignant_principal_cours'),
      path('exercices/<int:exercice_id>/modifier/', ModifierExerciceView.as_view(), name='exercice-modifier'),
      path('exercices/<int:exercice_id>/supprimer/', SupprimerExerciceView.as_view(), name='exercice-supprimer'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
