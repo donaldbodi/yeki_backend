@@ -990,6 +990,7 @@ class ExerciceSerializer(serializers.ModelSerializer):
     enonce_image_url = serializers.SerializerMethodField()
     exercices_composes_details = serializers.SerializerMethodField()
     est_epreuve = serializers.BooleanField(read_only=True)
+    nb_questions = serializers.SerializerMethodField()
 
     class Meta:
         model = Exercice
@@ -997,7 +998,7 @@ class ExerciceSerializer(serializers.ModelSerializer):
             "id", "titre", "enonce", "etoiles", "questions", "duree_minutes", "tentatives_max",
             "module", "module_nom", "lecon", "lecon_nom", "type_exercice", "est_epreuve",
             "exercices_composes", "exercices_composes_details", "enonce_image_url",
-            "nb_questions"  # Calculé dynamiquement
+            "nb_questions"
         ]
 
     def get_enonce_image_url(self, obj):
@@ -1019,6 +1020,10 @@ class ExerciceSerializer(serializers.ModelSerializer):
             }
             for ex in obj.exercices_composes.all()
         ]
+
+    def get_nb_questions(self, obj):
+        """Retourne le nombre de questions de l'exercice"""
+        return obj.questions.count()
 
 
 class ExerciceCreateSerializer(serializers.ModelSerializer):

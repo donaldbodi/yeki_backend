@@ -555,6 +555,10 @@ class Exercice(models.Model):
     etoiles = models.IntegerField()
     duree_minutes = models.IntegerField(default=10)  # durée examen
     tentatives_max = models.IntegerField(default=1)
+    nb_questions = models.PositiveIntegerField(
+        default=0,
+        help_text="Nombre de questions de l'exercice (mis à jour automatiquement)"
+    )
     module = models.ForeignKey(
         Module, 
         on_delete=models.SET_NULL,

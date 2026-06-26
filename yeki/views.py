@@ -2433,11 +2433,7 @@ class ListeExercicesCoursView(APIView):
             if request.query_params.get('include_epreuves') != 'true':
                 exercices = exercices.exclude(est_epreuve=True)
         
-        # Annoter avec le nombre de questions
-        from django.db.models import Count
-        exercices = exercices.annotate(nb_questions=Count('questions'))
-        
-        # CORRECTION : utiliser 'id' au lieu de 'created_at'
+        # CORRECTION : Ne pas annoter avec nb_questions, le serializer le calcule
         exercices = exercices.order_by('-id')
         
         serializer = ExerciceSerializer(exercices, many=True, context={'request': request})
