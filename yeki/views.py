@@ -9435,7 +9435,7 @@ class RegisterView(APIView):
         errors = {}
         for field, error_list in serializer.errors.items():
             errors[field] = error_list[0] if error_list else "Champ invalide"
-        
+
         # Détecter spécifiquement l'erreur email
         if 'email' in errors:
             return Response({
@@ -9464,11 +9464,11 @@ class LoginView(APIView):
         if serializer.is_valid():
             user = serializer.validated_data['user']
             profile = Profile.objects.get(user=user)
-            
+
             # Vérifier si le compte est actif
             if not profile.is_active:
                 return Response({
-                    'detail': 'Votre compte enseignant est en attente de validation par l\'administrateur.',
+                    'detail': '⚠️ Votre compte enseignant est en attente de validation par l\'administrateur.',
                     'error_type': 'account_inactive',
                     'role': profile.user_type,
                 }, status=403)
