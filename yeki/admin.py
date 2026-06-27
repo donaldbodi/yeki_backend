@@ -22,7 +22,6 @@ admin.site.register(ReponseOlympiade)
 admin.site.register(QuestionForum)
 admin.site.register(ReponseQuestion)
 admin.site.register(LikeReponse)
-admin.site.register(AppVersion)
 admin.site.register(CinetPayTransaction)
 admin.site.register(WalletTransaction)
 
