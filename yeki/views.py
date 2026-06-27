@@ -1610,39 +1610,150 @@ class MesOlympiadesCadreView(APIView):
         return Response(data)
 
 
-@csrf_exempt
-def latest_version(request):
+class LatestVersionView(APIView):
     """
     GET /api/latest-version/
-    Paramètre optionnel: platform (android, ios, desktop, web)
-    Retourne la dernière version de l'application pour la plateforme demandée
-    """
-    platform = request.GET.get('platform', 'android')
+    Retourne la dernière version disponible pour une plateforme.
     
-    try:
-        version = AppVersion.objects.filter(
-            platform=platform, 
-            is_active=True
-        ).latest('version_code')
+    Paramètres query:
+    - platform: 'android' | 'ios' | 'web' (défaut: 'android')
+    - current_version: int (optionnel, pour vérifier si une mise à jour est disponible)
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        platform = request.query_params.get('platform', 'android')
+        current_version = request.query_params.get('current_version')
         
-        return JsonResponse({
-            'version_code': version.version_code,
-            'version_name': version.version_name,
-            'download_url': version.download_url,
-            'changelog': version.changelog,
-            'min_version': version.min_version_code,
-            'force_update': version.force_update,
-        })
-    except AppVersion.DoesNotExist:
-        # Version par défaut si rien n'existe
-        return JsonResponse({
-            'version_code': 1,
-            'version_name': 'v1.0.3',
-            'download_url': '/static/app/yeki-v.1.0.3.apk',
-            'changelog': 'Première version',
-            'min_version': 1,
-            'force_update': False,
-        })
+        try:
+            # Récupérer la dernière version active
+            version = AppVersion.objects.filter(
+                platform=platform,
+                is_active=True
+            ).latest('version_code')
+            
+            # Si current_version est fourni, vérifier si une mise à jour est nécessaire
+            is_update_available = False
+            if current_version:
+                try:
+                    current = int(current_version)
+                    is_update_available = version.version_code > current
+                except (ValueError, TypeError):
+                    is_update_available = True
+            
+            data = AppVersionSerializer(version).data
+            data['is_update_available'] = is_update_available
+            
+            return Response(data, status=status.HTTP_200_OK)
+            
+        except AppVersion.DoesNotExist:
+            # Version par défaut si rien n'existe
+            return Response({
+                'platform': platform,
+                'version_code': 1,
+                'version_name': 'v1.0.0',
+                'download_url': '',
+                'changelog': 'Version initiale',
+                'min_version_code': 1,
+                'force_update': False,
+                'is_active': True,
+                'is_update_available': False,
+            }, status=status.HTTP_200_OK)
+
+class AdminVersionCreateView(APIView):
+    """
+    POST /api/admin/versions/
+    Crée une nouvelle version (réservé admin)
+    """
+    #authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Vérifier que l'utilisateur est admin
+        if not request.user.is_staff:
+            return Response(
+                {'detail': 'Permission refusée. Admin requis.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = AppVersionCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            # Désactiver les anciennes versions de la même plateforme
+            platform = serializer.validated_data['platform']
+            AppVersion.objects.filter(platform=platform, is_active=True).update(is_active=False)
+            
+            version = serializer.save()
+            return Response(
+                AppVersionSerializer(version).data,
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminVersionListView(APIView):
+    """
+    GET /api/admin/versions/
+    Liste toutes les versions (réservé admin)
+    """
+    #authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {'detail': 'Permission refusée. Admin requis.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        versions = AppVersion.objects.all().order_by('-version_code')
+        serializer = AppVersionSerializer(versions, many=True)
+        return Response(serializer.data)
+
+class CheckUpdateView(APIView):
+    """
+    GET /api/check-update/
+    Vérifie si une mise à jour est disponible pour la version actuelle.
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        platform = request.query_params.get('platform', 'android')
+        current_version = request.query_params.get('current_version')
+        
+        if not current_version:
+            return Response(
+                {'detail': 'current_version est requis'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            current = int(current_version)
+            version = AppVersion.objects.filter(
+                platform=platform,
+                is_active=True
+            ).latest('version_code')
+            
+            if version.version_code > current:
+                return Response({
+                    'update_available': True,
+                    'version': AppVersionSerializer(version).data,
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'update_available': False,
+                    'message': 'Vous utilisez déjà la dernière version.'
+                }, status=status.HTTP_200_OK)
+                
+        except AppVersion.DoesNotExist:
+            return Response({
+                'update_available': False,
+                'message': 'Version non trouvée.'
+            }, status=status.HTTP_200_OK)
+        except ValueError:
+            return Response(
+                {'detail': 'current_version doit être un entier'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 def _progression_cours(user, cours_qs):

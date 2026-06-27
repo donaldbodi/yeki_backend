@@ -26,3 +26,33 @@ admin.site.register(AppVersion)
 admin.site.register(CinetPayTransaction)
 admin.site.register(WalletTransaction)
 
+@admin.register(AppVersion)
+class AppVersionAdmin(admin.ModelAdmin):
+    list_display = [
+        'version_name', 
+        'version_code', 
+        'platform', 
+        'is_active', 
+        'force_update',
+        'release_date'
+    ]
+    list_filter = ['platform', 'is_active', 'force_update']
+    search_fields = ['version_name', 'changelog']
+    ordering = ['-version_code', '-release_date']
+    readonly_fields = ['created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Informations', {
+            'fields': ('platform', 'version_code', 'version_name', 'download_url', 'file_size')
+        }),
+        ('Détails', {
+            'fields': ('changelog', 'release_date')
+        }),
+        ('Paramètres', {
+            'fields': ('min_version_code', 'force_update', 'is_active')
+        }),
+        ('Métadonnées', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )

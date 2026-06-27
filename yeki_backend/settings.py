@@ -23,6 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-q^_-_xu=%8i54x&65v*nm6u$@c9y=avyrhyfnu!zb%)l6msm+8"
+DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
@@ -32,6 +33,7 @@ ALLOWED_HOSTS = ['yeki.pythonanywhere.com']
 CORS_ALLOWED_ORIGINS = [
     "https://yeki.pythonanywhere.com",
     "http://localhost:53299",
+    'https://yeki-84b1a.web.app',
 ]
 
 # Application definition
@@ -64,6 +66,10 @@ MIDDLEWARE = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
     ],
 }
 

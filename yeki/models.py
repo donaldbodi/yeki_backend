@@ -1754,27 +1754,55 @@ class CinetPayTransaction(models.Model):
         return f"CinetPay {self.reference} - {self.status}"
     
 
-# models.py - Ajouter à la fin du fichier
-
 class AppVersion(models.Model):
-    """
-    Gestion des versions de l'application pour les mises à jour.
-    """
+    
     PLATFORM_CHOICES = [
         ('android', 'Android'),
-        ('ios', 'iOS'),
         ('desktop', 'Desktop'),
+        ('ios', 'iOS'),
         ('web', 'Web'),
     ]
     
-    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='android')
-    version_code = models.PositiveIntegerField(help_text="Numéro de version interne (ex: 2, 3, 4...)")
-    version_name = models.CharField(max_length=20, help_text="Nom de version (ex: v1.0.3)")
-    download_url = models.URLField(help_text="URL de téléchargement de l'APK/EXE/DMG")
-    changelog = models.TextField(blank=True, help_text="Description des nouveautés")
-    min_version_code = models.PositiveIntegerField(default=1, help_text="Version minimale requise")
-    force_update = models.BooleanField(default=False, help_text="Si True, oblige l'utilisateur à mettre à jour")
-    is_active = models.BooleanField(default=True, help_text="Version active/public")
+    platform = models.CharField(
+        max_length=20, 
+        choices=PLATFORM_CHOICES, 
+        default='android',
+        help_text="Plateforme cible"
+    )
+    version_code = models.PositiveIntegerField(
+        help_text="Numéro de version interne (ex: 2, 3, 4...)"
+    )
+    version_name = models.CharField(
+        max_length=20, 
+        help_text="Nom de version (ex: v1.0.3)"
+    )
+    download_url = models.URLField(
+        help_text="URL de téléchargement (Firebase Storage)"
+    )
+    changelog = models.TextField(
+        blank=True, 
+        help_text="Description des nouveautés"
+    )
+    min_version_code = models.PositiveIntegerField(
+        default=1, 
+        help_text="Version minimale requise"
+    )
+    force_update = models.BooleanField(
+        default=False, 
+        help_text="Si True, oblige l'utilisateur à mettre à jour"
+    )
+    is_active = models.BooleanField(
+        default=True, 
+        help_text="Version active/public"
+    )
+    file_size = models.PositiveIntegerField(
+        default=0,
+        help_text="Taille du fichier en octets"
+    )
+    release_date = models.DateTimeField(
+        default=timezone.now,
+        help_text="Date de publication"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -1786,7 +1814,6 @@ class AppVersion(models.Model):
     
     def __str__(self):
         return f"{self.get_platform_display()} - {self.version_name} (code: {self.version_code})"
-
 
 # models.py - Ajouter à la fin du fichier
 

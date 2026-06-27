@@ -234,8 +234,6 @@ urlpatterns = [
     path('wallet/payer/',        WalletPayerView.as_view(),     name='wallet-payer'),
     path('wallet/verifier-iap/', WalletVerifierIAPView.as_view(), name='wallet-verifier-iap'),
 
-    path('latest-version/', latest_version, name='latest-version'),
-
     # Admin - Refus olympiade
     path('admin/olympiades/<int:pk>/refuser/', AdminRefuserOlympiadeView.as_view(), name='admin-refuser-olympiade'),
     
@@ -346,6 +344,13 @@ urlpatterns = [
          AdminGeneralModifierParcoursView.as_view(), 
          name='parcours-modifier-admin'),
      path('cours/<int:cours_id>/devoirs/creer/', CreerDevoirCoursView.as_view(), name='devoir-creer'),
+
+     path('latest-version/', LatestVersionView.as_view(), name='latest-version'),
+     path('check-update/', CheckUpdateView.as_view(), name='check-update'),
+     
+     # Admin
+     path('admin/versions/', AdminVersionCreateView.as_view(), name='admin-version-create'),
+     path('admin/versions/list/', AdminVersionListView.as_view(), name='admin-version-list'),
 
      # Dans urls.py, ajouter ces lignes après les autres endpoints
      path('principal/dashboard_stats/', PrincipalDashboardAPIView.as_view(), name='principal-dashboard-stats'),
