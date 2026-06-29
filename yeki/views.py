@@ -9343,11 +9343,17 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
-#@api_view(['GET'])
-#@permission_classes([IsAuthenticated])
+# views.py - Modifiez la fonction get_dashboard_data
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])  # CORRECTION: Ajouter cette ligne
 def get_dashboard_data(request):
     try:
         user = request.user
+        # Vérifier que l'utilisateur est authentifié
+        if not user.is_authenticated:
+            return Response({'error': 'Non authentifié'}, status=status.HTTP_401_UNAUTHORIZED)
+        
         profile = Profile.objects.get(user=user)
     except Profile.DoesNotExist:
         return Response({'error': 'Profil introuvable'}, status=status.HTTP_404_NOT_FOUND)
@@ -9389,8 +9395,7 @@ def get_dashboard_data(request):
         return Response(
             {'error': f'Erreur lors du chargement des données: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-    
+        ) 
 
 # ---------------------------
 # Landing page
