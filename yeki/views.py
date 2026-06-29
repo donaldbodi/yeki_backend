@@ -9344,7 +9344,7 @@ class WalletVerifierIAPView(APIView):
 # ---------------------------
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+#@permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
     try:
         user = request.user
