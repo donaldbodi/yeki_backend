@@ -9343,20 +9343,34 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
-# views.py - Modifiez la fonction get_dashboard_data
-
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # CORRECTION: Ajouter cette ligne
+@permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
+    """
+    GET /api/enseignant/dashboard/
+    Retourne les données du dashboard selon le rôle de l'utilisateur.
+    """
     try:
-        user = request.user
-        # Vérifier que l'utilisateur est authentifié
-        if not user.is_authenticated:
-            return Response({'error': 'Non authentifié'}, status=status.HTTP_401_UNAUTHORIZED)
+        # Vérification explicite de l'authentification
+        if not request.user.is_authenticated:
+            return Response(
+                {'error': 'Utilisateur non authentifié'}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
         
-        profile = Profile.objects.get(user=user)
-    except Profile.DoesNotExist:
-        return Response({'error': 'Profil introuvable'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            profile = Profile.objects.get(user=request.user)
+        except Profile.DoesNotExist:
+            return Response(
+                {'error': 'Profil introuvable pour cet utilisateur'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Erreur dans get_dashboard_data: {e}")
+        return Response(
+            {'error': f'Erreur serveur: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
     
     role = getattr(profile, "user_type", None)
 
@@ -9387,15 +9401,19 @@ def get_dashboard_data(request):
             data["cours"] = CoursSerializer(cours, many=True).data
 
         else:
-            return Response({'error': 'Rôle non géré ici.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {'error': f'Rôle non géré: {role}'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         return Response(data, status=status.HTTP_200_OK)
         
     except Exception as e:
+        logging.getLogger(__name__).error(f"Erreur lors du chargement des données: {e}")
         return Response(
             {'error': f'Erreur lors du chargement des données: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        ) 
+        )
 
 # ---------------------------
 # Landing page
