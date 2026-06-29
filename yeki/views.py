@@ -9343,8 +9343,8 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
-@api_view(['GET'])
-#@permission_classes([IsAuthenticated])
+#@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
     """
     GET /api/enseignant/dashboard/
@@ -9515,16 +9515,6 @@ class LoginView(APIView):
             }, status=200)
 
         return Response(serializer.errors, status=400)
-    
-# ═══════════════════════════════════════════════════════════════════════════
-#  ADDITIONS À views.py — Gestion complète du mot de passe oublié
-#  Coller à la fin de votre views.py existant
-#
-#  3 endpoints :
-#    POST /api/auth/forgot-password/         → envoie le code OTP par email
-#    POST /api/auth/verify-otp/              → vérifie le code OTP
-#    POST /api/auth/reset-password/          → définit le nouveau mot de passe
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 # ───────────────────────────────────────────────────────────────────────────
