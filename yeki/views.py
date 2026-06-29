@@ -9342,9 +9342,10 @@ class WalletVerifierIAPView(APIView):
 # ---------------------------
 # Dashboard selon rôle
 # ---------------------------
+# views.py - get_dashboard_data version CORRIGÉE
 
-#@api_view(['GET'])
-#@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
     """
     GET /api/enseignant/dashboard/
@@ -9358,6 +9359,7 @@ def get_dashboard_data(request):
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
+        # Récupération du profil
         try:
             profile = Profile.objects.get(user=request.user)
         except Profile.DoesNotExist:
@@ -9366,6 +9368,7 @@ def get_dashboard_data(request):
                 status=status.HTTP_404_NOT_FOUND
             )
     except Exception as e:
+        import logging
         logging.getLogger(__name__).error(f"Erreur dans get_dashboard_data: {e}")
         return Response(
             {'error': f'Erreur serveur: {str(e)}'},
@@ -9373,7 +9376,8 @@ def get_dashboard_data(request):
         )
     
     role = getattr(profile, "user_type", None)
-
+    
+    # Construction des données
     data = {
         "role": role, 
         "nom": f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username
@@ -9406,14 +9410,17 @@ def get_dashboard_data(request):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # Retourner la réponse avec le status 200 et le content-type JSON
         return Response(data, status=status.HTTP_200_OK)
         
     except Exception as e:
+        import logging
         logging.getLogger(__name__).error(f"Erreur lors du chargement des données: {e}")
         return Response(
             {'error': f'Erreur lors du chargement des données: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
 
 # ---------------------------
 # Landing page
