@@ -9343,7 +9343,7 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
-@api_view(['GET'])
+#@api_view(['GET'])
 #@permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
     try:
