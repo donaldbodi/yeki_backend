@@ -9343,6 +9343,97 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
+class EnseignantDashboardView(APIView):
+    """
+    GET /api/enseignant/dashboard/
+    Retourne les données du dashboard pour l'enseignant (secondaire).
+    """
+    #authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response(
+                {"detail": "Profil introuvable. Veuillez vous reconnecter."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Vérifier que l'utilisateur est un enseignant
+        if profile.user_type not in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']:
+            return Response(
+                {"detail": "Accès réservé aux enseignants."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Récupérer les cours où l'enseignant est secondaire
+        cours_secondaires = profile.cours_secondaires.all()
+        
+        # Pour les enseignants principaux, ajouter aussi leurs cours principaux
+        if profile.user_type == 'enseignant_principal':
+            cours_principaux = Cours.objects.filter(enseignant_principal=profile)
+            cours_list = list(cours_secondaires) + list(cours_principaux)
+        else:
+            cours_list = list(cours_secondaires)
+
+        # Sérialiser les cours
+        cours_data = []
+        for cours in cours_list:
+            # Calculer le taux de complétion moyen
+            nb_lecons = Lecon.objects.filter(cours=cours).count()
+            nb_terminees = ProgressionLecon.objects.filter(
+                cours=cours,
+                terminee=True
+            ).count()
+            taux_completion = round((nb_terminees / nb_lecons * 100), 1) if nb_lecons > 0 else 0.0
+
+            # Récupérer le département
+            departement_data = None
+            if cours.departement:
+                departement_data = {
+                    'id': cours.departement.id,
+                    'nom': cours.departement.nom,
+                }
+
+            cours_data.append({
+                'id': cours.id,
+                'titre': cours.titre,
+                'niveau': cours.niveau,
+                'description_brief': cours.description_brief or '',
+                'color_code': cours.color_code or '#2884A0',
+                'icon_name': cours.icon_name or 'school',
+                'nb_lecons': cours.nb_lecons,
+                'nb_devoirs': cours.nb_devoirs,
+                'nb_apprenants': cours.nb_apprenants,
+                'taux_completion': taux_completion,
+                'departement': departement_data,
+                'enseignant_principal': {
+                    'id': cours.enseignant_principal.id,
+                    'nom': f"{cours.enseignant_principal.user.first_name} {cours.enseignant_principal.user.last_name}".strip() or cours.enseignant_principal.user.username,
+                } if cours.enseignant_principal else None,
+            })
+
+        # Statistiques
+        stats = {
+            'nb_cours': len(cours_data),
+            'nb_lecons': sum(c['nb_lecons'] for c in cours_data),
+            'nb_devoirs': sum(c['nb_devoirs'] for c in cours_data),
+            'nb_apprenants': sum(c['nb_apprenants'] for c in cours_data),
+            'taux_completion_moyen': round(sum(c['taux_completion'] for c in cours_data) / len(cours_data), 1) if cours_data else 0.0,
+        }
+
+        nom_complet = f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username
+
+        return Response({
+            'nom': nom_complet,
+            'stats': stats,
+            'cours': cours_data,
+        }, status=status.HTTP_200_OK)
+    
+
+#@api_view(['GET'])
+#@permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
     """
     GET /api/enseignant/dashboard/
@@ -9354,7 +9445,7 @@ def get_dashboard_data(request):
                 {'error': 'Utilisateur non authentifié'}, 
                 status=401
             )
-        
+
         try:
             profile = Profile.objects.get(user=request.user)
         except Profile.DoesNotExist:
