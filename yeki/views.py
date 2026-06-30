@@ -9478,7 +9478,7 @@ def get_dashboard_data(request):
             {'error': f'Erreur lors du chargement des données: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-    
+
 
 # ---------------------------
 # Landing page
