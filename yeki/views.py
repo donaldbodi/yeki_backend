@@ -9343,7 +9343,8 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
-#@api_view(['GET'])
+
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
     """
@@ -9358,7 +9359,6 @@ def get_dashboard_data(request):
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
-        # Récupération du profil
         try:
             profile = Profile.objects.get(user=request.user)
         except Profile.DoesNotExist:
@@ -9376,7 +9376,7 @@ def get_dashboard_data(request):
     
     role = getattr(profile, "user_type", None)
     
-    # Construction des données
+    # Construction des données avec des dictionnaires simples
     data = {
         "role": role, 
         "nom": f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username
@@ -9385,23 +9385,82 @@ def get_dashboard_data(request):
     try:
         if role == "admin":
             parcours = Parcours.objects.select_related("admin").all()
-            data["parcours"] = ParcoursSerializer(parcours, many=True).data
+            # Utiliser des dictionnaires simples au lieu de serializers
+            data["parcours"] = [
+                {
+                    "id": p.id,
+                    "nom": p.nom,
+                    "type_parcours": p.type_parcours,
+                    "description": p.description,
+                    "admin": {
+                        "id": p.admin.id,
+                        "nom": f"{p.admin.user.first_name} {p.admin.user.last_name}".strip() or p.admin.user.username,
+                    } if p.admin else None,
+                }
+                for p in parcours
+            ]
 
         elif role == "enseignant_admin":
             parcours = Parcours.objects.filter(admin=profile)
-            data["parcours"] = ParcoursSerializer(parcours, many=True).data
+            data["parcours"] = [
+                {
+                    "id": p.id,
+                    "nom": p.nom,
+                    "type_parcours": p.type_parcours,
+                    "description": p.description,
+                }
+                for p in parcours
+            ]
 
         elif role == "enseignant_cadre":
             departements = Departement.objects.filter(cadre=profile)
-            data["departements"] = DepartementSerializer(departements, many=True).data
+            data["departements"] = [
+                {
+                    "id": d.id,
+                    "nom": d.nom,
+                    "description": d.description,
+                    "nb_cours": d.cours.count(),
+                    "cadre": {
+                        "id": d.cadre.id,
+                        "nom": f"{d.cadre.user.first_name} {d.cadre.user.last_name}".strip() or d.cadre.user.username,
+                    } if d.cadre else None,
+                }
+                for d in departements
+            ]
 
         elif role == "enseignant_principal":
             cours = Cours.objects.filter(enseignant_principal=profile)
-            data["cours"] = CoursSerializer(cours, many=True).data
+            data["cours"] = [
+                {
+                    "id": c.id,
+                    "titre": c.titre,
+                    "niveau": c.niveau,
+                    "description_brief": c.description_brief,
+                    "color_code": c.color_code,
+                    "icon_name": c.icon_name,
+                    "nb_lecons": c.nb_lecons,
+                    "nb_devoirs": c.nb_devoirs,
+                    "nb_apprenants": c.nb_apprenants,
+                }
+                for c in cours
+            ]
 
         elif role == "enseignant":
             cours = profile.cours_secondaires.all()
-            data["cours"] = CoursSerializer(cours, many=True).data
+            data["cours"] = [
+                {
+                    "id": c.id,
+                    "titre": c.titre,
+                    "niveau": c.niveau,
+                    "description_brief": c.description_brief,
+                    "color_code": c.color_code,
+                    "icon_name": c.icon_name,
+                    "nb_lecons": c.nb_lecons,
+                    "nb_devoirs": c.nb_devoirs,
+                    "nb_apprenants": c.nb_apprenants,
+                }
+                for c in cours
+            ]
 
         else:
             return Response(
@@ -9409,7 +9468,7 @@ def get_dashboard_data(request):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Retourner la réponse avec le status 200 et le content-type JSON
+        # Retourner la réponse avec le status 200
         return Response(data, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -9419,7 +9478,7 @@ def get_dashboard_data(request):
             {'error': f'Erreur lors du chargement des données: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
+    
 
 # ---------------------------
 # Landing page
