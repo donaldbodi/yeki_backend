@@ -9343,7 +9343,6 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
@@ -9352,31 +9351,27 @@ def get_dashboard_data(request):
     Retourne les données du dashboard selon le rôle de l'utilisateur.
     """
     try:
-        # Vérification explicite de l'authentification
         if not request.user.is_authenticated:
-            return Response(
+            return JsonResponse(
                 {'error': 'Utilisateur non authentifié'}, 
-                status=status.HTTP_401_UNAUTHORIZED
+                status=401
             )
         
         try:
             profile = Profile.objects.get(user=request.user)
         except Profile.DoesNotExist:
-            return Response(
+            return JsonResponse(
                 {'error': 'Profil introuvable pour cet utilisateur'}, 
-                status=status.HTTP_404_NOT_FOUND
+                status=404
             )
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Erreur dans get_dashboard_data: {e}")
-        return Response(
+        return JsonResponse(
             {'error': f'Erreur serveur: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=500
         )
     
     role = getattr(profile, "user_type", None)
     
-    # Construction des données avec des dictionnaires simples
     data = {
         "role": role, 
         "nom": f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username
@@ -9385,13 +9380,11 @@ def get_dashboard_data(request):
     try:
         if role == "admin":
             parcours = Parcours.objects.select_related("admin").all()
-            # Utiliser des dictionnaires simples au lieu de serializers
             data["parcours"] = [
                 {
                     "id": p.id,
                     "nom": p.nom,
                     "type_parcours": p.type_parcours,
-                    "description": p.description,
                     "admin": {
                         "id": p.admin.id,
                         "nom": f"{p.admin.user.first_name} {p.admin.user.last_name}".strip() or p.admin.user.username,
@@ -9407,7 +9400,6 @@ def get_dashboard_data(request):
                     "id": p.id,
                     "nom": p.nom,
                     "type_parcours": p.type_parcours,
-                    "description": p.description,
                 }
                 for p in parcours
             ]
@@ -9420,10 +9412,6 @@ def get_dashboard_data(request):
                     "nom": d.nom,
                     "description": d.description,
                     "nb_cours": d.cours.count(),
-                    "cadre": {
-                        "id": d.cadre.id,
-                        "nom": f"{d.cadre.user.first_name} {d.cadre.user.last_name}".strip() or d.cadre.user.username,
-                    } if d.cadre else None,
                 }
                 for d in departements
             ]
@@ -9435,9 +9423,6 @@ def get_dashboard_data(request):
                     "id": c.id,
                     "titre": c.titre,
                     "niveau": c.niveau,
-                    "description_brief": c.description_brief,
-                    "color_code": c.color_code,
-                    "icon_name": c.icon_name,
                     "nb_lecons": c.nb_lecons,
                     "nb_devoirs": c.nb_devoirs,
                     "nb_apprenants": c.nb_apprenants,
@@ -9452,9 +9437,6 @@ def get_dashboard_data(request):
                     "id": c.id,
                     "titre": c.titre,
                     "niveau": c.niveau,
-                    "description_brief": c.description_brief,
-                    "color_code": c.color_code,
-                    "icon_name": c.icon_name,
                     "nb_lecons": c.nb_lecons,
                     "nb_devoirs": c.nb_devoirs,
                     "nb_apprenants": c.nb_apprenants,
@@ -9463,22 +9445,18 @@ def get_dashboard_data(request):
             ]
 
         else:
-            return Response(
+            return JsonResponse(
                 {'error': f'Rôle non géré: {role}'}, 
-                status=status.HTTP_403_FORBIDDEN
+                status=403
             )
 
-        # Retourner la réponse avec le status 200
-        return Response(data, status=status.HTTP_200_OK)
+        return JsonResponse(data, status=200)
         
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Erreur lors du chargement des données: {e}")
-        return Response(
+        return JsonResponse(
             {'error': f'Erreur lors du chargement des données: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=500
         )
-
 
 # ---------------------------
 # Landing page
