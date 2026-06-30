@@ -40,7 +40,7 @@ urlpatterns = [
     path('enseignants/liste/', ListeEnseignantsParRoleView.as_view(), name='enseignants-liste-role'),
 
     # ── DASHBOARD ─────────────────────────────────────────────────
-    path('enseignant/dashboard/', EnseignantDashboardView.as_view(), name='enseignant-dashboard-data'),
+    path('enseignant/dashboard/', get_dashboard_data, name='enseignant-dashboard-data'),
     path('admin-general/dashboard/', AdminGeneralDashboardView.as_view(), name='admin-general-dashboard'),
     path('enseignant/admin/dashboard/', EnseignantAdminDashboardView.as_view(), name='enseignant-admin-dashboard'),
     path('cours/<int:cours_id>/changer-enseignant-principal/', ChangerEnseignantPrincipalView.as_view(), name='changer-ep'),
