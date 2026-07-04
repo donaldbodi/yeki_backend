@@ -9343,35 +9343,17 @@ class WalletVerifierIAPView(APIView):
 # Dashboard selon rôle
 # ---------------------------
 
-#@api_view(['GET'])
-#@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_dashboard_data(request):
-    """
-    GET /api/enseignant/dashboard/
-    Retourne les données du dashboard selon le rôle de l'utilisateur.
-    """
     try:
-        if not request.user.is_authenticated:
-            return JsonResponse(
-                {'error': 'Utilisateur non authentifié'}, 
-                status=401
-            )
-
-        try:
-            profile = Profile.objects.get(user=request.user)
-        except Profile.DoesNotExist:
-            return JsonResponse(
-                {'error': 'Profil introuvable pour cet utilisateur'}, 
-                status=404
-            )
-    except Exception as e:
-        return JsonResponse(
-            {'error': f'Erreur serveur: {str(e)}'},
-            status=500
-        )
+        user = request.user
+        profile = Profile.objects.get(user=user)
+    except Profile.DoesNotExist:
+        return Response({'error': 'Profil introuvable'}, status=status.HTTP_404_NOT_FOUND)
     
     role = getattr(profile, "user_type", None)
-    
+
     data = {
         "role": role, 
         "nom": f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username
@@ -9380,82 +9362,33 @@ def get_dashboard_data(request):
     try:
         if role == "admin":
             parcours = Parcours.objects.select_related("admin").all()
-            data["parcours"] = [
-                {
-                    "id": p.id,
-                    "nom": p.nom,
-                    "type_parcours": p.type_parcours,
-                    "admin": {
-                        "id": p.admin.id,
-                        "nom": f"{p.admin.user.first_name} {p.admin.user.last_name}".strip() or p.admin.user.username,
-                    } if p.admin else None,
-                }
-                for p in parcours
-            ]
+            data["parcours"] = ParcoursSerializer(parcours, many=True).data
 
         elif role == "enseignant_admin":
             parcours = Parcours.objects.filter(admin=profile)
-            data["parcours"] = [
-                {
-                    "id": p.id,
-                    "nom": p.nom,
-                    "type_parcours": p.type_parcours,
-                }
-                for p in parcours
-            ]
+            data["parcours"] = ParcoursSerializer(parcours, many=True).data
 
         elif role == "enseignant_cadre":
             departements = Departement.objects.filter(cadre=profile)
-            data["departements"] = [
-                {
-                    "id": d.id,
-                    "nom": d.nom,
-                    "description": d.description,
-                    "nb_cours": d.cours.count(),
-                }
-                for d in departements
-            ]
+            data["departements"] = DepartementSerializer(departements, many=True).data
 
         elif role == "enseignant_principal":
             cours = Cours.objects.filter(enseignant_principal=profile)
-            data["cours"] = [
-                {
-                    "id": c.id,
-                    "titre": c.titre,
-                    "niveau": c.niveau,
-                    "nb_lecons": c.nb_lecons,
-                    "nb_devoirs": c.nb_devoirs,
-                    "nb_apprenants": c.nb_apprenants,
-                }
-                for c in cours
-            ]
+            data["cours"] = CoursSerializer(cours, many=True).data
 
         elif role == "enseignant":
             cours = profile.cours_secondaires.all()
-            data["cours"] = [
-                {
-                    "id": c.id,
-                    "titre": c.titre,
-                    "niveau": c.niveau,
-                    "nb_lecons": c.nb_lecons,
-                    "nb_devoirs": c.nb_devoirs,
-                    "nb_apprenants": c.nb_apprenants,
-                }
-                for c in cours
-            ]
+            data["cours"] = CoursSerializer(cours, many=True).data
 
         else:
-            return JsonResponse(
-                {'error': f'Rôle non géré: {role}'}, 
-                status=403
-            )
+            return Response({'error': 'Rôle non géré ici.'}, status=status.HTTP_403_FORBIDDEN)
 
-        return JsonResponse(data, status=200)
+        return Response(data, status=status.HTTP_200_OK)
         
     except Exception as e:
-        return JsonResponse(
+        return Response(
             {'error': f'Erreur lors du chargement des données: {str(e)}'},
-            status=500
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
 # ---------------------------
