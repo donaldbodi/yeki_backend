@@ -101,7 +101,6 @@ urlpatterns = [
 
     # ── DEVOIRS ───────────────────────────────────────────────────
     path('devoirs/', ListeDevoirsView.as_view(), name='liste-devoirs'),
-    path('cours/<int:cours_id>/devoirs/', DevoirsCoursView.as_view()),
     path('devoirs/<int:devoir_id>/', DetailDevoirView.as_view(), name='detail-devoir'),
     path('devoirs/<int:devoir_id>/demarrer/', DemarrerDevoirView.as_view(), name='demarrer-devoir'),
     path('devoirs/<int:devoir_id>/soumettre/', SoumettreDevoirView.as_view(), name='soumettre-devoir'),

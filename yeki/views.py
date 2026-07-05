@@ -3214,59 +3214,6 @@ class ChangePasswordView(APIView):
             status=200
         )
 
-    
-# ============================================================
-#  views_devoirs.py
-# ============================================================
-class DevoirsCoursView(APIView):
-    """
-    GET /api/cours/<cours_id>/devoirs/
-    Retourne les devoirs liés à un cours spécifique.
-    Inclut la soumission de l'utilisateur connecté.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, cours_id):
-        # Import ici pour éviter les imports circulaires
-        from .models import Devoir, SoumissionDevoir
-
-        # Devoirs liés à ce cours via le bon champ FK cours_lie
-        devoirs = Devoir.objects.filter(
-            cours_lie_id=cours_id,
-            est_publie=True,
-        ).order_by('date_limite')
-
-        result = []
-        for devoir in devoirs:
-            # Chercher la soumission de l'utilisateur
-            soumission = SoumissionDevoir.objects.filter(
-                devoir=devoir,
-                utilisateur=request.user,
-            ).first()
-
-            soumission_data = None
-            if soumission:
-                soumission_data = {
-                    'id':     soumission.id,
-                    'statut': soumission.statut,
-                    'note':   float(soumission.note) if soumission.note is not None else None,
-                    'soumis_le': soumission.soumis_le.isoformat() if soumission.soumis_le else None,
-                }
-
-            result.append({
-                'id':           devoir.id,
-                'titre':        devoir.titre,
-                'description':  devoir.description,
-                'date_debut':   devoir.date_debut.isoformat() if devoir.date_debut else None,
-                'date_limite':  devoir.date_limite.isoformat() if devoir.date_limite else None,
-                'est_ouvert':   devoir.est_ouvert,
-                'est_expire':   devoir.est_expire,
-                'nb_questions': devoir.questions.count(),
-                'note_sur':     float(devoir.note_sur) if hasattr(devoir, 'note_sur') else 20,
-                'ma_soumission': soumission_data,
-            })
-
-        return Response(result)
 
 # ═══════════════════════════════════════════════════════════════
 #  DEVOIRS GÉNÉRAUX
@@ -3573,10 +3520,6 @@ class ResultatDevoirView(APIView):
             "detail":      detail,
         })
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. CRÉER UN DEVOIR LIÉ À UN COURS
-#    POST /api/cours/<cours_id>/devoirs/creer/
-# ─────────────────────────────────────────────────────────────────────────────
 
 class DevoirsCoursView(APIView):
     """
@@ -3588,18 +3531,18 @@ class DevoirsCoursView(APIView):
     def get(self, request, cours_id):
         cours = get_object_or_404(Cours, pk=cours_id)
         
-        # Récupérer tous les devoirs du cours, publiés ou non selon le rôle
         try:
             profile = request.user.profile
         except Profile.DoesNotExist:
             return Response({"detail": "Profil introuvable."}, status=404)
 
-        # Vérifier si l'utilisateur est enseignant principal du cours
-        is_enseignant = (profile.user_type in ['enseignant_principal', 'enseignant_cadre', 'enseignant_admin', 'admin'] and 
-                         (cours.enseignant_principal == profile or 
-                          profile.user_type in ['enseignant_cadre', 'enseignant_admin', 'admin']))
+        # ✅ CORRECTION : Vérifier si l'utilisateur est enseignant principal du cours
+        is_enseignant = (
+            profile.user_type in ['enseignant_principal', 'enseignant_cadre', 'enseignant_admin', 'admin'] and 
+            (cours.enseignant_principal == profile or profile.user_type in ['enseignant_cadre', 'enseignant_admin', 'admin'])
+        )
 
-        # Base queryset
+        # ✅ CORRECTION : Base queryset
         if is_enseignant:
             # Enseignant: voir tous les devoirs (publiés ou non)
             devoirs = Devoir.objects.filter(cours_lie=cours).order_by('-date_creation')
@@ -3665,8 +3608,6 @@ class DevoirsCoursView(APIView):
 
         return Response(result)
 
-
-# serializers.py - Améliorer ReponseSerializer
 
 class ReponseSerializer(serializers.ModelSerializer):
     auteur_nom = serializers.SerializerMethodField()
@@ -3781,7 +3722,7 @@ class CreerDevoirCoursView(APIView):
         except Profile.DoesNotExist:
             return Response({"detail": "Profil introuvable."}, status=404)
 
-        # Vérifier que l'utilisateur est l'enseignant principal du cours
+        # ✅ CORRECTION : Vérifier que l'utilisateur est l'enseignant principal du cours
         if cours.enseignant_principal != profile:
             return Response(
                 {"detail": "Seul l'enseignant principal peut créer un devoir pour ce cours."},
@@ -3799,7 +3740,6 @@ class CreerDevoirCoursView(APIView):
         if 'date_debut' not in data:
             data['date_debut'] = timezone.now().isoformat()
         if 'date_limite' not in data:
-            # Par défaut, 7 jours à partir de maintenant
             data['date_limite'] = (timezone.now() + timedelta(days=7)).isoformat()
         if 'duree_minutes' not in data:
             data['duree_minutes'] = 60
@@ -3857,8 +3797,6 @@ class CreerDevoirCoursView(APIView):
             }, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 class ModifierDevoirView(APIView):
     """
     PATCH /api/devoirs/<devoir_id>/modifier/
