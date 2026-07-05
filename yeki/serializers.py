@@ -1025,6 +1025,7 @@ class ExerciceSerializer(serializers.ModelSerializer):
         """Retourne le nombre de questions de l'exercice"""
         return obj.questions.count()
 
+
 class ExerciceCreateSerializer(serializers.ModelSerializer):
     enonce_image = serializers.ImageField(required=False, allow_null=True)
     exercices_composes = serializers.PrimaryKeyRelatedField(

@@ -2882,7 +2882,9 @@ class DemarrerExerciceView(APIView):
             return Response(
                 {
                     "detail": f"Nombre maximum de tentatives atteint ({exercice.tentatives_max}).",
-                    "tentatives_restantes": 0
+                    "tentatives_restantes": 0,
+                    "tentatives_max": exercice.tentatives_max,
+                    "tentatives_epuisees": True
                 },
                 status=status.HTTP_403_FORBIDDEN
             )
@@ -2916,9 +2918,10 @@ class DemarrerExerciceView(APIView):
             "debut": session.debut.isoformat(),
             "duree_totale": duree_totale,
             "temps_restant": temps_restant,
-            "tentatives_restantes": exercice.tentatives_max - tentatives
+            "tentatives_restantes": exercice.tentatives_max - tentatives,
+            "tentatives_max": exercice.tentatives_max,
+            "tentatives_epuisees": False
         }, status=status.HTTP_200_OK)
-
 
 class ExerciceDetailView(APIView):
     permission_classes = [IsAuthenticated]
@@ -3536,13 +3539,13 @@ class DevoirsCoursView(APIView):
         except Profile.DoesNotExist:
             return Response({"detail": "Profil introuvable."}, status=404)
 
-        # ✅ CORRECTION : Vérifier si l'utilisateur est enseignant principal du cours
+        # Vérifier si l'utilisateur est enseignant principal du cours
         is_enseignant = (
             profile.user_type in ['enseignant_principal', 'enseignant_cadre', 'enseignant_admin', 'admin'] and 
             (cours.enseignant_principal == profile or profile.user_type in ['enseignant_cadre', 'enseignant_admin', 'admin'])
         )
 
-        # ✅ CORRECTION : Base queryset
+        # Base queryset
         if is_enseignant:
             # Enseignant: voir tous les devoirs (publiés ou non)
             devoirs = Devoir.objects.filter(cours_lie=cours).order_by('-date_creation')
@@ -3722,7 +3725,7 @@ class CreerDevoirCoursView(APIView):
         except Profile.DoesNotExist:
             return Response({"detail": "Profil introuvable."}, status=404)
 
-        # ✅ CORRECTION : Vérifier que l'utilisateur est l'enseignant principal du cours
+        # Vérifier que l'utilisateur est l'enseignant principal du cours
         if cours.enseignant_principal != profile:
             return Response(
                 {"detail": "Seul l'enseignant principal peut créer un devoir pour ce cours."},
@@ -3797,6 +3800,8 @@ class CreerDevoirCoursView(APIView):
             }, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 class ModifierDevoirView(APIView):
     """
     PATCH /api/devoirs/<devoir_id>/modifier/
@@ -3875,6 +3880,7 @@ class ModifierDevoirView(APIView):
             'note_sur': float(devoir.note_sur),
             'detail': 'Devoir modifié avec succès.',
         }, status=status.HTTP_200_OK)
+
 
 # a verifier
 @api_view(['GET'])
