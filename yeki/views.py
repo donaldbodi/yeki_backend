@@ -1040,17 +1040,35 @@ class PrincipalDashboardAPIView(APIView):
         cours = Cours.objects.filter(enseignant_principal=profile)
         cours_ids = cours.values_list('id', flat=True)
 
+        if not cours_ids:
+            return Response({
+                'nom': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username,
+                'stats': {
+                    'nb_cours': 0,
+                    'nb_lecons': 0,
+                    'nb_devoirs': 0,
+                    'nb_apprenants': 0,
+                    'taux_rendu_global': 0,
+                    'moyenne_globale': 0,
+                    'nb_retards': 0,
+                },
+                'devoirs_par_cours': [],
+                'apprenants_risque': [],
+                'tendance_rendus': []
+            })
+
         # Statistiques de base
         nb_cours = cours.count()
         nb_lecons = Lecon.objects.filter(cours__in=cours_ids).count()
         nb_devoirs = Devoir.objects.filter(cours_lie__in=cours_ids).count()
         
-        # Apprenants uniques - CORRECTION : utiliser Profile.objects.filter avec cursus
-        # Récupérer les noms de parcours des départements des cours
+        # CORRECTION: Compter les apprenants uniques
+        # Récupérer les parcours des départements des cours
         parcours_noms = Departement.objects.filter(
             cours__in=cours_ids
         ).values_list('parcours__nom', flat=True).distinct()
         
+        # Compter les apprenants dans ces parcours
         apprenants = Profile.objects.filter(
             user_type='apprenant',
             cursus__in=parcours_noms,
@@ -1077,14 +1095,13 @@ class PrincipalDashboardAPIView(APIView):
             soumis_le__gt=F('devoir__date_limite')
         ).count()
 
-        # Apprenants à risque (ceux avec taux de rendu < 50%)
+        # Apprenants à risque
         apprenants_risque = []
         for p in Profile.objects.filter(
             user_type='apprenant',
             cursus__in=parcours_noms,
             is_active=True
         ).select_related('user'):
-            # Compter les soumissions de cet apprenant pour les cours du principal
             soumissions = SoumissionDevoir.objects.filter(
                 devoir__cours_lie__in=cours_ids,
                 utilisateur=p.user
