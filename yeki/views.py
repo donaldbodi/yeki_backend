@@ -1062,7 +1062,6 @@ class PrincipalDashboardAPIView(APIView):
             # Statistiques de base
             nb_cours = cours.count()
             nb_lecons = Lecon.objects.filter(cours__in=cours_ids).count()
-            
             nb_devoirs = Devoir.objects.filter(cours_lie__in=cours_ids).count()
             
             # Compter les apprenants
@@ -1078,24 +1077,23 @@ class PrincipalDashboardAPIView(APIView):
 
             # Taux de rendu global
             total_rendus = SoumissionDevoir.objects.filter(
-                    devoir__cours_lie__in=cours_ids,
-                    statut__in=['soumis', 'corrige', 'en_retard']
-                ).count()
-                
+                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                statut__in=['soumis', 'corrige', 'en_retard']
+            ).count()
             total_attendu = nb_devoirs * apprenants if apprenants > 0 else 1
             taux_rendu = (total_rendus / total_attendu * 100) if total_attendu > 0 else 0
 
             # Moyenne globale
             moyenne_globale = SoumissionDevoir.objects.filter(
-                    devoir__cours_lie__in=cours_ids,
-                    note__isnull=False
-                ).aggregate(Avg('note'))['note__avg'] or 0
+                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                note__isnull=False
+            ).aggregate(Avg('note'))['note__avg'] or 0
 
             # Retards
             retards = SoumissionDevoir.objects.filter(
-                    devoir__cours_lie__in=cours_ids,
-                    soumis_le__gt=F('devoir__date_limite')
-                ).count()
+                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                soumis_le__gt=F('devoir__date_limite')
+            ).count()
 
             # Apprenants à risque
             apprenants_risque = []
@@ -1105,14 +1103,13 @@ class PrincipalDashboardAPIView(APIView):
                 is_active=True
             ).select_related('user'):
                 soumissions = SoumissionDevoir.objects.filter(
-                        devoir__cours_lie__in=cours_ids,
-                        utilisateur=p.user
-                    )
+                    devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                    utilisateur=p.user
+                )
                 nb_rendus = soumissions.filter(
                     statut__in=['soumis', 'corrige', 'en_retard']
                 ).count()
-                
-                nb_devoirs_total = Devoir.objects.filter(cours_lie__in=cours_ids).count()
+                nb_devoirs_total = Devoir.objects.filter(cours__in=cours_ids).count()
                 
                 if nb_devoirs_total > 0:
                     taux = (nb_rendus / nb_devoirs_total * 100)
@@ -1135,10 +1132,9 @@ class PrincipalDashboardAPIView(APIView):
 
             # Devoirs par cours
             devoirs_par_cours = []
-            for c in cours:  # ← c est défini ici dans la boucle
+            for c in cours:
                 try:
-                    devoirs = Devoir.objects.filter(cours_lie=c)
-                        
+                    devoirs = Devoir.objects.filter(cours_lie=c)  # NOTE: Vérifiez le nom du champ
                     nb_devoirs_cours = devoirs.count()
                     
                     apprenants_cours = Profile.objects.filter(
@@ -1148,10 +1144,9 @@ class PrincipalDashboardAPIView(APIView):
                     ).count()
                     
                     rendus_cours = SoumissionDevoir.objects.filter(
-                            devoir__cours_lie=c,
-                            statut__in=['soumis', 'corrige', 'en_retard']
-                        )
-                        
+                        devoir__in=devoirs,
+                        statut__in=['soumis', 'corrige', 'en_retard']
+                    )
                     total_rendus_cours = rendus_cours.count()
                     total_attendu_cours = nb_devoirs_cours * apprenants_cours if apprenants_cours > 0 else 1
                     taux_cours = (total_rendus_cours / total_attendu_cours * 100) if total_attendu_cours > 0 else 0
@@ -1184,7 +1179,7 @@ class PrincipalDashboardAPIView(APIView):
                                 'nb_retards': nb_retards,
                                 'taux_rendu': (rendus_cours.filter(devoir=devoir).count() / apprenants_cours * 100) if apprenants_cours > 0 else 0,
                                 'note_moyenne': round(note_moyenne, 1) if note_moyenne else 0,
-                                'type_correction': getattr(devoir, 'type_correction', 'auto')
+                                'type_correction': getattr(devoir, 'type_correction', 'auto')  # NOTE: Vérifiez le nom du champ
                             })
                         except Exception as e:
                             print(f"Erreur traitement devoir {devoir.id}: {e}")
@@ -1206,10 +1201,10 @@ class PrincipalDashboardAPIView(APIView):
             for i in range(6, -1, -1):
                 date = timezone.now().date() - timedelta(days=i)
                 nb_rendus_jour = SoumissionDevoir.objects.filter(
-                        devoir__cours_lie__in=cours_ids,
-                        soumis_le__date=date,
-                        statut__in=['soumis', 'corrige', 'en_retard']
-                    ).count()
+                    devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                    soumis_le__date=date,
+                    statut__in=['soumis', 'corrige', 'en_retard']
+                ).count()
                 tendance_rendus.append({
                     'date': date.isoformat(),
                     'nb_rendus': nb_rendus_jour
