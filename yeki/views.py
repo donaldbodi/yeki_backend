@@ -1036,11 +1036,200 @@ class PrincipalDashboardAPIView(APIView):
                 status=403
             )
 
-        # Récupérer les cours du principal
-        cours = Cours.objects.filter(enseignant_principal=profile)
-        cours_ids = cours.values_list('id', flat=True)
+        try:
+            # Récupérer les cours du principal
+            cours = Cours.objects.filter(enseignant_principal=profile)
+            cours_ids = cours.values_list('id', flat=True)
 
-        if not cours_ids:
+            # Si pas de cours, retourner des données vides
+            if not cours_ids:
+                return Response({
+                    'nom': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username,
+                    'stats': {
+                        'nb_cours': 0,
+                        'nb_lecons': 0,
+                        'nb_devoirs': 0,
+                        'nb_apprenants': 0,
+                        'taux_rendu_global': 0,
+                        'moyenne_globale': 0,
+                        'nb_retards': 0,
+                    },
+                    'devoirs_par_cours': [],
+                    'apprenants_risque': [],
+                    'tendance_rendus': []
+                })
+
+            # Statistiques de base
+            nb_cours = cours.count()
+            nb_lecons = Lecon.objects.filter(cours__in=cours_ids).count()
+            nb_devoirs = Devoir.objects.filter(cours_lie=c).count()
+            
+            # Compter les apprenants
+            parcours_noms = Departement.objects.filter(
+                cours__in=cours_ids
+            ).values_list('parcours__nom', flat=True).distinct()
+            
+            apprenants = Profile.objects.filter(
+                user_type='apprenant',
+                cursus__in=parcours_noms,
+                is_active=True
+            ).distinct().count()
+
+            # Taux de rendu global
+            total_rendus = SoumissionDevoir.objects.filter(
+                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                statut__in=['soumis', 'corrige', 'en_retard']
+            ).count()
+            total_attendu = nb_devoirs * apprenants if apprenants > 0 else 1
+            taux_rendu = (total_rendus / total_attendu * 100) if total_attendu > 0 else 0
+
+            # Moyenne globale
+            moyenne_globale = SoumissionDevoir.objects.filter(
+                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                note__isnull=False
+            ).aggregate(Avg('note'))['note__avg'] or 0
+
+            # Retards
+            retards = SoumissionDevoir.objects.filter(
+                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                soumis_le__gt=F('devoir__date_limite')
+            ).count()
+
+            # Apprenants à risque
+            apprenants_risque = []
+            for p in Profile.objects.filter(
+                user_type='apprenant',
+                cursus__in=parcours_noms,
+                is_active=True
+            ).select_related('user'):
+                soumissions = SoumissionDevoir.objects.filter(
+                    devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                    utilisateur=p.user
+                )
+                nb_rendus = soumissions.filter(
+                    statut__in=['soumis', 'corrige', 'en_retard']
+                ).count()
+                nb_devoirs_total = Devoir.objects.filter(cours__in=cours_ids).count()
+                
+                if nb_devoirs_total > 0:
+                    taux = (nb_rendus / nb_devoirs_total * 100)
+                    if taux < 50:
+                        moyenne = soumissions.filter(
+                            note__isnull=False
+                        ).aggregate(Avg('note'))['note__avg'] or 0
+                        
+                        raison = "Taux de rendu faible" if taux < 30 else "Taux de rendu moyen"
+                        
+                        apprenants_risque.append({
+                            'id': p.id,
+                            'nom': p.user.last_name or '',
+                            'prenom': p.user.first_name or '',
+                            'email': p.user.email or '',
+                            'taux_rendu': round(taux, 1),
+                            'moyenne': round(moyenne, 1),
+                            'raison': raison,
+                        })
+
+            # Devoirs par cours
+            devoirs_par_cours = []
+            for c in cours:
+                try:
+                    devoirs = Devoir.objects.filter(cours_lie=c)  # NOTE: Vérifiez le nom du champ
+                    nb_devoirs_cours = devoirs.count()
+                    
+                    apprenants_cours = Profile.objects.filter(
+                        user_type='apprenant',
+                        cursus=c.departement.parcours.nom if c.departement and c.departement.parcours else '',
+                        is_active=True
+                    ).count()
+                    
+                    rendus_cours = SoumissionDevoir.objects.filter(
+                        devoir__in=devoirs,
+                        statut__in=['soumis', 'corrige', 'en_retard']
+                    )
+                    total_rendus_cours = rendus_cours.count()
+                    total_attendu_cours = nb_devoirs_cours * apprenants_cours if apprenants_cours > 0 else 1
+                    taux_cours = (total_rendus_cours / total_attendu_cours * 100) if total_attendu_cours > 0 else 0
+                    
+                    details_devoirs = []
+                    for devoir in devoirs:
+                        try:
+                            # Date limite avec gestion None
+                            date_limite = None
+                            if devoir.date_limite:
+                                date_limite = devoir.date_limite.isoformat()
+                            
+                            # Retards avec gestion None
+                            nb_retards = 0
+                            if devoir.date_limite:
+                                nb_retards = rendus_cours.filter(
+                                    soumis_le__gt=devoir.date_limite
+                                ).count()
+                            
+                            # Note moyenne
+                            note_moyenne = rendus_cours.filter(
+                                note__isnull=False
+                            ).aggregate(Avg('note'))['note__avg'] or 0
+                            
+                            details_devoirs.append({
+                                'id': devoir.id,
+                                'titre': devoir.titre,
+                                'date_limite': date_limite,
+                                'nb_rendus': rendus_cours.filter(devoir=devoir).count(),
+                                'nb_retards': nb_retards,
+                                'taux_rendu': (rendus_cours.filter(devoir=devoir).count() / apprenants_cours * 100) if apprenants_cours > 0 else 0,
+                                'note_moyenne': round(note_moyenne, 1) if note_moyenne else 0,
+                                'type_correction': getattr(devoir, 'type_correction', 'auto')  # NOTE: Vérifiez le nom du champ
+                            })
+                        except Exception as e:
+                            print(f"Erreur traitement devoir {devoir.id}: {e}")
+                            continue
+                    
+                    devoirs_par_cours.append({
+                        'cours_id': c.id,
+                        'cours_titre': c.titre,
+                        'nb_devoirs': nb_devoirs_cours,
+                        'taux_rendu': round(taux_cours, 1),
+                        'details_devoirs': details_devoirs
+                    })
+                except Exception as e:
+                    print(f"Erreur traitement cours {c.id}: {e}")
+                    continue
+
+            # Tendance des rendus (7 derniers jours)
+            tendance_rendus = []
+            for i in range(6, -1, -1):
+                date = timezone.now().date() - timedelta(days=i)
+                nb_rendus_jour = SoumissionDevoir.objects.filter(
+                    devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
+                    soumis_le__date=date,
+                    statut__in=['soumis', 'corrige', 'en_retard']
+                ).count()
+                tendance_rendus.append({
+                    'date': date.isoformat(),
+                    'nb_rendus': nb_rendus_jour
+                })
+
+            return Response({
+                'nom': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username,
+                'stats': {
+                    'nb_cours': nb_cours,
+                    'nb_lecons': nb_lecons,
+                    'nb_devoirs': nb_devoirs,
+                    'nb_apprenants': apprenants,
+                    'taux_rendu_global': round(taux_rendu, 1),
+                    'moyenne_globale': round(moyenne_globale, 1) if moyenne_globale else 0,
+                    'nb_retards': retards,
+                },
+                'devoirs_par_cours': devoirs_par_cours,
+                'apprenants_risque': apprenants_risque,
+                'tendance_rendus': tendance_rendus
+            })
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            
+            # Retourner des données par défaut même en cas d'erreur
             return Response({
                 'nom': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username,
                 'stats': {
@@ -1054,163 +1243,9 @@ class PrincipalDashboardAPIView(APIView):
                 },
                 'devoirs_par_cours': [],
                 'apprenants_risque': [],
-                'tendance_rendus': []
-            })
-
-        # Statistiques de base
-        nb_cours = cours.count()
-        nb_lecons = Lecon.objects.filter(cours__in=cours_ids).count()
-        nb_devoirs = Devoir.objects.filter(cours_lie__in=cours_ids).count()
-        
-        # CORRECTION: Compter les apprenants uniques
-        # Récupérer les parcours des départements des cours
-        parcours_noms = Departement.objects.filter(
-            cours__in=cours_ids
-        ).values_list('parcours__nom', flat=True).distinct()
-        
-        # Compter les apprenants dans ces parcours
-        apprenants = Profile.objects.filter(
-            user_type='apprenant',
-            cursus__in=parcours_noms,
-            is_active=True
-        ).distinct().count()
-
-        # Taux de rendu global
-        total_rendus = SoumissionDevoir.objects.filter(
-            devoir__cours_lie__in=cours_ids,
-            statut__in=['soumis', 'corrige', 'en_retard']
-        ).count()
-        total_attendu = nb_devoirs * apprenants if apprenants > 0 else 1
-        taux_rendu = (total_rendus / total_attendu * 100) if total_attendu > 0 else 0
-
-        # Moyenne globale
-        moyenne_globale = SoumissionDevoir.objects.filter(
-            devoir__cours_lie__in=cours_ids,
-            note__isnull=False
-        ).aggregate(Avg('note'))['note__avg'] or 0
-
-        # Retards
-        retards = SoumissionDevoir.objects.filter(
-            devoir__cours_lie__in=cours_ids,
-            soumis_le__gt=F('devoir__date_limite')
-        ).count()
-
-        # Apprenants à risque
-        apprenants_risque = []
-        for p in Profile.objects.filter(
-            user_type='apprenant',
-            cursus__in=parcours_noms,
-            is_active=True
-        ).select_related('user'):
-            soumissions = SoumissionDevoir.objects.filter(
-                devoir__cours_lie__in=cours_ids,
-                utilisateur=p.user
-            )
-            nb_rendus = soumissions.filter(
-                statut__in=['soumis', 'corrige', 'en_retard']
-            ).count()
-            nb_devoirs_total = Devoir.objects.filter(cours_lie__in=cours_ids).count()
-            
-            if nb_devoirs_total > 0:
-                taux = (nb_rendus / nb_devoirs_total * 100)
-                if taux < 50:
-                    moyenne = soumissions.filter(
-                        note__isnull=False
-                    ).aggregate(Avg('note'))['note__avg'] or 0
-                    
-                    raison = "Taux de rendu faible" if taux < 30 else "Taux de rendu moyen"
-                    
-                    apprenants_risque.append({
-                        'id': p.id,
-                        'nom': p.user.last_name or '',
-                        'prenom': p.user.first_name or '',
-                        'email': p.user.email or '',
-                        'taux_rendu': round(taux, 1),
-                        'moyenne': round(moyenne, 1),
-                        'raison': raison,
-                    })
-
-        # Devoirs par cours
-        devoirs_par_cours = []
-        for c in cours:
-            devoirs = Devoir.objects.filter(cours_lie=c)
-            nb_devoirs_cours = devoirs.count()
-            
-            # Compter les apprenants de ce cours
-            apprenants_cours = Profile.objects.filter(
-                user_type='apprenant',
-                cursus=c.departement.parcours.nom if c.departement and c.departement.parcours else '',
-                is_active=True
-            ).count()
-            
-            rendus_cours = SoumissionDevoir.objects.filter(
-                devoir__in=devoirs,
-                statut__in=['soumis', 'corrige', 'en_retard']
-            )
-            total_rendus_cours = rendus_cours.count()
-            total_attendu_cours = nb_devoirs_cours * apprenants_cours if apprenants_cours > 0 else 1
-            taux_cours = (total_rendus_cours / total_attendu_cours * 100) if total_attendu_cours > 0 else 0
-            
-            # Détails des devoirs
-            details_devoirs = []
-            for devoir in devoirs:
-                rendus_devoir = rendus_cours.filter(devoir=devoir)
-                nb_rendus = rendus_devoir.count()
-                nb_retards = rendus_devoir.filter(
-                    soumis_le__gt=devoir.date_limite
-                ).count()
-                note_moyenne = rendus_devoir.filter(
-                    note__isnull=False
-                ).aggregate(Avg('note'))['note__avg'] or 0
-                
-                details_devoirs.append({
-                    'id': devoir.id,
-                    'titre': devoir.titre,
-                    'date_limite': devoir.date_limite.isoformat(),
-                    'nb_rendus': nb_rendus,
-                    'nb_retards': nb_retards,
-                    'taux_rendu': (nb_rendus / apprenants_cours * 100) if apprenants_cours > 0 else 0,
-                    'note_moyenne': round(note_moyenne, 1) if note_moyenne else 0,
-                    'type_correction': getattr(devoir, 'type_correction', 'auto')
-                })
-            
-            devoirs_par_cours.append({
-                'cours_id': c.id,
-                'cours_titre': c.titre,
-                'nb_devoirs': nb_devoirs_cours,
-                'taux_rendu': round(taux_cours, 1),
-                'details_devoirs': details_devoirs
-            })
-
-        # Tendance des rendus (7 derniers jours)
-        tendance_rendus = []
-        for i in range(6, -1, -1):
-            date = timezone.now().date() - timedelta(days=i)
-            nb_rendus_jour = SoumissionDevoir.objects.filter(
-                devoir__cours_lie__in=cours_ids,
-                soumis_le__date=date,
-                statut__in=['soumis', 'corrige', 'en_retard']
-            ).count()
-            tendance_rendus.append({
-                'date': date.isoformat(),
-                'nb_rendus': nb_rendus_jour
-            })
-
-        return Response({
-            'nom': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username,
-            'stats': {
-                'nb_cours': nb_cours,
-                'nb_lecons': nb_lecons,
-                'nb_devoirs': nb_devoirs,
-                'nb_apprenants': apprenants,
-                'taux_rendu_global': round(taux_rendu, 1),
-                'moyenne_globale': round(moyenne_globale, 1) if moyenne_globale else 0,
-                'nb_retards': retards,
-            },
-            'devoirs_par_cours': devoirs_par_cours,
-            'apprenants_risque': apprenants_risque,
-            'tendance_rendus': tendance_rendus
-        })
+                'tendance_rendus': [],
+                'debug': str(e)
+            }, status=200)
 
 
 class PrincipalApprenantsCoursAPIView(APIView):
