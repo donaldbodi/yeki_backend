@@ -811,6 +811,15 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
             'bonne_reponse': {'required': True},
         }
 
+    def validate_points(self, value):
+        try:
+            points = float(value)
+            if points < 0.25:
+                raise serializers.ValidationError("Les points doivent être au moins 0.25.")
+            return points
+        except (TypeError, ValueError):
+            raise serializers.ValidationError("Les points doivent être un nombre.")
+
     def validate(self, attrs):
         type_q = attrs.get('type_question', 'texte')
         choix  = attrs.get('choix', [])
@@ -1044,9 +1053,15 @@ class ExerciceCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'type_exercice': {'required': False, 'default': 'general'},
             'est_epreuve': {'required': False, 'default': False},
+            'enonce': {'required': True},  # Rendre explicitement requis
         }
 
     def validate(self, data):
+        # Valider l'énoncé
+        enonce = data.get('enonce', '').strip()
+        if not enonce:
+            raise serializers.ValidationError({"enonce": "L'énoncé est obligatoire."})
+        
         # Si c'est une épreuve, elle doit contenir des exercices
         if data.get('est_epreuve', False):
             exercices = data.get('exercices_composes', [])
@@ -1054,6 +1069,12 @@ class ExerciceCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "Une épreuve doit contenir au moins un exercice."
                 )
+            # Vérifier que tous les exercices existent
+            for ex_id in exercices:
+                if not Exercice.objects.filter(id=ex_id.id).exists():
+                    raise serializers.ValidationError(
+                        f"L'exercice {ex_id.id} n'existe pas."
+                    )
         return data
 
     def create(self, validated_data):
@@ -1070,6 +1091,7 @@ class ExerciceCreateSerializer(serializers.ModelSerializer):
             exercice.exercices_composes.set(exercices_composes)
             
         return exercice
+    
 
 class SessionSerializer(serializers.ModelSerializer):
     temps_restant = serializers.SerializerMethodField()
@@ -1091,9 +1113,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
         fields = ["id", "titre", "etoiles", "score", "total", "date"]
 
 
-# ============================================================
-#  serializers_devoirs.py 
-# ============================================================
+# serializers.py - Modifications pour Devoir et Olympiade
 
 # ─────────────────────────────────────────────────────────────────
 # CHOIX / QUESTIONS
@@ -1117,7 +1137,7 @@ class QuestionDevoirSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = QuestionDevoir
-        fields = ["id", "texte", "type_question", "points", "ordre", "choix"]
+        fields = ["id", "enonce", "type_question", "points", "ordre", "choix"]
 
 
 class QuestionDevoirAdminSerializer(serializers.ModelSerializer):
@@ -1125,11 +1145,83 @@ class QuestionDevoirAdminSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = QuestionDevoir
-        fields = ["id", "texte", "type_question", "points", "ordre", "choix"]
+        fields = ["id", "enonce", "type_question", "points", "ordre", "choix", "reponse_attendue", "reponse_exemple"]
+
+
+class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
+    choix = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        default=[]
+    )
+
+    class Meta:
+        model  = QuestionDevoir
+        fields = ["enonce", "type_question", "points", "ordre", "choix", "reponse_attendue", "reponse_exemple"]
+        extra_kwargs = {
+            'points': {'required': False, 'default': 1},
+            'ordre': {'required': False},
+        }
+
+    def validate(self, attrs):
+        type_q = attrs.get('type_question', 'texte')
+        choix  = attrs.get('choix', [])
+
+        if type_q == 'qcm' and len(choix) < 2:
+            raise serializers.ValidationError("Un QCM doit avoir au moins 2 choix.")
+
+        if type_q == 'texte':
+            # Pour correction auto, reponse_attendue est obligatoire
+            if self.context.get('type_correction') == 'auto':
+                if not attrs.get('reponse_attendue', '').strip():
+                    raise serializers.ValidationError(
+                        {"reponse_attendue": "La réponse attendue est obligatoire pour la correction automatique."}
+                    )
+        return attrs
+
+    def create(self, validated_data):
+        choix_data = validated_data.pop('choix', [])
+        question = QuestionDevoir.objects.create(**validated_data)
+        for c in choix_data:
+            ChoixReponse.objects.create(
+                question=question,
+                texte=c.get('texte', ''),
+                est_correct=c.get('est_correct', False)
+            )
+        return question
+
+    def update(self, instance, validated_data):
+        choix_data = validated_data.pop('choix', None)
+        
+        # Mettre à jour les champs de base
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        instance.save()
+        
+        # Mettre à jour les choix si fournis
+        if choix_data is not None:
+            # Supprimer les choix existants
+            instance.choix.all().delete()
+            for c in choix_data:
+                ChoixReponse.objects.create(
+                    question=instance,
+                    texte=c.get('texte', ''),
+                    est_correct=c.get('est_correct', False)
+                )
+        
+        return instance
+
+
+class QuestionDevoirDetailSerializer(serializers.ModelSerializer):
+    choix = ChoixReponseSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = QuestionDevoir
+        fields = ["id", "enonce", "type_question", "points", "ordre", "choix"]
 
 
 # ─────────────────────────────────────────────────────────────────
-# DEVOIR  (list, detail apprenant, detail admin)
+# DEVOIR
 # ─────────────────────────────────────────────────────────────────
 
 class DevoirListSerializer(serializers.ModelSerializer):
@@ -1139,15 +1231,20 @@ class DevoirListSerializer(serializers.ModelSerializer):
     temps_restant_jours = serializers.SerializerMethodField()
     est_ouvert        = serializers.BooleanField(read_only=True)
     est_expire        = serializers.BooleanField(read_only=True)
+    peut_modifier_questions = serializers.BooleanField(read_only=True)
+    nb_sorties = serializers.SerializerMethodField()
+    sorties_max = serializers.IntegerField(source='tentatives_max', read_only=True)
 
     class Meta:
         model  = Devoir
         fields = [
-            "id", "titre", "description", "type_devoir", "matiere",
-            "niveau", "date_debut", "date_limite", "duree_minutes",
+            "id", "titre", "description", "type_devoir",
+            "date_debut", "date_limite", "duree_minutes",
             "note_sur", "coefficient", "concours_lie", "formation_liee",
             "est_publie", "est_ouvert", "est_expire",
             "statut_apprenant", "note_apprenant", "temps_restant_jours",
+            "type_correction", "peut_modifier_questions",
+            "nb_sorties", "sorties_max",
         ]
 
     def get_statut_apprenant(self, obj):
@@ -1168,38 +1265,135 @@ class DevoirListSerializer(serializers.ModelSerializer):
         delta = obj.date_limite - timezone.now()
         return max(0, delta.days)
 
+    def get_nb_sorties(self, obj):
+        user = self.context["request"].user
+        soum = SoumissionDevoir.objects.filter(utilisateur=user, devoir=obj).first()
+        if soum:
+            return soum.sorties
+        return 0
+
 
 class DevoirDetailSerializer(serializers.ModelSerializer):
     """Détail pour l'apprenant — questions sans bonnes réponses."""
-    questions = QuestionDevoirSerializer(many=True, read_only=True)
+    questions = QuestionDevoirDetailSerializer(many=True, read_only=True)
+    peut_modifier_questions = serializers.BooleanField(read_only=True)
+    nb_sorties = serializers.SerializerMethodField()
+    sorties_max = serializers.IntegerField(source='tentatives_max', read_only=True)
 
     class Meta:
         model  = Devoir
         fields = [
-            "id", "titre", "description", "type_devoir", "matiere",
-            "niveau", "enonce", "date_debut", "date_limite", "duree_minutes",
+            "id", "titre", "description", "type_devoir",
+            "enonce", "date_debut", "date_limite", "duree_minutes",
             "note_sur", "coefficient", "tentatives_max",
             "concours_lie", "formation_liee", "questions",
+            "type_correction", "peut_modifier_questions",
+            "nb_sorties", "sorties_max",
         ]
+
+    def get_nb_sorties(self, obj):
+        user = self.context["request"].user
+        soum = SoumissionDevoir.objects.filter(utilisateur=user, devoir=obj).first()
+        if soum:
+            return soum.sorties
+        return 0
 
 
 class DevoirCreateSerializer(serializers.ModelSerializer):
+    enonces_supplementaires = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=[]
+    )
+    fichier_correction = serializers.FileField(required=False, allow_null=True)
+
     class Meta:
         model  = Devoir
         fields = [
-            "titre", "description", "type_devoir", "matiere", "niveau",
+            "titre", "description", "type_devoir",
             "enonce", "date_debut", "date_limite", "duree_minutes",
             "note_sur", "coefficient", "tentatives_max",
             "concours_lie", "formation_liee", "cours_lie",
-            "est_publie", "acces_restreint",
+            "est_publie", "acces_restreint", "type_correction",
+            "fichier_correction", "enonces_supplementaires", "source_devoir"
         ]
+        extra_kwargs = {
+            'enonce': {'required': True},
+            'type_correction': {'required': False, 'default': 'auto'},
+            'enonces_supplementaires': {'required': False},
+        }
 
     def validate(self, data):
+        # Valider l'énoncé
+        enonce = data.get('enonce', '').strip()
+        if not enonce:
+            raise serializers.ValidationError({"enonce": "L'énoncé est obligatoire."})
+        
         if data.get("date_limite") and data.get("date_debut"):
             if data["date_limite"] <= data["date_debut"]:
                 raise serializers.ValidationError(
                     "La date limite doit être postérieure à la date de début."
                 )
+        
+        # Pour correction manuelle, vérifier le fichier de correction
+        if data.get('type_correction') == 'manuel':
+            if not data.get('fichier_correction'):
+                raise serializers.ValidationError(
+                    {"fichier_correction": "Un fichier PDF de correction est requis pour la correction manuelle."}
+                )
+        
+        return data
+
+    def create(self, validated_data):
+        enonces_supp = validated_data.pop('enonces_supplementaires', [])
+        source_devoir = validated_data.pop('source_devoir', None)
+        
+        devoir = Devoir.objects.create(**validated_data)
+        
+        if enonces_supp:
+            devoir.enonces_supplementaires = enonces_supp
+            devoir.save(update_fields=['enonces_supplementaires'])
+        
+        return devoir
+
+
+class DevoirUpdateSerializer(serializers.ModelSerializer):
+    enonces_supplementaires = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=[]
+    )
+    fichier_correction = serializers.FileField(required=False, allow_null=True)
+
+    class Meta:
+        model  = Devoir
+        fields = [
+            "titre", "description", "type_devoir",
+            "enonce", "date_debut", "date_limite", "duree_minutes",
+            "note_sur", "coefficient", "tentatives_max",
+            "concours_lie", "formation_liee", "cours_lie",
+            "est_publie", "acces_restreint", "type_correction",
+            "fichier_correction", "enonces_supplementaires"
+        ]
+        extra_kwargs = {
+            'titre': {'required': False},
+            'enonce': {'required': False},
+            'type_correction': {'required': False},
+            'est_publie': {'required': False},
+        }
+
+    def validate(self, data):
+        # Si le devoir est déjà publié, on ne peut pas modifier l'énoncé ou les questions
+        if self.instance and self.instance.est_publie:
+            if 'enonce' in data:
+                raise serializers.ValidationError(
+                    {"enonce": "Un devoir publié ne peut pas être modifié."}
+                )
+            if 'enonces_supplementaires' in data:
+                raise serializers.ValidationError(
+                    {"enonces_supplementaires": "Un devoir publié ne peut pas avoir de nouveaux énoncés."}
+                )
+        
         return data
 
 
@@ -1217,6 +1411,8 @@ class ReponseSubmitSerializer(serializers.Serializer):
 class SoumissionDetailSerializer(serializers.ModelSerializer):
     devoir_titre = serializers.CharField(source="devoir.titre", read_only=True)
     temps_restant = serializers.SerializerMethodField()
+    sorties = serializers.IntegerField(read_only=True)
+    sorties_max = serializers.IntegerField(source='devoir.tentatives_max', read_only=True)
 
     class Meta:
         model  = SoumissionDevoir
@@ -1224,10 +1420,52 @@ class SoumissionDetailSerializer(serializers.ModelSerializer):
             "id", "devoir", "devoir_titre", "statut",
             "debut", "soumis_le", "note", "commentaire",
             "temps_restant", "nb_focus_perdu", "est_suspecte",
+            "sorties", "sorties_max"
         ]
 
     def get_temps_restant(self, obj):
         return obj.temps_restant_secondes()
+
+
+class SoumissionResultatSerializer(serializers.ModelSerializer):
+    devoir_titre = serializers.CharField(source="devoir.titre", read_only=True)
+    questions_detail = serializers.SerializerMethodField()
+    fichier_correction_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = SoumissionDevoir
+        fields = [
+            "id", "devoir_titre", "statut", "note", "commentaire",
+            "soumis_le", "corrige_le", "en_retard", "est_suspecte",
+            "questions_detail", "fichier_correction_url"
+        ]
+
+    def get_questions_detail(self, obj):
+        reponses = obj.reponses.select_related('question', 'choix').all()
+        result = []
+        for rep in reponses:
+            result.append({
+                "question_id": rep.question.id,
+                "question_enonce": rep.question.enonce,
+                "type_question": rep.question.type_question,
+                "reponse_utilisateur": rep.reponse,
+                "choix_selectionne": rep.choix.texte if rep.choix else None,
+                "est_correct": rep.est_correct,
+                "points_obtenus": rep.points_obtenus,
+                "points_max": rep.question.points,
+                "bonne_reponse": rep.question.reponse_attendue if rep.question.type_question == 'texte' else 
+                                (rep.question.choix.filter(est_correct=True).first().texte if rep.question.choix.filter(est_correct=True).exists() else None),
+                "reponse_exemple": rep.question.reponse_exemple,
+            })
+        return result
+
+    def get_fichier_correction_url(self, obj):
+        if obj.devoir.fichier_correction:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.devoir.fichier_correction.url)
+            return obj.devoir.fichier_correction.url
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1249,16 +1487,16 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Olympiade
         fields = [
-            "id", "titre", "description", "matiere", "niveau", "edition",
+            "id", "titre", "description", "edition",
             "date_ouverture_inscription", "date_cloture_inscription",
             "date_debut_olympiade", "date_fin_olympiade",
             "duree_minutes", "nb_questions", "note_sur",
-            "prix_1er", "prix_2eme", "prix_3eme","prix_participation", "prix_global", "recompense",
-            "demande_paiement_participants",
+            "recompense",
+            "prix_global", "prix_participation", "demande_paiement_participants",
             "statut", "est_inscrit", "nb_inscrits", "inscription_ouverte",
-            "devoir_id", "mon_inscription","niveaux_accessibles"
+            "devoir_id", "mon_inscription", "niveaux_accessibles"
         ]
-    
+
     def get_niveaux_accessibles(self, obj):
         return obj.get_niveaux_accessibles_list()
 
@@ -1323,6 +1561,62 @@ class OlympiadeDetailSerializer(OlympiadeListSerializer):
             random.seed(str(user.id) + str(obj.id))  # seed déterministe par participant
             random.shuffle(data_list)
             return data_list
+        return data
+
+
+class OlympiadeCreateSerializer(serializers.ModelSerializer):
+    niveaux_accessibles = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=[]
+    )
+    recompense = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = Olympiade
+        fields = [
+            "titre", "description", "edition",
+            "date_ouverture_inscription", "date_cloture_inscription",
+            "date_debut_olympiade", "date_fin_olympiade",
+            "duree_minutes", "nb_questions", "note_sur",
+            "melanger_questions", "melanger_choix", "une_seule_session",
+            "max_focus_perdu", "recompense", "prix_participation",
+            "demande_paiement_participants", "niveaux_accessibles"
+        ]
+        extra_kwargs = {
+            'titre': {'required': True},
+            'date_ouverture_inscription': {'required': True},
+            'date_cloture_inscription': {'required': True},
+            'date_debut_olympiade': {'required': True},
+            'date_fin_olympiade': {'required': True},
+            'duree_minutes': {'required': False, 'default': 120},
+            'nb_questions': {'required': False, 'default': 30},
+            'note_sur': {'required': False, 'default': 20},
+            'recompense': {'required': False, 'allow_blank': True},
+            'prix_participation': {'required': False, 'default': 0},
+            'demande_paiement_participants': {'required': False, 'default': False},
+        }
+
+    def validate(self, data):
+        # Validation des dates
+        date_ouv_insc = data.get('date_ouverture_inscription')
+        date_clo_insc = data.get('date_cloture_inscription')
+        date_debut = data.get('date_debut_olympiade')
+        date_fin = data.get('date_fin_olympiade')
+
+        if date_clo_insc >= date_debut:
+            raise serializers.ValidationError(
+                "La clôture des inscriptions doit être avant le début de l'olympiade."
+            )
+        if date_debut >= date_fin:
+            raise serializers.ValidationError(
+                "Le début de l'olympiade doit être avant sa fin."
+            )
+        if date_ouv_insc >= date_clo_insc:
+            raise serializers.ValidationError(
+                "L'ouverture des inscriptions doit être avant leur clôture."
+            )
+
         return data
 
 

@@ -98,6 +98,10 @@ urlpatterns = [
     path('exercices/<int:exercice_id>/questions/', views.ListeQuestionsExerciceView.as_view(), name='question-liste'),
     path('exercices/<int:exercice_id>/questions/ajouter/', views.AjouterQuestionView.as_view(), name='question-ajouter'),
     path('evaluations/exercice/<int:exercice_id>/', ResultatExerciceView.as_view(), name='resultat-exercice'),
+    path('exercices/<int:exercice_id>/sortir/', SortirExerciceView.as_view(), name='exercice-sortir'),
+    path('evaluations/exercice/<int:exercice_id>/historique/', HistoriqueTentativesExerciceView.as_view(), name='historique-tentatives-exercice'),
+    path('modules/<int:module_id>/exercices/', ExercicesParModuleView.as_view(), name='exercices-par-module'),
+    path('classement/verifier-progression/', VerifierProgressionRangView.as_view(), name='verifier-progression-rang'),
 
     # ── DEVOIRS ───────────────────────────────────────────────────
     path('devoirs/', ListeDevoirsView.as_view(), name='liste-devoirs'),

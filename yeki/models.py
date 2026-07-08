@@ -663,13 +663,9 @@ class EvaluationExercice(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.exercice.titre} ({self.score}/{self.total})"
 
-
-# ─────────────────────────────────────────────────────────────────
-# DEVOIR GÉNÉRAL (cursus, concours, formation classique/métier)
-# ─────────────────────────────────────────────────────────────────
+# models.py - Modifications pour Devoir et Olympiade
 
 class Devoir(models.Model):
-
     # ── Type de devoir ──────────────────────────────────────────
     TYPE_CHOICES = [
         ("cursus",           "Devoir de cursus"),
@@ -679,40 +675,15 @@ class Devoir(models.Model):
         ("olympiade",        "Olympiade"),
     ]
 
-    MATIERE_CHOICES = [
-        ("Mathématiques",    "Mathématiques"),
-        ("Physique",         "Physique"),
-        ("Chimie",           "Chimie"),
-        ("SVT",              "SVT"),
-        ("Informatique",     "Informatique"),
-        ("Français",         "Français"),
-        ("Anglais",          "Anglais"),
-        ("Histoire-Géo",     "Histoire-Géo"),
-        ("Philosophie",      "Philosophie"),
-        ("Économie",         "Économie"),
-        ("Autre",            "Autre"),
-    ]
-
-    NIVEAU_CHOICES = [
-        ("Terminale", "Terminale"),
-        ("1ère",      "1ère"),
-        ("2nde",      "2nde"),
-        ("3ème",      "3ème"),
-        ("Licence 1", "Licence 1"),
-        ("Licence 2", "Licence 2"),
-        ("Licence 3", "Licence 3"),
-        ("Master 1",  "Master 1"),
-        ("Master 2",  "Master 2"),
-        ("Autre",     "Autre"),
-    ]
-
     # ── Champs de base ───────────────────────────────────────────
     titre        = models.CharField(max_length=255)
     description  = models.TextField(blank=True)
     type_devoir  = models.CharField(max_length=25, choices=TYPE_CHOICES, default="cursus")
-    matiere      = models.CharField(max_length=100, choices=MATIERE_CHOICES)
-    niveau       = models.CharField(max_length=50, choices=NIVEAU_CHOICES, default="Terminale")
     enonce       = models.TextField()
+    
+    # ⚠️ SUPPRESSION DES CHAMPS MATIERE ET NIVEAU
+    # matiere      = models.CharField(max_length=100, choices=MATIERE_CHOICES)
+    # niveau       = models.CharField(max_length=50, choices=NIVEAU_CHOICES, default="Terminale")
 
     # ── Dates ────────────────────────────────────────────────────
     date_creation  = models.DateTimeField(auto_now_add=True)
@@ -729,7 +700,8 @@ class Devoir(models.Model):
     # ── Paramètres pédagogiques ──────────────────────────────────
     duree_minutes       = models.PositiveIntegerField(default=60,
                                                        help_text="Durée max de composition en minutes")
-    tentatives_max      = models.PositiveIntegerField(default=1)
+    tentatives_max      = models.PositiveIntegerField(default=1,
+                                                       help_text="Nombre de sorties autorisées avant soumission auto")
     note_sur            = models.PositiveIntegerField(default=20)
     coefficient         = models.FloatField(default=1.0)
 
@@ -749,13 +721,34 @@ class Devoir(models.Model):
         max_length=10,
         choices=TYPE_CORRECTION_CHOICES,
         default='auto',
-        help_text='auto = QCM/texte exact corrigé auto ; manuel = enseignant corrige',
+        help_text='auto = QCM/texte exact corrigé auto ; manuel = enseignant corrige avec fichier PDF',
+    )
+
+    # ── Fichier de correction pour correction manuelle ──────────
+    fichier_correction = models.FileField(
+        upload_to='devoirs/corrections/',
+        null=True, blank=True,
+        help_text="Fichier PDF de correction pour les devoirs manuels"
+    )
+
+    # ── Plusieurs énoncés ────────────────────────────────────────
+    # Champ pour stocker plusieurs énoncés (JSON)
+    enonces_supplementaires = models.JSONField(
+        default=list, blank=True,
+        help_text="Énoncés supplémentaires (JSON)"
     )
 
     # ── Auteur ───────────────────────────────────────────────────
     cree_par = models.ForeignKey(
         "Profile", on_delete=models.SET_NULL,
         null=True, blank=True, related_name="devoirs_crees"
+    )
+
+    # ── Devoir source pour duplication ──────────────────────────
+    source_devoir = models.ForeignKey(
+        'self', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="duplicatas",
+        help_text="Devoir source si ce devoir est une copie"
     )
 
     class Meta:
@@ -773,15 +766,16 @@ class Devoir(models.Model):
     def est_expire(self):
         return timezone.now() > self.date_limite
 
+    @property
+    def peut_modifier_questions(self):
+        """Vérifie si on peut encore modifier les questions du devoir."""
+        return not self.est_publie
+
     def clean(self):
         if self.date_debut and self.date_limite:
             if self.date_limite <= self.date_debut:
                 raise ValidationError("La date limite doit être après la date de début.")
 
-
-# ─────────────────────────────────────────────────────────────────
-# QUESTIONS D'UN DEVOIR  (QCM ou texte libre)
-# ─────────────────────────────────────────────────────────────────
 
 class QuestionDevoir(models.Model):
     TYPE_CHOICES = [
@@ -789,16 +783,22 @@ class QuestionDevoir(models.Model):
         ("texte", "Texte libre"),
     ]
     devoir         = models.ForeignKey(Devoir, on_delete=models.CASCADE, related_name="questions")
-    texte          = models.TextField()
+    enonce         = models.TextField()
     type_question  = models.CharField(max_length=10, choices=TYPE_CHOICES)
     points         = models.FloatField(default=1.0)
     ordre          = models.PositiveIntegerField(default=1)
+    
+    # Pour les questions de type texte en correction auto
+    reponse_attendue = models.TextField(blank=True, help_text="Réponse attendue pour correction automatique")
+    
+    # Pour les questions de type texte en correction manuelle
+    reponse_exemple = models.TextField(blank=True, help_text="Exemple de réponse (non utilisé pour correction)")
 
     class Meta:
         ordering = ["ordre"]
 
     def __str__(self):
-        return f"Q{self.ordre} — {self.texte[:60]}"
+        return f"Q{self.ordre} — {self.enonce[:60]}"
 
 
 class ChoixReponse(models.Model):
@@ -809,10 +809,6 @@ class ChoixReponse(models.Model):
     def __str__(self):
         return f"{'✓' if self.est_correct else '✗'} {self.texte[:40]}"
 
-
-# ─────────────────────────────────────────────────────────────────
-# SOUMISSION  (une par apprenant par devoir)
-# ─────────────────────────────────────────────────────────────────
 
 class SoumissionDevoir(models.Model):
     STATUT_CHOICES = [
@@ -841,8 +837,7 @@ class SoumissionDevoir(models.Model):
 
     fichier_soumis = models.FileField(
         upload_to='soumissions_devoirs/',
-        null=True,
-        blank=True,
+        null=True, blank=True,
         help_text='Fichier PDF soumis par l\'apprenant (correction manuelle)',
     )
 
@@ -852,6 +847,9 @@ class SoumissionDevoir(models.Model):
     ip_address      = models.GenericIPAddressField(null=True, blank=True)
     user_agent      = models.TextField(blank=True)
     est_suspecte    = models.BooleanField(default=False)
+
+    # ── Sorties enregistrées ────────────────────────────────────
+    sorties = models.PositiveIntegerField(default=0, help_text="Nombre de sorties enregistrées")
 
     class Meta:
         unique_together = ("utilisateur", "devoir")
@@ -886,10 +884,6 @@ class ReponseDevoir(models.Model):
         unique_together = ("soumission", "question")
 
 
-# ─────────────────────────────────────────────────────────────────
-# OLYMPIADE  (type spécial avec logique propre)
-# ─────────────────────────────────────────────────────────────────
-
 class Olympiade(models.Model):
     STATUT_CHOICES = [
         ("inscription",  "Inscriptions ouvertes"),
@@ -920,9 +914,11 @@ class Olympiade(models.Model):
     # ── Identité ─────────────────────────────────────────────────
     titre        = models.CharField(max_length=255)
     description  = models.TextField(blank=True)
-    matiere      = models.CharField(max_length=100)
-    niveau       = models.CharField(max_length=50)
     edition      = models.CharField(max_length=20, blank=True, help_text="Ex: 2025-1")
+    
+    # ⚠️ SUPPRESSION DES CHAMPS MATIERE ET NIVEAU
+    # matiere      = models.CharField(max_length=100)
+    # niveau       = models.CharField(max_length=50)
 
     # ── Dates ────────────────────────────────────────────────────
     date_ouverture_inscription = models.DateTimeField()
@@ -951,10 +947,10 @@ class Olympiade(models.Model):
         help_text="Le devoir contenant les questions de l'olympiade"
     )
 
-    # ── Prix / Récompenses ───────────────────────────────────────
-    prix_1er    = models.CharField(max_length=255, blank=True)
-    prix_2eme   = models.CharField(max_length=255, blank=True)
-    prix_3eme   = models.CharField(max_length=255, blank=True)
+    # ⚠️ SUPPRESSION DES CHAMPS PRIX_1ER, PRIX_2EME, PRIX_3EME
+    # prix_1er    = models.CharField(max_length=255, blank=True)
+    # prix_2eme   = models.CharField(max_length=255, blank=True)
+    # prix_3eme   = models.CharField(max_length=255, blank=True)
 
     # ── Auteur ───────────────────────────────────────────────────
     organisateur = models.ForeignKey(
@@ -1014,6 +1010,7 @@ class Olympiade(models.Model):
             raise ValidationError("La clôture des inscriptions doit être avant le début de l'olympiade.")
         if self.date_debut_olympiade >= self.date_fin_olympiade:
             raise ValidationError("La date de début doit être avant la date de fin.")
+
 
 class InscriptionOlympiade(models.Model):
     """Inscription d'un apprenant à une olympiade."""
@@ -1167,6 +1164,7 @@ class LikeReponse(models.Model):
 
     class Meta:
         unique_together = ("reponse", "utilisateur")
+
 
 class ReponseImage(models.Model):
     """Image jointe à une réponse du forum"""
@@ -1893,3 +1891,15 @@ class ScoreDetail(models.Model):
     def __str__(self):
         return f"{self.categorie}: {self.score:.1f} (poids {self.poids})"
 
+
+# Ajouter un modèle pour stocker les réponses détaillées
+class ReponseExercice(models.Model):
+    """
+    Stocke la réponse d'un apprenant à une question d'exercice.
+    Permet l'historique détaillé des tentatives.
+    """
+    evaluation = models.ForeignKey(EvaluationExercice, on_delete=models.CASCADE, related_name='reponses')
+    question = models.ForeignKey(Question, on_delete=models.CASCADE)
+    reponse = models.TextField(blank=True)
+    est_correct = models.BooleanField(default=False)
+    points_obtenus = models.FloatField(default=0.0)

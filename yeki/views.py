@@ -2662,6 +2662,190 @@ class AjouterExerciceView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class SortirExerciceView(APIView):
+    """
+    POST /api/exercices/<exercice_id>/sortir/
+    Gère la sortie anticipée d'un exercice avec soumission automatique.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, exercice_id):
+        user = request.user
+        exercice = get_object_or_404(Exercice, id=exercice_id)
+
+        # Récupérer la session en cours
+        session = SessionExercice.objects.filter(
+            user=user,
+            exercice=exercice,
+            termine=False
+        ).first()
+
+        if not session:
+            return Response(
+                {"detail": "Aucune session en cours pour cet exercice."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Récupérer les réponses actuelles
+        reponses = request.data.get("reponses", {})
+        
+        # Calculer le score avec ce qui a été répondu
+        score = 0.0
+        total = 0.0
+        details = []
+
+        # Créer l'évaluation avec les réponses actuelles
+        evaluation = EvaluationExercice.objects.create(
+            user=user,
+            exercice=exercice,
+            score=0,
+            total=0
+        )
+
+        for question in exercice.questions.all():
+            points = question.points
+            total += points
+            
+            user_rep = reponses.get(str(question.id), "").strip().lower()
+            bonne_rep = question.bonne_reponse.strip().lower()
+            
+            is_correct = (user_rep == bonne_rep)
+            points_obtenus = points if is_correct else 0
+            
+            ReponseExercice.objects.create(
+                evaluation=evaluation,
+                question=question,
+                reponse=user_rep,
+                est_correct=is_correct,
+                points_obtenus=points_obtenus
+            )
+            
+            if is_correct:
+                score += points
+            
+            details.append({
+                "question_id": question.id,
+                "question": question.text,
+                "reponse_utilisateur": user_rep,
+                "bonne_reponse": question.bonne_reponse,
+                "correct": is_correct,
+                "points_obtenus": points_obtenus,
+                "points_max": points
+            })
+
+        # Mettre à jour l'évaluation
+        evaluation.score = score
+        evaluation.total = total
+        evaluation.save()
+
+        # Marquer la session comme terminée
+        session.termine = True
+        session.save()
+
+        # Calculer la note sur 20
+        note_sur_20 = (score / total) * 20 if total > 0 else 0
+
+        return Response({
+            "score": score,
+            "total": total,
+            "note": round(note_sur_20, 1),
+            "note_sur": 20,
+            "detail": details,
+            "message": "Exercice soumis automatiquement avec les réponses actuelles.",
+            "auto_soumis": True
+        }, status=status.HTTP_200_OK)
+
+
+class VerifierProgressionRangView(APIView):
+    """
+    GET /api/classement/verifier-progression/
+    Vérifie si l'apprenant a gagné des places dans son département.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        
+        if profile.user_type != 'apprenant':
+            return Response({"detail": "Réservé aux apprenants."}, status=403)
+        
+        if not profile.cursus:
+            return Response({"detail": "Aucun cursus assigné."}, status=404)
+        
+        # Récupérer le département principal
+        try:
+            parcours = Departement.objects.filter(
+                parcours__nom=profile.cursus,
+                parcours__type_parcours='cursus'
+            ).first()
+        except Exception:
+            parcours = None
+        
+        if not parcours:
+            return Response({"detail": "Aucun département trouvé pour votre cursus."}, status=404)
+        
+        # Récupérer le rang actuel
+        rang_actuel = RangApprenant.objects.filter(
+            apprenant=request.user,
+            departement=parcours
+        ).first()
+        
+        if not rang_actuel:
+            return Response({"detail": "Aucun rang calculé pour vous."}, status=404)
+        
+        # Vérifier la progression (comparer avec le dernier calcul)
+        # Pour simplifier, on compare avec la dernière valeur de progression
+        progression = rang_actuel.progression_semaine
+        
+        # Simuler un gain de rang (à adapter selon votre logique)
+        rang_ameliore = progression > 0
+        
+        return Response({
+            "rang": rang_actuel.rang,
+            "score": rang_actuel.score,
+            "progression": progression,
+            "rang_ameliore": rang_ameliore,
+            "message": "Félicitations ! Vous avez gagné des places au classement." if rang_ameliore else "",
+            "departement": {
+                "id": parcours.id,
+                "nom": parcours.nom,
+            }
+        })
+
+
+class ExercicesParModuleView(APIView):
+    """
+    GET /api/modules/<module_id>/exercices/
+    Retourne tous les exercices liés à un module (y compris ceux des leçons).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, module_id):
+        module = get_object_or_404(Module, pk=module_id)
+        
+        # Exercices directement liés au module
+        exercices_module = Exercice.objects.filter(module=module)
+        
+        # Exercices liés aux leçons du module
+        lecons_ids = module.lecons.values_list('id', flat=True)
+        exercices_lecons = Exercice.objects.filter(lecon_id__in=lecons_ids)
+        
+        # Combiner et filtrer par type
+        exercices = exercices_module | exercices_lecons
+        exercices = exercices.distinct()
+        
+        # Filtres supplémentaires
+        type_exercice = request.query_params.get('type')
+        if type_exercice:
+            exercices = exercices.filter(type_exercice=type_exercice)
+        
+        serializer = ExerciceSerializer(exercices, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
 class ModifierExerciceView(APIView):
     """
     PATCH /api/exercices/<exercice_id>/modifier/
@@ -2766,6 +2950,7 @@ class SupprimerExerciceView(APIView):
 class SoumettreEvaluationView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, exercice_id):
         user = request.user
         exercice = get_object_or_404(Exercice, id=exercice_id)
@@ -2777,7 +2962,6 @@ class SoumettreEvaluationView(APIView):
             termine=False
         ).first()
 
-        # Si pas de session, en créer une
         if not session:
             # Vérifier les tentatives
             tentatives = EvaluationExercice.objects.filter(
@@ -2809,9 +2993,17 @@ class SoumettreEvaluationView(APIView):
         reponses = request.data.get("reponses", {})
         
         # Calculer le score
-        score = 0
-        total = 0
+        score = 0.0
+        total = 0.0
         details = []
+
+        # Créer l'évaluation
+        evaluation = EvaluationExercice.objects.create(
+            user=user,
+            exercice=exercice,
+            score=0,  # Temporaire, sera mis à jour
+            total=0
+        )
 
         for question in exercice.questions.all():
             points = question.points
@@ -2822,6 +3014,16 @@ class SoumettreEvaluationView(APIView):
             bonne_rep = question.bonne_reponse.strip().lower()
             
             is_correct = (user_rep == bonne_rep)
+            points_obtenus = points if is_correct else 0
+            
+            # Enregistrer la réponse détaillée
+            reponse_obj = ReponseExercice.objects.create(
+                evaluation=evaluation,
+                question=question,
+                reponse=user_rep,
+                est_correct=is_correct,
+                points_obtenus=points_obtenus
+            )
             
             if is_correct:
                 score += points
@@ -2832,17 +3034,14 @@ class SoumettreEvaluationView(APIView):
                 "reponse_utilisateur": user_rep,
                 "bonne_reponse": question.bonne_reponse,
                 "correct": is_correct,
-                "points_obtenus": points if is_correct else 0,
+                "points_obtenus": points_obtenus,
                 "points_max": points
             })
 
-        # Sauvegarder l'évaluation
-        evaluation = EvaluationExercice.objects.create(
-            user=user,
-            exercice=exercice,
-            score=score,
-            total=total
-        )
+        # Mettre à jour l'évaluation
+        evaluation.score = score
+        evaluation.total = total
+        evaluation.save()
 
         # Marquer la session comme terminée
         session.termine = True
@@ -2860,12 +3059,53 @@ class SoumettreEvaluationView(APIView):
             "message": "Examen soumis avec succès",
             "auto_soumis": False
         }, status=status.HTTP_200_OK)
+    
+
+class HistoriqueTentativesExerciceView(APIView):
+    """
+    GET /api/evaluations/exercice/<exercice_id>/historique/
+    Retourne l'historique complet des tentatives d'un apprenant.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, exercice_id):
+        exercice = get_object_or_404(Exercice, id=exercice_id)
+        user = request.user
+
+        evaluations = EvaluationExercice.objects.filter(
+            user=user,
+            exercice=exercice
+        ).order_by('-date').prefetch_related('reponses__question')
+
+        result = []
+        for eval in evaluations:
+            tentatives_data = []
+            for reponse in eval.reponses.all():
+                tentatives_data.append({
+                    'question_id': reponse.question.id,
+                    'question': reponse.question.text,
+                    'reponse': reponse.reponse,
+                    'est_correct': reponse.est_correct,
+                    'points_obtenus': reponse.points_obtenus,
+                    'points_max': reponse.question.points,
+                })
+            
+            result.append({
+                'id': eval.id,
+                'date': eval.date.isoformat(),
+                'score': eval.score,
+                'total': eval.total,
+                'note_sur_20': round((eval.score / eval.total) * 20, 1) if eval.total > 0 else 0,
+                'reponses': tentatives_data
+            })
+
+        return Response(result)
 
 
 class ResultatExerciceView(APIView):
     """
     GET /api/evaluations/exercice/<exercice_id>/
-    Retourne le dernier résultat de l'utilisateur pour un exercice donné.
+    Retourne le dernier résultat avec l'historique des tentatives.
     """
     permission_classes = [IsAuthenticated]
 
@@ -2885,16 +3125,17 @@ class ResultatExerciceView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Récupérer les détails des questions
-        details = []
-        for question in exercice.questions.all():
-            # Pour récupérer la réponse de l'utilisateur, il faudrait stocker les réponses
-            # Dans une table séparée. Pour l'instant, on retourne juste le score par question
-            details.append({
-                "question_id": question.id,
-                "question": question.text,
-                "points_max": question.points,
-                "bonne_reponse": question.bonne_reponse
+        # Récupérer l'historique complet
+        historique = []
+        for eval in EvaluationExercice.objects.filter(
+            user=user, exercice=exercice
+        ).order_by('-date').prefetch_related('reponses__question'):
+            historique.append({
+                'id': eval.id,
+                'date': eval.date.isoformat(),
+                'score': eval.score,
+                'total': eval.total,
+                'note_sur_20': round((eval.score / eval.total) * 20, 1) if eval.total > 0 else 0,
             })
 
         return Response({
@@ -2905,7 +3146,9 @@ class ResultatExerciceView(APIView):
             "score": evaluation.score,
             "total": evaluation.total,
             "date": evaluation.date,
-            "detail": details
+            "historique": historique,
+            "tentatives_restantes": max(0, exercice.tentatives_max - len(historique)),
+            "tentatives_max": exercice.tentatives_max
         }, status=status.HTTP_200_OK)
 
 
@@ -3352,26 +3595,20 @@ class DemarrerDevoirView(APIView):
     def post(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
 
+        # Vérifier que la date de début est passée
+        if timezone.now() < devoir.date_debut:
+            return Response(
+                {"detail": f"Ce devoir sera disponible à partir du {devoir.date_debut.strftime('%d/%m/%Y à %H:%M')}."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         if not devoir.est_ouvert:
             return Response(
                 {"detail": "Le devoir n'est plus accessible."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Vérifier tentatives
-        nb_tentatives = SoumissionDevoir.objects.filter(
-            utilisateur=request.user,
-            devoir=devoir,
-            statut__in=["soumis", "corrige", "en_retard"]
-        ).count()
-
-        if nb_tentatives >= devoir.tentatives_max:
-            return Response(
-                {"detail": f"Nombre maximum de tentatives atteint ({devoir.tentatives_max})."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        # Créer ou récupérer la soumission
+        # Vérifier les sorties déjà effectuées
         soum, created = SoumissionDevoir.objects.get_or_create(
             utilisateur=request.user,
             devoir=devoir,
@@ -3388,6 +3625,16 @@ class DemarrerDevoirView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Si le nombre de sorties a atteint le maximum, soumettre automatiquement
+        if soum.sorties >= devoir.tentatives_max:
+            soum.statut = "soumis"
+            soum.soumis_le = timezone.now()
+            soum.save()
+            return Response(
+                {"detail": "Nombre maximum de sorties atteint. Devoir soumis automatiquement."},
+                status=status.HTTP_200_OK
+            )
+
         serializer = SoumissionDetailSerializer(soum, context={"request": request})
         return Response({
             "soumission": serializer.data,
@@ -3400,6 +3647,70 @@ class DemarrerDevoirView(APIView):
             return x_forwarded.split(",")[0].strip()
         return request.META.get("REMOTE_ADDR")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SORTIR DEVOIR - NOUVELLE VUE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SortirDevoirView(APIView):
+    """
+    POST /api/devoirs/<id>/sortir/
+    Enregistre une sortie du devoir. Si le nombre de sorties atteint le maximum,
+    soumet automatiquement le devoir.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
+        
+        soum = get_object_or_404(
+            SoumissionDevoir,
+            devoir=devoir,
+            utilisateur=request.user,
+            statut="en_cours"
+        )
+
+        # Incrémenter le compteur de sorties
+        soum.sorties += 1
+        soum.save(update_fields=['sorties'])
+
+        # Si le nombre de sorties atteint le maximum, soumettre automatiquement
+        if soum.sorties >= devoir.tentatives_max:
+            # Récupérer les réponses actuelles
+            reponses = request.data.get("reponses", {})
+            
+            # Enregistrer les réponses
+            for question in devoir.questions.all():
+                user_rep = reponses.get(str(question.id), "").strip()
+                repobj, _ = ReponseDevoir.objects.get_or_create(
+                    soumission=soum, question=question
+                )
+                repobj.reponse = user_rep
+                repobj.save()
+
+            soum.statut = "soumis"
+            soum.soumis_le = timezone.now()
+            soum.save(update_fields=['statut', 'soumis_le'])
+
+            return Response({
+                "detail": "Nombre maximum de sorties atteint. Devoir soumis automatiquement.",
+                "force_submit": True,
+                "sorties": soum.sorties,
+                "sorties_max": devoir.tentatives_max,
+            })
+
+        return Response({
+            "detail": f"Sortie enregistrée ({soum.sorties}/{devoir.tentatives_max}).",
+            "sorties": soum.sorties,
+            "sorties_max": devoir.tentatives_max,
+            "force_submit": False,
+        })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SOUMETTRE DEVOIR - MODIFIÉ POUR GÉRER LES POINTS
+# ─────────────────────────────────────────────────────────────────────────────
 
 class SoumettreDevoirView(APIView):
     """POST /api/devoirs/<id>/soumettre/"""
@@ -3457,7 +3768,14 @@ class SoumettreDevoirView(APIView):
                     repobj.points_obtenus = 0
             else:
                 repobj.reponse   = user_rep
-                repobj.est_correct = None   # correction manuelle
+                # Pour correction auto, comparer avec reponse_attendue
+                if devoir.type_correction == 'auto':
+                    repobj.est_correct = (user_rep.strip().lower() == question.reponse_attendue.strip().lower())
+                    repobj.points_obtenus = question.points if repobj.est_correct else 0
+                    if repobj.est_correct:
+                        score += question.points
+                else:
+                    repobj.est_correct = None   # correction manuelle
                 has_texte = True
 
             repobj.save()
@@ -3467,7 +3785,7 @@ class SoumettreDevoirView(APIView):
         soum.soumis_le = now
         soum.statut    = "en_retard" if soum.est_en_retard else "soumis"
 
-        if not has_texte:
+        if not has_texte and devoir.type_correction == 'auto':
             # 100% QCM → correction auto
             note = round((score / total) * devoir.note_sur, 2) if total > 0 else 0
             soum.note    = note
@@ -3483,6 +3801,504 @@ class SoumettreDevoirView(APIView):
             "en_retard":  soum.est_en_retard,
             "message":    "Devoir soumis avec succès.",
         })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RÉSULTAT DEVOIR - MODIFIÉ POUR AFFICHER LES DÉTAILS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ResultatDevoirView(APIView):
+    """GET /api/devoirs/<id>/resultat/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, devoir_id):
+        soum = get_object_or_404(
+            SoumissionDevoir,
+            devoir_id=devoir_id,
+            utilisateur=request.user
+        )
+        
+        if soum.statut == "en_cours":
+            return Response(
+                {"detail": "Devoir encore en cours de composition."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        if soum.statut == "soumis":
+            return Response(
+                {"detail": "Résultat en attente de correction par l'enseignant."},
+                status=status.HTTP_202_ACCEPTED
+            )
+        if soum.statut not in ["corrige", "en_retard"]:
+            return Response(
+                {"detail": "Résultat pas encore disponible."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = SoumissionResultatSerializer(soum, context={"request": request})
+        return Response(serializer.data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DUPLIQUER DEVOIR - NOUVELLE VUE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DupliquerDevoirView(APIView):
+    """
+    POST /api/devoirs/<id>/dupliquer/
+    Crée une copie d'un devoir existant avec toutes ses questions.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, devoir_id):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        source = get_object_or_404(Devoir, pk=devoir_id)
+
+        # Vérifier que l'utilisateur est l'enseignant principal du cours
+        cours = source.cours_lie
+        if cours is None or cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut dupliquer ce devoir."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Copier les champs de base
+        nouveau_devoir = Devoir.objects.create(
+            titre=f"Copie de {source.titre}",
+            description=source.description,
+            type_devoir=source.type_devoir,
+            enonce=source.enonce,
+            date_debut=source.date_debut,
+            date_limite=source.date_limite,
+            duree_minutes=source.duree_minutes,
+            note_sur=source.note_sur,
+            coefficient=source.coefficient,
+            tentatives_max=source.tentatives_max,
+            concours_lie=source.concours_lie,
+            formation_liee=source.formation_liee,
+            cours_lie=source.cours_lie,
+            est_publie=False,  # Nouveau devoir non publié
+            acces_restreint=source.acces_restreint,
+            type_correction=source.type_correction,
+            enonces_supplementaires=source.enonces_supplementaires,
+            cree_par=profile,
+            source_devoir=source,
+        )
+
+        # Copier les questions
+        for q in source.questions.all():
+            nouvelle_question = QuestionDevoir.objects.create(
+                devoir=nouveau_devoir,
+                enonce=q.enonce,
+                type_question=q.type_question,
+                points=q.points,
+                ordre=q.ordre,
+                reponse_attendue=q.reponse_attendue,
+                reponse_exemple=q.reponse_exemple,
+            )
+            # Copier les choix
+            for choix in q.choix.all():
+                ChoixReponse.objects.create(
+                    question=nouvelle_question,
+                    texte=choix.texte,
+                    est_correct=choix.est_correct,
+                )
+
+        return Response({
+            "detail": "Devoir dupliqué avec succès.",
+            "id": nouveau_devoir.id,
+            "titre": nouveau_devoir.titre,
+            "nb_questions": nouveau_devoir.questions.count(),
+        }, status=status.HTTP_201_CREATED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODIFIER/SUPPRIMER QUESTION DEVOIR - NOUVELLES VUES
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ModifierQuestionDevoirView(APIView):
+    """
+    PATCH /api/devoirs/questions/<question_id>/modifier/
+    Modifie une question d'un devoir.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, question_id):
+        question = get_object_or_404(QuestionDevoir, pk=question_id)
+        devoir = question.devoir
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        # Vérifier que l'utilisateur est l'enseignant principal
+        cours = devoir.cours_lie
+        if cours is None or cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut modifier une question."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Vérifier que le devoir n'est pas publié
+        if devoir.est_publie:
+            return Response(
+                {"detail": "Impossible de modifier une question d'un devoir déjà publié."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = QuestionDevoirCreateUpdateSerializer(
+            question,
+            data=request.data,
+            partial=True,
+            context={'type_correction': devoir.type_correction}
+        )
+        if serializer.is_valid():
+            updated = serializer.save()
+            return Response(
+                QuestionDevoirAdminSerializer(updated).data,
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SupprimerQuestionDevoirView(APIView):
+    """
+    DELETE /api/devoirs/questions/<question_id>/supprimer/
+    Supprime une question d'un devoir.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, question_id):
+        question = get_object_or_404(QuestionDevoir, pk=question_id)
+        devoir = question.devoir
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        # Vérifier que l'utilisateur est l'enseignant principal
+        cours = devoir.cours_lie
+        if cours is None or cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal peut supprimer une question."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Vérifier que le devoir n'est pas publié
+        if devoir.est_publie:
+            return Response(
+                {"detail": "Impossible de supprimer une question d'un devoir déjà publié."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        question.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CRÉER OLYMPIADE - CORRIGÉ
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CreerOlympiadeParCadreView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if profile.user_type != 'enseignant_cadre':
+            return Response(
+                {"detail": "Seuls les enseignants cadres peuvent créer des olympiades."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Utiliser le serializer pour valider les données
+        serializer = OlympiadeCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+
+        # ── Validation du département ─────────────────────────────
+        departement_id = request.data.get('departement_id')
+        if not departement_id:
+            return Response({"detail": "departement_id est obligatoire."}, status=400)
+
+        departement = get_object_or_404(Departement, pk=departement_id)
+
+        if departement.cadre != profile:
+            return Response({"detail": "Ce département ne vous appartient pas."}, status=403)
+
+        parcours = departement.parcours
+
+        # ── Prix de participation ──────────────────────────────────
+        demande_paiement = data.get('demande_paiement_participants', False)
+        prix_participation = data.get('prix_participation', 0)
+        
+        if demande_paiement and prix_participation <= 0:
+            return Response(
+                {"detail": "Veuillez entrer un prix de participation valide."},
+                status=400
+            )
+        
+        if prix_participation > 200:
+            return Response(
+                {"detail": "Le prix de participation ne peut pas dépasser 200 FCFA."},
+                status=400
+            )
+
+        # ── Calcul du prix global ──────────────────────────────────
+        nb_apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus=departement.parcours.nom,
+            is_active=True
+        ).count()
+
+        # Tarification progressive
+        if nb_apprenants <= 50:
+            prix_global = nb_apprenants * 100
+        elif nb_apprenants <= 100:
+            prix_global = int(nb_apprenants * 100 * 0.8)
+        elif nb_apprenants <= 200:
+            prix_global = int(nb_apprenants * 100 * 0.6)
+        else:
+            prix_global = int(nb_apprenants * 100 * 0.5)
+
+        # ── Création de l'olympiade ───────────────────────────────
+        olympiade = Olympiade.objects.create(
+            titre=data['titre'],
+            description=data.get('description', ''),
+            edition=data.get('edition', ''),
+            date_ouverture_inscription=data['date_ouverture_inscription'],
+            date_cloture_inscription=data['date_cloture_inscription'],
+            date_debut_olympiade=data['date_debut_olympiade'],
+            date_fin_olympiade=data['date_fin_olympiade'],
+            duree_minutes=data.get('duree_minutes', 120),
+            nb_questions=data.get('nb_questions', 30),
+            max_focus_perdu=data.get('max_focus_perdu', 3),
+            melanger_questions=data.get('melanger_questions', True),
+            melanger_choix=data.get('melanger_choix', True),
+            une_seule_session=data.get('une_seule_session', True),
+            recompense=data.get('recompense', ''),
+            prix_participation=prix_participation,
+            demande_paiement_participants=demande_paiement,
+            prix_global=prix_global,
+            note_sur=20,
+            organisateur=profile,
+            cree_par=request.user,
+        )
+
+        # Enregistrer les niveaux accessibles
+        niveaux_accessibles = data.get('niveaux_accessibles', [])
+        if niveaux_accessibles:
+            olympiade.niveaux_accessibles = ','.join(niveaux_accessibles)
+            olympiade.save(update_fields=['niveaux_accessibles'])
+
+        # ── Créer automatiquement un Devoir lié ──────────────────
+        devoir_lie = Devoir.objects.create(
+            titre=f"[Olympiade] {olympiade.titre}",
+            description=f"Devoir lié à l'olympiade : {olympiade.titre}",
+            type_devoir='olympiade',
+            enonce=f"Questions de l'olympiade {olympiade.titre}",
+            date_debut=olympiade.date_debut_olympiade,
+            date_limite=olympiade.date_fin_olympiade,
+            duree_minutes=olympiade.duree_minutes,
+            note_sur=20,
+            est_publie=False,
+            cree_par=profile,
+        )
+        olympiade.devoir = devoir_lie
+        olympiade.save(update_fields=['devoir'])
+
+        # ── Gestion de la validation ─────────────────────────────
+        message_detail = ""
+        besoin_validation = False
+        
+        if prix_global == 0:
+            besoin_validation = True
+            devoir_lie.est_publie = False
+            devoir_lie.save(update_fields=['est_publie'])
+            message_detail = (
+                "Olympiade créée avec succès. "
+                "Aucun apprenant n'est inscrit dans ce département. "
+                "L'administrateur du parcours doit valider l'olympiade avant qu'elle ne soit visible."
+            )
+        else:
+            devoir_lie.est_publie = False
+            devoir_lie.save(update_fields=['est_publie'])
+            message_detail = (
+                f"Olympiade créée avec succès. "
+                f"Un paiement de {prix_global} FCFA est requis pour valider l'olympiade.\n"
+                f"Référence : {olympiade.id}\n"
+                f"Pour payer, utilisez le portefeuille Yeki ou Mobile Money."
+            )
+
+        enregistrer_activite(
+            user=request.user,
+            action='olympiad_created',
+            description=f"Olympiade « {olympiade.titre} » créée",
+            data={
+                'titre': olympiade.titre,
+                'edition': olympiade.edition,
+                'prix_global': prix_global,
+            },
+            objet_id=olympiade.id,
+            objet_type='Olympiade',
+        )
+
+        return Response({
+            "id": olympiade.id,
+            "titre": olympiade.titre,
+            "edition": olympiade.edition,
+            "statut": olympiade.statut_auto,
+            "date_ouverture_inscription": olympiade.date_ouverture_inscription.isoformat(),
+            "date_cloture_inscription": olympiade.date_cloture_inscription.isoformat(),
+            "date_debut_olympiade": olympiade.date_debut_olympiade.isoformat(),
+            "date_fin_olympiade": olympiade.date_fin_olympiade.isoformat(),
+            "duree_minutes": olympiade.duree_minutes,
+            "nb_questions": olympiade.nb_questions,
+            "devoir_id": devoir_lie.id,
+            "recompense": olympiade.recompense,
+            "prix_global": prix_global,
+            "prix_participation": olympiade.prix_participation,
+            "demande_paiement_participants": olympiade.demande_paiement_participants,
+            "en_attente_validation": besoin_validation or prix_global > 0,
+            "detail": message_detail,
+        }, status=status.HTTP_201_CREATED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODIFIER DEVOIR - MODIFIÉ POUR GÉRER LES CONTRAINTES
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ModifierDevoirView(APIView):
+    """
+    PATCH /api/devoirs/<devoir_id>/modifier/
+    Permet à l'enseignant principal de modifier un devoir.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        cours = devoir.cours_lie
+        if cours is None or cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal du cours peut modifier ce devoir."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = DevoirUpdateSerializer(devoir, data=request.data, partial=True)
+        if serializer.is_valid():
+            updated = serializer.save()
+            
+            enregistrer_activite(
+                user=request.user,
+                action='homework_modified',
+                description=f"Devoir « {updated.titre} » modifié",
+                data={
+                    'devoir': updated.titre,
+                    'cours': cours.titre,
+                },
+                objet_id=updated.id,
+                objet_type='Devoir',
+            )
+
+            return Response({
+                'id': updated.id,
+                'titre': updated.titre,
+                'description': updated.description,
+                'date_debut': updated.date_debut.isoformat() if updated.date_debut else None,
+                'date_limite': updated.date_limite.isoformat() if updated.date_limite else None,
+                'est_publie': updated.est_publie,
+                'nb_questions': updated.questions.count(),
+                'note_sur': float(updated.note_sur),
+                'detail': 'Devoir modifié avec succès.',
+            }, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODIFIER DEVOIR - GESTION PUBLICATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PublierDevoirView(APIView):
+    """
+    POST /api/devoirs/<devoir_id>/publier/
+    Publie un devoir et bloque les modifications ultérieures.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        cours = devoir.cours_lie
+        if cours is None or cours.enseignant_principal != profile:
+            return Response(
+                {"detail": "Seul l'enseignant principal du cours peut publier ce devoir."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if devoir.est_publie:
+            return Response({"detail": "Ce devoir est déjà publié."}, status=400)
+
+        # Vérifier que le devoir a au moins une question
+        if not devoir.questions.exists():
+            return Response(
+                {"detail": "Le devoir doit contenir au moins une question avant d'être publié."},
+                status=400
+            )
+
+        devoir.est_publie = True
+        devoir.save(update_fields=['est_publie'])
+
+        # MAJ compteur
+        cours.nb_devoirs = Devoir.objects.filter(
+            cours_lie=cours, est_publie=True
+        ).count()
+        cours.save(update_fields=['nb_devoirs'])
+
+        enregistrer_activite(
+            user=request.user,
+            action='homework_published',
+            description=f"Devoir « {devoir.titre} » publié",
+            data={
+                'devoir': devoir.titre,
+                'cours': cours.titre,
+            },
+            objet_id=devoir.id,
+            objet_type='Devoir',
+        )
+
+        return Response({
+            "detail": "Devoir publié avec succès. Il ne peut plus être modifié.",
+            "id": devoir.id,
+            "est_publie": True,
+            "message": "Une fois publié, vous ne pouvez plus ajouter ou modifier les questions."
+        }, status=200)
 
 
 class SignalerFocusDevoirView(APIView):
@@ -3522,58 +4338,6 @@ class MesSoumissionsView(APIView):
             soumissions, many=True, context={"request": request}
         )
         return Response(serializer.data)
-
-
-class ResultatDevoirView(APIView):
-    """GET /api/devoirs/<id>/resultat/"""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, devoir_id):
-        soum = get_object_or_404(
-            SoumissionDevoir,
-            devoir_id=devoir_id,
-            utilisateur=request.user
-        )
-        # "corrige"   → correction auto (QCM) ou manuelle faite
-        # "en_retard" → soumis hors délai, peut être auto-corrigé (QCM)
-        # "soumis"    → en attente de correction manuelle
-        if soum.statut == "en_cours":
-            return Response(
-                {"detail": "Devoir encore en cours de composition."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        if soum.statut == "soumis":
-            return Response(
-                {"detail": "Résultat en attente de correction par l'enseignant."},
-                status=status.HTTP_202_ACCEPTED
-            )
-        if soum.statut not in ["corrige", "en_retard"]:
-            return Response(
-                {"detail": "Résultat pas encore disponible."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Construire le détail par question
-        detail = []
-        for rep in soum.reponses.select_related("question", "choix").all():
-            detail.append({
-                "question":       rep.question.texte,
-                "reponse":        rep.reponse,
-                "est_correct":    rep.est_correct,
-                "points_obtenus": rep.points_obtenus,
-                "points_max":     rep.question.points,
-            })
-
-        return Response({
-            "devoir":      soum.devoir.titre,
-            "note":        soum.note,
-            "note_sur":    soum.devoir.note_sur,
-            "commentaire": soum.commentaire,
-            "soumis_le":   soum.soumis_le,
-            "corrige_le":  soum.corrige_le,
-            "en_retard":   soum.est_en_retard,
-            "detail":      detail,
-        })
 
 
 class DevoirsCoursView(APIView):
@@ -3662,103 +4426,6 @@ class DevoirsCoursView(APIView):
             })
 
         return Response(result)
-
-
-class ReponseSerializer(serializers.ModelSerializer):
-    auteur_nom = serializers.SerializerMethodField()
-    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
-    auteur_est_enseignant = serializers.SerializerMethodField()
-    nb_likes = serializers.SerializerMethodField()
-    mon_like = serializers.SerializerMethodField()
-    image_url = serializers.SerializerMethodField()
-    audio_url = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ReponseQuestion
-        fields = [
-            "id", "contenu", "cree_le", "est_solution",
-            "auteur_nom", "auteur_username", "auteur_est_enseignant",
-            "nb_likes", "mon_like", "image_url", "audio_url"
-        ]
-
-    def get_auteur_nom(self, obj):
-        user = obj.auteur
-        nom = f"{user.first_name} {user.last_name}".strip()
-        return nom if nom else user.username
-
-    def get_auteur_est_enseignant(self, obj):
-        try:
-            profile = obj.auteur.profile
-            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
-        except:
-            return False
-
-    def get_nb_likes(self, obj):
-        return obj.likes.count()
-
-    def get_mon_like(self, obj):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            return obj.likes.filter(utilisateur=request.user).exists()
-        return False
-
-    def get_image_url(self, obj):
-        # Si la réponse a une image (modèle à étendre si nécessaire)
-        return None
-
-    def get_audio_url(self, obj):
-        # Si la réponse a un audio (modèle à étendre si nécessaire)
-        return None
-
-
-class QuestionForumDetailSerializer(serializers.ModelSerializer):
-    auteur_nom = serializers.SerializerMethodField()
-    auteur_username = serializers.CharField(source="auteur.username", read_only=True)
-    auteur_est_enseignant = serializers.SerializerMethodField()
-    nb_reponses = serializers.IntegerField(read_only=True)
-    reponses = ReponseSerializer(many=True, read_only=True)
-    image_url = serializers.SerializerMethodField()
-    audio_url = serializers.SerializerMethodField()
-
-    class Meta:
-        model = QuestionForum
-        fields = [
-            "id", "contenu", "source", "cree_le", "est_resolue", "nb_vues",
-            "nb_reponses", "reponses",
-            "lecon_id", "lecon_titre", "cours_id", "cours_titre",
-            "exercice_id", "exercice_titre",
-            "devoir_id", "devoir_titre",
-            "auteur_nom", "auteur_username", "auteur_est_enseignant",
-            "image_url", "audio_url",
-        ]
-
-    def get_auteur_nom(self, obj):
-        user = obj.auteur
-        nom = f"{user.first_name} {user.last_name}".strip()
-        return nom if nom else user.username
-
-    def get_auteur_est_enseignant(self, obj):
-        try:
-            profile = obj.auteur.profile
-            return profile.user_type in ['enseignant', 'enseignant_principal', 'enseignant_cadre', 'enseignant_admin']
-        except:
-            return False
-
-    def get_image_url(self, obj):
-        if obj.image:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-            return obj.image.url
-        return None
-
-    def get_audio_url(self, obj):
-        if obj.audio:
-            request = self.context.get("request")
-            if request:
-                return request.build_absolute_uri(obj.audio.url)
-            return obj.audio.url
-        return None
 
 
 class CreerDevoirCoursView(APIView):
@@ -3852,86 +4519,6 @@ class CreerDevoirCoursView(APIView):
             }, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class ModifierDevoirView(APIView):
-    """
-    PATCH /api/devoirs/<devoir_id>/modifier/
-    Permet à l'enseignant principal de modifier un devoir.
-    """
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def patch(self, request, devoir_id):
-        devoir = get_object_or_404(Devoir, pk=devoir_id)
-
-        try:
-            profile = request.user.profile
-        except Profile.DoesNotExist:
-            return Response({"detail": "Profil introuvable."}, status=404)
-
-        cours = devoir.cours_lie
-        if cours is None or cours.enseignant_principal != profile:
-            return Response(
-                {"detail": "Seul l'enseignant principal du cours peut modifier ce devoir."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        data = request.data.copy()
-        type_correction = data.pop('type_correction', None)
-
-        # Champs modifiables
-        updatable_fields = [
-            'titre', 'description', 'type_devoir', 'matiere', 'niveau',
-            'enonce', 'date_debut', 'date_limite', 'duree_minutes',
-            'note_sur', 'coefficient', 'tentatives_max', 'est_publie',
-            'acces_restreint', 'concours_lie', 'formation_liee'
-        ]
-        
-        updates = {}
-        for field in updatable_fields:
-            if field in data:
-                updates[field] = data[field]
-
-        if not updates and type_correction is None:
-            return Response(
-                {"detail": "Aucune modification spécifiée."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Appliquer les modifications
-        for key, value in updates.items():
-            setattr(devoir, key, value)
-        
-        if type_correction and hasattr(devoir, 'type_correction'):
-            devoir.type_correction = type_correction
-        
-        devoir.save()
-
-        enregistrer_activite(
-            user=request.user,
-            action='homework_modified',
-            description=f"Devoir « {devoir.titre} » modifié",
-            data={
-                'devoir': devoir.titre,
-                'cours': cours.titre,
-                'modifications': list(updates.keys()),
-            },
-            objet_id=devoir.id,
-            objet_type='Devoir',
-        )
-
-        return Response({
-            'id': devoir.id,
-            'titre': devoir.titre,
-            'description': devoir.description,
-            'date_debut': devoir.date_debut.isoformat() if devoir.date_debut else None,
-            'date_limite': devoir.date_limite.isoformat() if devoir.date_limite else None,
-            'est_publie': devoir.est_publie,
-            'nb_questions': devoir.questions.count(),
-            'note_sur': float(devoir.note_sur),
-            'detail': 'Devoir modifié avec succès.',
-        }, status=status.HTTP_200_OK)
 
 
 # a verifier
@@ -4049,133 +4636,6 @@ class DetailQuestionView(APIView):
             return Response({"detail": "Question introuvable ou non autorisée."}, status=404)
         question.delete()
         return Response(status=204)
-
-
-class SoumettreDevoirFichierView(APIView):
-    """
-    POST /api/devoirs/<devoir_id>/soumettre-fichier/
-    Permet à un apprenant de soumettre un fichier PDF pour un devoir
-    de type correction manuelle.
-    """
-    permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
-
-    @transaction.atomic
-    def post(self, request, devoir_id):
-        devoir = get_object_or_404(Devoir, pk=devoir_id)
-
-        if not devoir.est_ouvert:
-            return Response(
-                {"detail": "Le devoir n'est plus accessible."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Vérifier les tentatives
-        nb_tentatives = SoumissionDevoir.objects.filter(
-            utilisateur=request.user,
-            devoir=devoir,
-            statut__in=["soumis", "corrige", "en_retard"]
-        ).count()
-
-        if nb_tentatives >= devoir.tentatives_max:
-            return Response(
-                {"detail": f"Nombre maximum de tentatives atteint ({devoir.tentatives_max})."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Récupérer ou créer la soumission
-        soum, created = SoumissionDevoir.objects.get_or_create(
-            utilisateur=request.user,
-            devoir=devoir,
-            defaults={
-                "statut": "en_cours",
-                "ip_address": _get_client_ip(request),
-                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
-            }
-        )
-
-        if not created and soum.statut in ["soumis", "corrige"]:
-            return Response(
-                {"detail": "Vous avez déjà soumis ce devoir."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Traiter le fichier uploadé
-        fichier = request.FILES.get('fichier')
-        if not fichier:
-            return Response(
-                {"detail": "Aucun fichier fourni."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not fichier.name.lower().endswith('.pdf'):
-            return Response(
-                {"detail": "Seuls les fichiers PDF sont acceptés."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Stocker le fichier dans la soumission
-        if hasattr(soum, 'fichier_soumis'):
-            soum.fichier_soumis = fichier
-        else:
-            # Fallback si le champ n'existe pas
-            from django.core.files.base import ContentFile
-            soum.fichier_soumis = fichier
-
-        now = timezone.now()
-        soum.statut    = 'en_retard' if soum.est_en_retard else 'soumis'
-        soum.soumis_le = now
-        soum.save()
-
-        return Response({
-            "statut":    soum.statut,
-            "message":   "Fichier soumis avec succès. En attente de correction.",
-            "soumis_le": soum.soumis_le.isoformat(),
-            "devoir_titre": devoir.titre,
-        })
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. MODIFIER UN DEVOIR
-#    PATCH /api/devoirs/<devoir_id>/modifier/
-# ─────────────────────────────────────────────────────────────────────────────
-class ModifierDevoirView(APIView):
-    """
-    Modification partielle d'un devoir.
-    Réservé à l'enseignant principal du cours lié.
-    """
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def patch(self, request, devoir_id):
-        devoir = get_object_or_404(Devoir, pk=devoir_id)
-
-        try:
-            profile = request.user.profile
-        except Profile.DoesNotExist:
-            return Response({"detail": "Profil introuvable."}, status=404)
-
-        cours = devoir.cours_lie
-        if cours is None or cours.enseignant_principal != profile:
-            return Response(
-                {"detail": "Seul l'enseignant principal du cours peut modifier ce devoir."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        data = request.data.copy()
-        type_correction = data.pop('type_correction', None)
-
-        serializer = DevoirCreateSerializer(devoir, data=data, partial=True)
-        if serializer.is_valid():
-            devoir = serializer.save()
-            if type_correction and hasattr(devoir, 'type_correction'):
-                devoir.type_correction = type_correction
-                devoir.save(update_fields=['type_correction'])
-
-            return Response(
-                _devoir_to_dict(devoir, request.user),
-                status=status.HTTP_200_OK,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
