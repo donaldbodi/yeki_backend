@@ -4638,6 +4638,90 @@ class DetailQuestionView(APIView):
         return Response(status=204)
 
 
+class SoumettreDevoirFichierView(APIView):
+    """
+    POST /api/devoirs/<devoir_id>/soumettre-fichier/
+    Permet à un apprenant de soumettre un fichier PDF pour un devoir
+    de type correction manuelle.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @transaction.atomic
+    def post(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+
+        if not devoir.est_ouvert:
+            return Response(
+                {"detail": "Le devoir n'est plus accessible."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Vérifier les tentatives
+        nb_tentatives = SoumissionDevoir.objects.filter(
+            utilisateur=request.user,
+            devoir=devoir,
+            statut__in=["soumis", "corrige", "en_retard"]
+        ).count()
+
+        if nb_tentatives >= devoir.tentatives_max:
+            return Response(
+                {"detail": f"Nombre maximum de tentatives atteint ({devoir.tentatives_max})."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Récupérer ou créer la soumission
+        soum, created = SoumissionDevoir.objects.get_or_create(
+            utilisateur=request.user,
+            devoir=devoir,
+            defaults={
+                "statut": "en_cours",
+                "ip_address": _get_client_ip(request),
+                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:500],
+            }
+        )
+
+        if not created and soum.statut in ["soumis", "corrige"]:
+            return Response(
+                {"detail": "Vous avez déjà soumis ce devoir."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Traiter le fichier uploadé
+        fichier = request.FILES.get('fichier')
+        if not fichier:
+            return Response(
+                {"detail": "Aucun fichier fourni."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not fichier.name.lower().endswith('.pdf'):
+            return Response(
+                {"detail": "Seuls les fichiers PDF sont acceptés."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Stocker le fichier dans la soumission
+        if hasattr(soum, 'fichier_soumis'):
+            soum.fichier_soumis = fichier
+        else:
+            # Fallback si le champ n'existe pas
+            from django.core.files.base import ContentFile
+            soum.fichier_soumis = fichier
+
+        now = timezone.now()
+        soum.statut    = 'en_retard' if soum.est_en_retard else 'soumis'
+        soum.soumis_le = now
+        soum.save()
+
+        return Response({
+            "statut":    soum.statut,
+            "message":   "Fichier soumis avec succès. En attente de correction.",
+            "soumis_le": soum.soumis_le.isoformat(),
+            "devoir_titre": devoir.titre,
+        })
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. AJOUTER UNE QUESTION À UN DEVOIR
 #    POST /api/devoirs/<devoir_id>/questions/ajouter/
