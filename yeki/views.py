@@ -7753,7 +7753,7 @@ class CadreOlympiadesView(APIView):
                 "une_seule_session": o.une_seule_session,
                 "max_focus_perdu": o.max_focus_perdu,
                 "description": o.description,
-                "created_at": o.created_at.isoformat() if hasattr(o, 'created_at') else None,
+                "created_at": o.cree_par.isoformat() if hasattr(o, 'cree_par') else None,
             })
 
         return Response(data)
