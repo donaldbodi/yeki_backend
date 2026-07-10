@@ -155,6 +155,12 @@ urlpatterns = [
          YekiIAChatAvecHistoriqueView.as_view(), 
          name='ia-chat'),
 
+     # Ajouter dans urlpatterns
+     path('notifications/', NotificationsView.as_view(), name='notifications'),
+     path('notifications/<int:id>/lire/', MarquerNotificationLueView.as_view(), name='notifications-lire'),
+     path('notifications/tout-lire/', MarquerToutesNotificationsLuesView.as_view(), name='notifications-tout-lire'),
+     path('notifications/non-lues/', NotificationsNonLuesView.as_view(), name='notifications-non-lues'),
+
     # ── PAIEMENT ──────────────────────────────────────────────────
     # GET /api/paiements/historique/
     path('paiements/historique/', HistoriquePaiementsView.as_view(), name='paiements-historique'),

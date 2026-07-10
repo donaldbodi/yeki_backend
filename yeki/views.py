@@ -1379,6 +1379,72 @@ class PrincipalRendusDevoirsAPIView(APIView):
             'total': len(result)
         })
 
+
+# Ajouter ces nouvelles vues dans views.py
+
+from .models import Notification, creer_notification
+from .serializers import NotificationSerializer
+
+class NotificationsView(APIView):
+    """
+    GET /api/notifications/
+    Retourne les notifications de l'utilisateur connecté.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        limit = int(request.query_params.get('limit', 50))
+        notifications = Notification.objects.filter(
+            utilisateur=request.user
+        ).order_by('-cree_le')[:limit]
+        serializer = NotificationSerializer(notifications, many=True)
+        return Response(serializer.data)
+
+
+class MarquerNotificationLueView(APIView):
+    """
+    PATCH /api/notifications/<id>/lire/
+    Marque une notification comme lue.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, id):
+        notification = get_object_or_404(Notification, pk=id, utilisateur=request.user)
+        notification.est_lue = True
+        notification.save()
+        return Response({'est_lue': True})
+
+
+class MarquerToutesNotificationsLuesView(APIView):
+    """
+    POST /api/notifications/tout-lire/
+    Marque toutes les notifications comme lues.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        Notification.objects.filter(
+            utilisateur=request.user, 
+            est_lue=False
+        ).update(est_lue=True)
+        return Response({'detail': 'Toutes les notifications marquées comme lues'})
+
+
+class NotificationsNonLuesView(APIView):
+    """
+    GET /api/notifications/non-lues/
+    Retourne le nombre de notifications non lues.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        count = Notification.objects.filter(
+            utilisateur=request.user,
+            est_lue=False
+        ).count()
+        return Response({'non_lues': count})
+
+
 class ClassementDepartementView(APIView):
     """
     GET /api/classement/departement/<departement_id>/
@@ -4003,181 +4069,6 @@ class SupprimerQuestionDevoirView(APIView):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CRÉER OLYMPIADE - CORRIGÉ
-# ─────────────────────────────────────────────────────────────────────────────
-
-class CreerOlympiadeParCadreView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request):
-        try:
-            profile = request.user.profile
-        except Profile.DoesNotExist:
-            return Response({"detail": "Profil introuvable."}, status=404)
-
-        if profile.user_type != 'enseignant_cadre':
-            return Response(
-                {"detail": "Seuls les enseignants cadres peuvent créer des olympiades."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        # Utiliser le serializer pour valider les données
-        serializer = OlympiadeCreateSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        data = serializer.validated_data
-
-        # ── Validation du département ─────────────────────────────
-        departement_id = request.data.get('departement_id')
-        if not departement_id:
-            return Response({"detail": "departement_id est obligatoire."}, status=400)
-
-        departement = get_object_or_404(Departement, pk=departement_id)
-
-        if departement.cadre != profile:
-            return Response({"detail": "Ce département ne vous appartient pas."}, status=403)
-
-        parcours = departement.parcours
-
-        # ── Prix de participation ──────────────────────────────────
-        demande_paiement = data.get('demande_paiement_participants', False)
-        prix_participation = data.get('prix_participation', 0)
-        
-        if demande_paiement and prix_participation <= 0:
-            return Response(
-                {"detail": "Veuillez entrer un prix de participation valide."},
-                status=400
-            )
-        
-        if prix_participation > 200:
-            return Response(
-                {"detail": "Le prix de participation ne peut pas dépasser 200 FCFA."},
-                status=400
-            )
-
-        # ── Calcul du prix global ──────────────────────────────────
-        nb_apprenants = Profile.objects.filter(
-            user_type='apprenant',
-            cursus=departement.parcours.nom,
-            is_active=True
-        ).count()
-
-        # Tarification progressive
-        if nb_apprenants <= 50:
-            prix_global = nb_apprenants * 100
-        elif nb_apprenants <= 100:
-            prix_global = int(nb_apprenants * 100 * 0.8)
-        elif nb_apprenants <= 200:
-            prix_global = int(nb_apprenants * 100 * 0.6)
-        else:
-            prix_global = int(nb_apprenants * 100 * 0.5)
-
-        # ── Création de l'olympiade ───────────────────────────────
-        olympiade = Olympiade.objects.create(
-            titre=data['titre'],
-            description=data.get('description', ''),
-            edition=data.get('edition', ''),
-            date_ouverture_inscription=data['date_ouverture_inscription'],
-            date_cloture_inscription=data['date_cloture_inscription'],
-            date_debut_olympiade=data['date_debut_olympiade'],
-            date_fin_olympiade=data['date_fin_olympiade'],
-            duree_minutes=data.get('duree_minutes', 120),
-            nb_questions=data.get('nb_questions', 30),
-            max_focus_perdu=data.get('max_focus_perdu', 3),
-            melanger_questions=data.get('melanger_questions', True),
-            melanger_choix=data.get('melanger_choix', True),
-            une_seule_session=data.get('une_seule_session', True),
-            recompense=data.get('recompense', ''),
-            prix_participation=prix_participation,
-            demande_paiement_participants=demande_paiement,
-            prix_global=prix_global,
-            note_sur=20,
-            organisateur=profile,
-            cree_par=request.user,
-        )
-
-        # Enregistrer les niveaux accessibles
-        niveaux_accessibles = data.get('niveaux_accessibles', [])
-        if niveaux_accessibles:
-            olympiade.niveaux_accessibles = ','.join(niveaux_accessibles)
-            olympiade.save(update_fields=['niveaux_accessibles'])
-
-        # ── Créer automatiquement un Devoir lié ──────────────────
-        devoir_lie = Devoir.objects.create(
-            titre=f"[Olympiade] {olympiade.titre}",
-            description=f"Devoir lié à l'olympiade : {olympiade.titre}",
-            type_devoir='olympiade',
-            enonce=f"Questions de l'olympiade {olympiade.titre}",
-            date_debut=olympiade.date_debut_olympiade,
-            date_limite=olympiade.date_fin_olympiade,
-            duree_minutes=olympiade.duree_minutes,
-            note_sur=20,
-            est_publie=False,
-            cree_par=profile,
-        )
-        olympiade.devoir = devoir_lie
-        olympiade.save(update_fields=['devoir'])
-
-        # ── Gestion de la validation ─────────────────────────────
-        message_detail = ""
-        besoin_validation = False
-        
-        if prix_global == 0:
-            besoin_validation = True
-            devoir_lie.est_publie = False
-            devoir_lie.save(update_fields=['est_publie'])
-            message_detail = (
-                "Olympiade créée avec succès. "
-                "Aucun apprenant n'est inscrit dans ce département. "
-                "L'administrateur du parcours doit valider l'olympiade avant qu'elle ne soit visible."
-            )
-        else:
-            devoir_lie.est_publie = False
-            devoir_lie.save(update_fields=['est_publie'])
-            message_detail = (
-                f"Olympiade créée avec succès. "
-                f"Un paiement de {prix_global} FCFA est requis pour valider l'olympiade.\n"
-                f"Référence : {olympiade.id}\n"
-                f"Pour payer, utilisez le portefeuille Yeki ou Mobile Money."
-            )
-
-        enregistrer_activite(
-            user=request.user,
-            action='olympiad_created',
-            description=f"Olympiade « {olympiade.titre} » créée",
-            data={
-                'titre': olympiade.titre,
-                'edition': olympiade.edition,
-                'prix_global': prix_global,
-            },
-            objet_id=olympiade.id,
-            objet_type='Olympiade',
-        )
-
-        return Response({
-            "id": olympiade.id,
-            "titre": olympiade.titre,
-            "edition": olympiade.edition,
-            "statut": olympiade.statut_auto,
-            "date_ouverture_inscription": olympiade.date_ouverture_inscription.isoformat(),
-            "date_cloture_inscription": olympiade.date_cloture_inscription.isoformat(),
-            "date_debut_olympiade": olympiade.date_debut_olympiade.isoformat(),
-            "date_fin_olympiade": olympiade.date_fin_olympiade.isoformat(),
-            "duree_minutes": olympiade.duree_minutes,
-            "nb_questions": olympiade.nb_questions,
-            "devoir_id": devoir_lie.id,
-            "recompense": olympiade.recompense,
-            "prix_global": prix_global,
-            "prix_participation": olympiade.prix_participation,
-            "demande_paiement_participants": olympiade.demande_paiement_participants,
-            "en_attente_validation": besoin_validation or prix_global > 0,
-            "detail": message_detail,
-        }, status=status.HTTP_201_CREATED)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # MODIFIER DEVOIR - MODIFIÉ POUR GÉRER LES CONTRAINTES
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -4240,10 +4131,6 @@ class ModifierDevoirView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PublierDevoirView(APIView):
-    """
-    POST /api/devoirs/<devoir_id>/publier/
-    Publie un devoir et bloque les modifications ultérieures.
-    """
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
@@ -4265,7 +4152,6 @@ class PublierDevoirView(APIView):
         if devoir.est_publie:
             return Response({"detail": "Ce devoir est déjà publié."}, status=400)
 
-        # Vérifier que le devoir a au moins une question
         if not devoir.questions.exists():
             return Response(
                 {"detail": "Le devoir doit contenir au moins une question avant d'être publié."},
@@ -4275,7 +4161,6 @@ class PublierDevoirView(APIView):
         devoir.est_publie = True
         devoir.save(update_fields=['est_publie'])
 
-        # MAJ compteur
         cours.nb_devoirs = Devoir.objects.filter(
             cours_lie=cours, est_publie=True
         ).count()
@@ -4292,6 +4177,24 @@ class PublierDevoirView(APIView):
             objet_id=devoir.id,
             objet_type='Devoir',
         )
+
+        # Créer des notifications pour les apprenants du cours
+        apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus=cours.departement.parcours.nom,
+            is_active=True
+        ).select_related('user')
+        
+        for apprenant in apprenants:
+            creer_notification(
+                utilisateur=apprenant.user,
+                type_notif='devoir',
+                titre=f"Nouveau devoir : {devoir.titre}",
+                contenu=f"Le devoir '{devoir.titre}' est maintenant disponible dans le cours '{cours.titre}'.",
+                objet_id=devoir.id,
+                objet_type='Devoir',
+                action_url=f"/devoirs/{devoir.id}/composer"
+            )
 
         return Response({
             "detail": "Devoir publié avec succès. Il ne peut plus être modifié.",
@@ -6498,11 +6401,6 @@ class CreerOlympiadeParCadreView(APIView):
         elif not isinstance(niveaux_accessibles, list):
             niveaux_accessibles = []
 
-        # ── Prix et récompenses ───────────────────────────────────
-        prix_1er = (data.get('prix_1er') or '').strip()
-        prix_2eme = (data.get('prix_2eme') or '').strip()
-        prix_3eme = (data.get('prix_3eme') or '').strip()
-        recompense = (data.get('recompense') or '').strip()
         
         # Prix de participation par apprenant
         demande_paiement = data.get('demande_paiement_participants', False)
@@ -6554,10 +6452,6 @@ class CreerOlympiadeParCadreView(APIView):
             melanger_questions=melanger_questions,
             melanger_choix=melanger_choix,
             une_seule_session=une_seule_session,
-            prix_1er=prix_1er,
-            prix_2eme=prix_2eme,
-            prix_3eme=prix_3eme,
-            recompense=recompense,
             prix_participation=prix_participation,
             demande_paiement_participants=demande_paiement,
             prix_global=prix_global,
@@ -6566,6 +6460,25 @@ class CreerOlympiadeParCadreView(APIView):
             cree_par=request.user,
             niveaux_accessibles=','.join(niveaux_accessibles) if niveaux_accessibles else '',
         )
+
+        # Créer des notifications pour les apprenants éligibles
+        apprenants = Profile.objects.filter(
+            user_type='apprenant',
+            cursus=departement.parcours.nom,
+            is_active=True
+        ).select_related('user')
+        
+        for apprenant in apprenants:
+            if olympiade.est_accessible_par_niveau(apprenant.niveau):
+                creer_notification(
+                    utilisateur=apprenant.user,
+                    type_notif='olympiade',
+                    titre=f"Nouvelle olympiade : {olympiade.titre}",
+                    contenu=f"Une nouvelle olympiade '{olympiade.titre}' est disponible. Inscrivez-vous maintenant !",
+                    objet_id=olympiade.id,
+                    objet_type='Olympiade',
+                    action_url=f"/olympiades/{olympiade.id}/inscription"
+                )
 
         # ── Créer automatiquement un Devoir lié ──────────────────
         devoir_lie = Devoir.objects.create(

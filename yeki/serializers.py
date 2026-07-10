@@ -34,8 +34,6 @@ class ProfileSerializer(serializers.ModelSerializer):
 # REGISTER SERIALIZER
 # =======================
 
-# Dans serializers.py, modifiez la classe RegisterSerializer
-
 class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
     name = serializers.CharField(required=True)
@@ -56,7 +54,6 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value):
-        # ✅ Vérification email unique (insensible à la casse)
         if User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError("Cette adresse email est déjà utilisée.")
         return value
@@ -74,12 +71,10 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
-        # Vérification supplémentaire email unique (sécurité)
         email = validated_data.get('email')
         if User.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError({"email": "Cette adresse email est déjà utilisée."})
         
-        # Crée l'utilisateur Django
         user = User.objects.create(
             username=validated_data['username'],
             email=email,
@@ -87,7 +82,6 @@ class RegisterSerializer(serializers.Serializer):
         user.set_password(validated_data['password'])
         user.save()
 
-        # Crée le profil relié
         profile = Profile.objects.create(
             user=user,
             user_type=validated_data.get('user_type'),
@@ -116,10 +110,8 @@ class LoginSerializer(serializers.Serializer):
         identifier = data.get('identifier')
         password = data.get('password')
 
-        # login par username
         user = authenticate(username=identifier, password=password)
 
-        # login par email
         if user is None:
             try:
                 user_obj = User.objects.get(email=identifier)
@@ -229,12 +221,9 @@ class CoursSerializer(serializers.ModelSerializer):
 
 
 class CoursCreateSerializer(serializers.ModelSerializer):
-    # departement envoyé comme id (multipart ou json)
     departement = serializers.PrimaryKeyRelatedField(
         queryset=Departement.objects.all()
     )
-
-    # enseignant_principal optionnel
     enseignant_principal = serializers.PrimaryKeyRelatedField(
         queryset=Profile.objects.filter(user_type='enseignant_principal'),
         required=False,
@@ -264,7 +253,6 @@ class CoursCreateSerializer(serializers.ModelSerializer):
             'icon_name':         {'required': False},
         }
 
-    # ── Validation du département ────────────────────────────────
     def validate_departement(self, departement):
         request = self.context.get('request')
         if not request:
@@ -273,8 +261,6 @@ class CoursCreateSerializer(serializers.ModelSerializer):
             profile = request.user.profile
         except Profile.DoesNotExist:
             raise serializers.ValidationError("Profil introuvable.")
-
-        # Un cadre ne peut créer que dans SON département
         if profile.user_type == 'enseignant_cadre':
             if departement.cadre != profile:
                 raise serializers.ValidationError(
@@ -282,7 +268,6 @@ class CoursCreateSerializer(serializers.ModelSerializer):
                 )
         return departement
 
-    # ── Validation de l'enseignant principal ─────────────────────
     def validate_enseignant_principal(self, ep):
         if ep is not None and ep.user_type != 'enseignant_principal':
             raise serializers.ValidationError(
@@ -290,7 +275,6 @@ class CoursCreateSerializer(serializers.ModelSerializer):
             )
         return ep
 
-    # ── Validation globale ───────────────────────────────────────
     def validate(self, attrs):
         color = attrs.get('color_code', '#008080')
         if color and not color.startswith('#'):
@@ -354,10 +338,11 @@ class ModuleListSerializer(serializers.ModelSerializer):
         model = Module
         fields = ['id', 'titre', 'ordre', 'description']
 
+
 # =======================
 # DEPARTEMENT SERIALIZER
 # =======================
-class EnseignantCadreLightSerializer(serializers.ModelSerializer): # enseignant serializer joue le meme role
+class EnseignantCadreLightSerializer(serializers.ModelSerializer):
     user = UserSerializer()
     class Meta:
         model = Profile
@@ -396,7 +381,6 @@ class DepartementSerializer(serializers.ModelSerializer):
             try:
                 profile = request.user.profile
                 if profile.user_type == 'enseignant_cadre':
-                    from .models import DemandeAccesFormation
                     demandes = DemandeAccesFormation.objects.filter(
                         departement=obj,
                         statut='en_attente'
@@ -422,7 +406,6 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
         help_text="Liste des niveaux accessibles"
     )
 
-    # ✅ Traitement spécifique pour les dates
     date_limite_inscription = serializers.DateField(
         required=False, 
         allow_null=True,
@@ -472,7 +455,6 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
         }
     
     def validate(self, data):
-        # Validation spécifique pour le type de formation
         instance = self.instance
         if instance and instance.parcours.type_parcours == 'formation':
             est_metier = data.get('est_formation_metier', instance.est_formation_metier)
@@ -481,8 +463,6 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "Veuillez sélectionner au moins un type de formation (Métier ou Classique)"
                 )
-            
-            # Vérifier niveau_formation pour les formations métier
             if est_metier:
                 niveau = data.get('niveau_formation', instance.niveau_formation)
                 if niveau and niveau not in ['debutant', 'intermediaire', 'avance']:
@@ -492,19 +472,14 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
         return data
     
     def update(self, instance, validated_data):
-        # Gérer les niveaux accessibles séparément
         niveaux_accessibles = validated_data.pop('niveaux_accessibles', None)
-        
-        # Mettre à jour les autres champs
         for key, value in validated_data.items():
             setattr(instance, key, value)
-        
         if niveaux_accessibles is not None:
             if isinstance(niveaux_accessibles, list):
                 instance.niveaux_accessibles = ','.join(niveaux_accessibles)
             else:
                 instance.niveaux_accessibles = niveaux_accessibles
-        
         instance.save()
         return instance
 
@@ -537,7 +512,7 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
             'duree_formation', 'certificat_delivre', 'prerequis',
             'objectifs', 'domaine', 'ville', 'est_certifiante',
             'acces_restreint', 'niveaux_accessibles',
-            'niveau_formation'  # ✅ AJOUTÉ
+            'niveau_formation'
         ]
         extra_kwargs = {
             'description': {'required': False, 'allow_blank': True},
@@ -554,7 +529,6 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
         }
     
     def validate(self, data):
-        # Si c'est une formation, au moins un type doit être sélectionné
         parcours = data.get('parcours')
         if parcours and parcours.type_parcours == 'formation':
             est_metier = data.get('est_formation_metier', False)
@@ -563,8 +537,6 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "Veuillez sélectionner au moins un type de formation (Métier ou Classique)"
                 )
-            
-            # Vérifier que niveau_formation est valide pour les formations métier
             if est_metier:
                 niveau = data.get('niveau_formation', 'debutant')
                 if niveau not in ['debutant', 'intermediaire', 'avance']:
@@ -668,7 +640,6 @@ class LeconLightSerializer(serializers.ModelSerializer):
         return None
 
 
-
 class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
     lecons = LeconLightSerializer(many=True, read_only=True)
 
@@ -684,11 +655,6 @@ class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
 
 
 class ModuleUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer pour la MODIFICATION partielle d'un module.
-    Gère le conflit d'ordre : si l'ordre choisi est déjà pris
-    dans le même cours, on décale les autres modules.
-    """
     class Meta:
         model  = Module
         fields = ['titre', 'description', 'ordre']
@@ -705,28 +671,18 @@ class ModuleUpdateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         nouvel_ordre = validated_data.get('ordre')
-
-        # Si l'ordre change ET qu'un autre module occupe déjà cette position
         if nouvel_ordre and nouvel_ordre != instance.ordre:
             conflit = Module.objects.filter(
                 cours=instance.cours,
                 ordre=nouvel_ordre
             ).exclude(pk=instance.pk).first()
-
             if conflit:
-                # Échange des positions
                 conflit.ordre = instance.ordre
                 conflit.save(update_fields=['ordre'])
-
         return super().update(instance, validated_data)
 
 
 class LeconUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer pour la MODIFICATION partielle d'une leçon.
-    Tous les champs sont optionnels (PATCH).
-    Valide que le module cible appartient bien au même cours.
-    """
     class Meta:
         model  = Lecon
         fields = [
@@ -758,7 +714,6 @@ class LeconUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_module(self, module):
-        """Le module cible doit appartenir au même cours que la leçon."""
         if module is None:
             return module
         lecon = self.instance
@@ -796,11 +751,6 @@ class ChoixCreateSerializer(serializers.ModelSerializer):
 
 
 class QuestionCreateSerializer(serializers.ModelSerializer):
-    """
-    Crée une Question avec ses Choix imbriqués.
-    Les choix sont passés dans 'choix' : [{"texte": "..."}, ...]
-    La bonne réponse est passée dans 'bonne_reponse' (texte exact d'un choix).
-    """
     choix = ChoixCreateSerializer(many=True, required=False, default=[])
 
     class Meta:
@@ -823,12 +773,10 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         type_q = attrs.get('type_question', 'texte')
         choix  = attrs.get('choix', [])
-
         if type_q == 'qcm' and len(choix) < 2:
             raise serializers.ValidationError(
                 "Un QCM doit avoir au moins 2 choix."
             )
-
         bonne = attrs.get('bonne_reponse', '').strip()
         if type_q == 'qcm' and choix:
             textes = [c['texte'].strip() for c in choix]
@@ -885,11 +833,9 @@ class ReponseSerializer(serializers.ModelSerializer):
         return False
 
     def get_image_url(self, obj):
-        # Si la réponse a une image (modèle à étendre si nécessaire)
         return None
 
     def get_audio_url(self, obj):
-        # Si la réponse a un audio (modèle à étendre si nécessaire)
         return None
 
 
@@ -1031,7 +977,6 @@ class ExerciceSerializer(serializers.ModelSerializer):
         ]
 
     def get_nb_questions(self, obj):
-        """Retourne le nombre de questions de l'exercice"""
         return obj.questions.count()
 
 
@@ -1053,23 +998,19 @@ class ExerciceCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'type_exercice': {'required': False, 'default': 'general'},
             'est_epreuve': {'required': False, 'default': False},
-            'enonce': {'required': True},  # Rendre explicitement requis
+            'enonce': {'required': True},
         }
 
     def validate(self, data):
-        # Valider l'énoncé
         enonce = data.get('enonce', '').strip()
         if not enonce:
             raise serializers.ValidationError({"enonce": "L'énoncé est obligatoire."})
-        
-        # Si c'est une épreuve, elle doit contenir des exercices
         if data.get('est_epreuve', False):
             exercices = data.get('exercices_composes', [])
             if not exercices:
                 raise serializers.ValidationError(
                     "Une épreuve doit contenir au moins un exercice."
                 )
-            # Vérifier que tous les exercices existent
             for ex_id in exercices:
                 if not Exercice.objects.filter(id=ex_id.id).exists():
                     raise serializers.ValidationError(
@@ -1080,18 +1021,14 @@ class ExerciceCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         exercices_composes = validated_data.pop('exercices_composes', [])
         enonce_image = validated_data.pop('enonce_image', None)
-        
         exercice = Exercice.objects.create(**validated_data)
-        
         if enonce_image:
             exercice.enonce_image = enonce_image
             exercice.save()
-        
         if exercices_composes:
             exercice.exercices_composes.set(exercices_composes)
-            
         return exercice
-    
+
 
 class SessionSerializer(serializers.ModelSerializer):
     temps_restant = serializers.SerializerMethodField()
@@ -1101,7 +1038,7 @@ class SessionSerializer(serializers.ModelSerializer):
         fields = ["id", "exercice", "debut", "termine", "temps_restant"]
 
     def get_temps_restant(self, obj):
-        return obj.temps_restant()  # déjà défini dans ton modèle
+        return obj.temps_restant()
 
 
 class EvaluationSerializer(serializers.ModelSerializer):
@@ -1113,20 +1050,17 @@ class EvaluationSerializer(serializers.ModelSerializer):
         fields = ["id", "titre", "etoiles", "score", "total", "date"]
 
 
-# serializers.py - Modifications pour Devoir et Olympiade
-
-# ─────────────────────────────────────────────────────────────────
-# CHOIX / QUESTIONS
-# ─────────────────────────────────────────────────────────────────
+# ============================================================
+# SERIALIZERS DEVOIRS
+# ============================================================
 
 class ChoixReponseSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ChoixReponse
-        fields = ["id", "texte"]  # ⚠️ ne jamais exposer est_correct à l'apprenant !
+        fields = ["id", "texte"]
 
 
 class ChoixReponseAdminSerializer(serializers.ModelSerializer):
-    """Version enseignant — expose la bonne réponse."""
     class Meta:
         model  = ChoixReponse
         fields = ["id", "texte", "est_correct"]
@@ -1166,12 +1100,9 @@ class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         type_q = attrs.get('type_question', 'texte')
         choix  = attrs.get('choix', [])
-
         if type_q == 'qcm' and len(choix) < 2:
             raise serializers.ValidationError("Un QCM doit avoir au moins 2 choix.")
-
         if type_q == 'texte':
-            # Pour correction auto, reponse_attendue est obligatoire
             if self.context.get('type_correction') == 'auto':
                 if not attrs.get('reponse_attendue', '').strip():
                     raise serializers.ValidationError(
@@ -1192,15 +1123,10 @@ class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         choix_data = validated_data.pop('choix', None)
-        
-        # Mettre à jour les champs de base
         for key, value in validated_data.items():
             setattr(instance, key, value)
         instance.save()
-        
-        # Mettre à jour les choix si fournis
         if choix_data is not None:
-            # Supprimer les choix existants
             instance.choix.all().delete()
             for c in choix_data:
                 ChoixReponse.objects.create(
@@ -1208,7 +1134,6 @@ class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
                     texte=c.get('texte', ''),
                     est_correct=c.get('est_correct', False)
                 )
-        
         return instance
 
 
@@ -1220,12 +1145,7 @@ class QuestionDevoirDetailSerializer(serializers.ModelSerializer):
         fields = ["id", "enonce", "type_question", "points", "ordre", "choix"]
 
 
-# ─────────────────────────────────────────────────────────────────
-# DEVOIR
-# ─────────────────────────────────────────────────────────────────
-
 class DevoirListSerializer(serializers.ModelSerializer):
-    """Utilisé dans les listes — inclut le statut dynamique de l'apprenant."""
     statut_apprenant  = serializers.SerializerMethodField()
     note_apprenant    = serializers.SerializerMethodField()
     temps_restant_jours = serializers.SerializerMethodField()
@@ -1274,7 +1194,6 @@ class DevoirListSerializer(serializers.ModelSerializer):
 
 
 class DevoirDetailSerializer(serializers.ModelSerializer):
-    """Détail pour l'apprenant — questions sans bonnes réponses."""
     questions = QuestionDevoirDetailSerializer(many=True, read_only=True)
     peut_modifier_questions = serializers.BooleanField(read_only=True)
     nb_sorties = serializers.SerializerMethodField()
@@ -1324,36 +1243,28 @@ class DevoirCreateSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, data):
-        # Valider l'énoncé
         enonce = data.get('enonce', '').strip()
         if not enonce:
             raise serializers.ValidationError({"enonce": "L'énoncé est obligatoire."})
-        
         if data.get("date_limite") and data.get("date_debut"):
             if data["date_limite"] <= data["date_debut"]:
                 raise serializers.ValidationError(
                     "La date limite doit être postérieure à la date de début."
                 )
-        
-        # Pour correction manuelle, vérifier le fichier de correction
         if data.get('type_correction') == 'manuel':
             if not data.get('fichier_correction'):
                 raise serializers.ValidationError(
                     {"fichier_correction": "Un fichier PDF de correction est requis pour la correction manuelle."}
                 )
-        
         return data
 
     def create(self, validated_data):
         enonces_supp = validated_data.pop('enonces_supplementaires', [])
         source_devoir = validated_data.pop('source_devoir', None)
-        
         devoir = Devoir.objects.create(**validated_data)
-        
         if enonces_supp:
             devoir.enonces_supplementaires = enonces_supp
             devoir.save(update_fields=['enonces_supplementaires'])
-        
         return devoir
 
 
@@ -1383,7 +1294,6 @@ class DevoirUpdateSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, data):
-        # Si le devoir est déjà publié, on ne peut pas modifier l'énoncé ou les questions
         if self.instance and self.instance.est_publie:
             if 'enonce' in data:
                 raise serializers.ValidationError(
@@ -1393,16 +1303,10 @@ class DevoirUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"enonces_supplementaires": "Un devoir publié ne peut pas avoir de nouveaux énoncés."}
                 )
-        
         return data
 
 
-# ─────────────────────────────────────────────────────────────────
-# SOUMISSION
-# ─────────────────────────────────────────────────────────────────
-
 class ReponseSubmitSerializer(serializers.Serializer):
-    """Reçu du Flutter : {question_id: réponse, ...}"""
     reponses = serializers.DictField(
         child=serializers.CharField(allow_blank=True)
     )
@@ -1468,9 +1372,9 @@ class SoumissionResultatSerializer(serializers.ModelSerializer):
         return None
 
 
-# ─────────────────────────────────────────────────────────────────
-# OLYMPIADE
-# ─────────────────────────────────────────────────────────────────
+# ============================================================
+# SERIALIZERS OLYMPIADES
+# ============================================================
 
 class OlympiadeListSerializer(serializers.ModelSerializer):
     statut              = serializers.SerializerMethodField()
@@ -1533,7 +1437,6 @@ class OlympiadeListSerializer(serializers.ModelSerializer):
 
 
 class OlympiadeDetailSerializer(OlympiadeListSerializer):
-    """Inclut les questions seulement si l'olympiade est EN COURS pour l'apprenant inscrit."""
     questions = serializers.SerializerMethodField()
 
     class Meta(OlympiadeListSerializer.Meta):
@@ -1544,21 +1447,16 @@ class OlympiadeDetailSerializer(OlympiadeListSerializer):
         inscription = InscriptionOlympiade.objects.filter(
             olympiade=obj, apprenant=user, soumis=False
         ).first()
-
-        # Questions visibles uniquement si l'olympiade est en cours ET l'apprenant a démarré
         if not inscription or not inscription.session_demarree:
             return []
         if obj.statut_auto != "en_cours":
             return []
-
         questions = obj.devoir.questions.all() if obj.devoir else []
         data = QuestionDevoirSerializer(questions, many=True).data
-
-        # Mélange côté serveur si activé
         if obj.melanger_questions:
             import random
             data_list = list(data)
-            random.seed(str(user.id) + str(obj.id))  # seed déterministe par participant
+            random.seed(str(user.id) + str(obj.id))
             random.shuffle(data_list)
             return data_list
         return data
@@ -1598,12 +1496,10 @@ class OlympiadeCreateSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, data):
-        # Validation des dates
         date_ouv_insc = data.get('date_ouverture_inscription')
         date_clo_insc = data.get('date_cloture_inscription')
         date_debut = data.get('date_debut_olympiade')
         date_fin = data.get('date_fin_olympiade')
-
         if date_clo_insc >= date_debut:
             raise serializers.ValidationError(
                 "La clôture des inscriptions doit être avant le début de l'olympiade."
@@ -1616,7 +1512,6 @@ class OlympiadeCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "L'ouverture des inscriptions doit être avant leur clôture."
             )
-
         return data
 
 
@@ -1660,7 +1555,6 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     avatar = serializers.SerializerMethodField()
 
-    # Champs user.first/last_name exposés à plat
     first_name = serializers.CharField(source="user.first_name", read_only=True)
     last_name  = serializers.CharField(source="user.last_name",  read_only=True)
     email      = serializers.CharField(source="user.email",      read_only=True)
@@ -1683,7 +1577,7 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.avatar.url)
             return obj.avatar.url
         return None
-    
+
 
 class ReponseSerializer(serializers.ModelSerializer):
     auteur_nom      = serializers.CharField(source="auteur.get_full_name", read_only=True)
@@ -1725,7 +1619,7 @@ class QuestionForumCreateSerializer(serializers.ModelSerializer):
             "lecon_id", "lecon_titre", "cours_id", "cours_titre",
             "exercice_id", "exercice_titre",
             "devoir_id", "devoir_titre",
-            "image", "audio",  # ⚠️ AJOUTÉ
+            "image", "audio",
         ]
 
     def create(self, validated_data):
@@ -1759,6 +1653,7 @@ class HistoriqueActiviteSerializer(serializers.ModelSerializer):
         u = obj.user
         return f"{u.first_name} {u.last_name}".strip() or u.username
 
+
 class AppVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppVersion
@@ -1778,6 +1673,7 @@ class AppVersionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at']
 
+
 class AppVersionCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppVersion
@@ -1792,3 +1688,29 @@ class AppVersionCreateSerializer(serializers.ModelSerializer):
             'is_active',
             'file_size',
         ]
+
+
+# ============================================================
+# SERIALIZERS NOTIFICATIONS
+# ============================================================
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'type', 'titre', 'contenu', 
+            'est_lue', 'cree_le', 'action_url'
+        ]
+
+
+class NotificationCreateSerializer(serializers.Serializer):
+    utilisateur_id = serializers.IntegerField()
+    type = serializers.ChoiceField(choices=Notification.TYPE_CHOICES)
+    titre = serializers.CharField()
+    contenu = serializers.CharField()
+    objet_id = serializers.IntegerField(required=False, allow_null=True)
+    objet_type = serializers.CharField(required=False, allow_blank=True)
+    action_url = serializers.CharField(required=False, allow_blank=True)
+
+    def create(self, validated_data):
+        return Notification.objects.create(**validated_data)

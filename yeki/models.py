@@ -4,7 +4,6 @@ import uuid
 from django.db import models
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.auth.models import User
-#import mammoth
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -84,7 +83,6 @@ class PasswordResetOTP(models.Model):
 
     def __str__(self):
         return f"OTP {self.code} → {self.user.username} ({'✓' if self.used else '⏳'})"
-
 
 
 # --- NIVEAU 1 ---
@@ -639,7 +637,7 @@ class Question(models.Model):
     text = models.TextField()
     type_question = models.CharField(max_length=10, choices=TYPE_CHOICES)
     bonne_reponse = models.CharField(max_length=255)
-    points = models.IntegerField(default=1)
+    points = models.FloatField(default=1.0)
 
     def __str__(self):
         return self.text
@@ -656,14 +654,36 @@ class Choix(models.Model):
 class EvaluationExercice(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE)
-    score = models.IntegerField()
-    total = models.IntegerField()
+    score = models.FloatField(default=0.0)
+    total = models.FloatField(default=0.0)
     date = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.user.username} - {self.exercice.titre} ({self.score}/{self.total})"
 
-# models.py - Modifications pour Devoir et Olympiade
+
+class ReponseExercice(models.Model):
+    """
+    Stocke la réponse d'un apprenant à une question d'exercice.
+    Permet l'historique détaillé des tentatives.
+    """
+    evaluation = models.ForeignKey(EvaluationExercice, on_delete=models.CASCADE, related_name='reponses')
+    question = models.ForeignKey(Question, on_delete=models.CASCADE)
+    reponse = models.TextField(blank=True)
+    est_correct = models.BooleanField(default=False)
+    points_obtenus = models.FloatField(default=0.0)
+
+    class Meta:
+        verbose_name = 'Réponse d\'exercice'
+        verbose_name_plural = 'Réponses d\'exercices'
+
+    def __str__(self):
+        return f"Réponse à {self.question.text[:30]} - {self.evaluation.user.username}"
+
+
+# ============================================================
+# DEVOIR GÉNÉRAL (cursus, concours, formation classique/métier)
+# ============================================================
 
 class Devoir(models.Model):
     # ── Type de devoir ──────────────────────────────────────────
@@ -1088,7 +1108,6 @@ class ClassementOlympiade(models.Model):
 # QUESTION FORUM
 # Peut être liée à une leçon, un exercice ou un devoir
 # ─────────────────────────────────────────────────────────────────
-# models.py - Ajoutez ces champs à la classe QuestionForum
 
 class QuestionForum(models.Model):
     SOURCE_CHOICES = [
@@ -1130,7 +1149,7 @@ class QuestionForum(models.Model):
     )
 
     class Meta:
-        ordering = ["-cree_le"]  # ⚠️ CORRECTION : Plus récent en premier
+        ordering = ["-cree_le"]
 
     def __str__(self):
         return f"[{self.source}] {self.auteur.username} — {self.contenu[:60]}"
@@ -1174,16 +1193,6 @@ class ReponseImage(models.Model):
 
     def __str__(self):
         return f"Image de réponse {self.reponse.id}"
-
-        
-'''@receiver(post_save, sender=Lecon)
-def convertir_docx_en_html(sender, instance, **kwargs):
-    if instance.fichier and instance.fichier.name.endswith(".docx"):
-        with open(instance.fichier.path, "rb") as docx_file:
-            result = mammoth.convert_to_html(docx_file)
-            html = result.value  # HTML du contenu
-            instance.contenu_html = html
-            instance.save()'''
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1314,10 +1323,10 @@ def enregistrer_activite(
             objet_id    = objet_id,
             objet_type  = objet_type,
         )
+        return True
     except Exception:
-        pass   # Ne jamais bloquer une view à cause du journal
+        return False  # Ne jamais bloquer une view à cause du journal
 
-# models.py - Correction des conflits de relations
 
 class Paiement(models.Model):
     """
@@ -1330,7 +1339,7 @@ class Paiement(models.Model):
         ('abonnement_annuel',   'Abonnement annuel cursus'),
         ('acces_departement',   'Accès département (concours/formation)'),
         ('olympiade',           'Participation olympiade'),
-        ('olympiade_participation', 'Participation apprenant à une olympiade'),  # Nouveau type
+        ('olympiade_participation', 'Participation apprenant à une olympiade'),
     ]
     MOYEN_CHOICES = [
         ('mtn_momo',  'MTN Mobile Money'),
@@ -1361,7 +1370,7 @@ class Paiement(models.Model):
     # Lien optionnel vers olympiade (pour paiement global)
     olympiade_liee = models.ForeignKey(
         Olympiade, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='paiements_globaux')  # ✅ related_name unique
+        null=True, blank=True, related_name='paiements_globaux')
 
     # Commission Yeki prélevée (15% si paiement > 0 pour département)
     commission_yeki = models.PositiveIntegerField(
@@ -1402,7 +1411,7 @@ class PaiementOlympiade(models.Model):
     olympiade = models.ForeignKey(
         Olympiade,
         on_delete=models.CASCADE,
-        related_name='paiements_participants'  # ✅ related_name unique
+        related_name='paiements_participants'
     )
     montant = models.PositiveIntegerField()
     statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='en_attente')
@@ -1424,6 +1433,7 @@ class PaiementOlympiade(models.Model):
     def __str__(self):
         return f"{self.apprenant.username} → {self.olympiade.titre} ({self.statut})"
     
+
 # ══════════════════════════════════════════════════════════════════
 # ABONNEMENT PREMIUM
 # ══════════════════════════════════════════════════════════════════
@@ -1575,7 +1585,6 @@ class YekiIAPersonalite(models.Model):
 # La commission Yeki (IA) va dans le compte principal Yeki.
 # ══════════════════════════════════════════════════════════════════
 
-# Tarification IA Yeki
 TARIF_IA_PAR_TOKEN = 0.002          # 0.002 FCFA par token OpenAI (gpt-3.5-turbo)
 COMMISSION_YEKI_IA = 5              # 5 FCFA commission Yeki par requête IA
 TARIF_IA_MIN_PAR_REQUETE = 10       # minimum 10 FCFA par requête IA
@@ -1726,9 +1735,6 @@ class YekiIAChatHistorique(models.Model):
         return f"[{self.role}] {self.apprenant.username} — {self.cours.titre} — {self.cree_le:%d/%m %H:%M}"
 
 
-# models.py - Transaction
-
-
 class CinetPayTransaction(models.Model):
     """Transaction CinetPay"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cinetpay_transactions')
@@ -1750,10 +1756,9 @@ class CinetPayTransaction(models.Model):
     
     def __str__(self):
         return f"CinetPay {self.reference} - {self.status}"
-    
+
 
 class AppVersion(models.Model):
-    
     PLATFORM_CHOICES = [
         ('android', 'Android'),
         ('desktop', 'Desktop'),
@@ -1813,7 +1818,6 @@ class AppVersion(models.Model):
     def __str__(self):
         return f"{self.get_platform_display()} - {self.version_name} (code: {self.version_code})"
 
-# models.py - Ajouter à la fin du fichier
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTÈME DE RANG DES APPRENANTS PAR DÉPARTEMENT
@@ -1892,14 +1896,84 @@ class ScoreDetail(models.Model):
         return f"{self.categorie}: {self.score:.1f} (poids {self.poids})"
 
 
-# Ajouter un modèle pour stocker les réponses détaillées
-class ReponseExercice(models.Model):
+# ═══════════════════════════════════════════════════════════════════════════
+# NOTIFICATIONS IN-APP
+# ═══════════════════════════════════════════════════════════════════════════
+
+class Notification(models.Model):
     """
-    Stocke la réponse d'un apprenant à une question d'exercice.
-    Permet l'historique détaillé des tentatives.
+    Notification in-app pour les utilisateurs.
+    Types:
+    - devoir: nouveau devoir publié
+    - correction: devoir/exercice corrigé
+    - olympiade: olympiade créée/à venir
+    - rappel: rappel de date limite
+    - classement: changement de rang
+    - forum: réponse à une question
+    - system: notification système
     """
-    evaluation = models.ForeignKey(EvaluationExercice, on_delete=models.CASCADE, related_name='reponses')
-    question = models.ForeignKey(Question, on_delete=models.CASCADE)
-    reponse = models.TextField(blank=True)
-    est_correct = models.BooleanField(default=False)
-    points_obtenus = models.FloatField(default=0.0)
+    TYPE_CHOICES = [
+        ('devoir', 'Devoir'),
+        ('correction', 'Correction'),
+        ('olympiade', 'Olympiade'),
+        ('rappel', 'Rappel'),
+        ('classement', 'Classement'),
+        ('forum', 'Forum'),
+        ('system', 'Système'),
+    ]
+
+    utilisateur = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='notifications'
+    )
+    type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='system')
+    titre = models.CharField(max_length=255)
+    contenu = models.TextField()
+    est_lue = models.BooleanField(default=False)
+    cree_le = models.DateTimeField(auto_now_add=True)
+    
+    # Lien vers l'objet concerné (optionnel)
+    objet_id = models.PositiveIntegerField(null=True, blank=True)
+    objet_type = models.CharField(max_length=50, blank=True)
+    action_url = models.CharField(max_length=500, blank=True, help_text="URL de redirection")
+
+    class Meta:
+        ordering = ['-cree_le']
+        indexes = [
+            models.Index(fields=['utilisateur', 'est_lue']),
+            models.Index(fields=['utilisateur', 'cree_le']),
+        ]
+        verbose_name = 'Notification'
+        verbose_name_plural = 'Notifications'
+
+    def __str__(self):
+        return f"{self.titre} → {self.utilisateur.username} ({'lue' if self.est_lue else 'non lue'})"
+
+
+# Helper pour créer une notification
+def creer_notification(
+    utilisateur,
+    type_notif: str,
+    titre: str,
+    contenu: str,
+    objet_id: int = None,
+    objet_type: str = '',
+    action_url: str = '',
+):
+    """
+    Crée une notification pour un utilisateur.
+    """
+    try:
+        Notification.objects.create(
+            utilisateur=utilisateur,
+            type=type_notif,
+            titre=titre,
+            contenu=contenu,
+            objet_id=objet_id,
+            objet_type=objet_type,
+            action_url=action_url,
+        )
+        return True
+    except Exception:
+        return False
