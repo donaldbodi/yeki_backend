@@ -11,18 +11,33 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 import os
+import environ
 from pathlib import Path
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# ── Variables d'environnement ───────────────────────────────────────────────
+# Toutes les valeurs sensibles (clé secrète Django, identifiants email, clés
+# API de paiement) sont lues depuis l'environnement, jamais codées en dur.
+# En local : copier .env.example vers .env à la racine du projet (à côté de
+# manage.py) et renseigner les valeurs réelles (jamais commité, voir .gitignore).
+# En production (PythonAnywhere) : définir les variables directement dans la
+# configuration de l'environnement du serveur ; le fichier .env n'est alors
+# pas nécessaire (read_env() ignore silencieusement son absence).
+env = environ.Env()
+environ.Env.read_env(str(BASE_DIR / '.env'))
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-q^_-_xu=%8i54x&65v*nm6u$@c9y=avyrhyfnu!zb%)l6msm+8"
+# Volontairement SANS valeur par défaut : si SECRET_KEY est absente de
+# l'environnement, le démarrage doit échouer plutôt que de tourner avec une
+# clé de test ou (pire) une clé devinable.
+SECRET_KEY = env('SECRET_KEY')
 DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -53,13 +68,20 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # CorsMiddleware doit être le plus haut possible et impérativement avant
+    # CommonMiddleware (exigence django-cors-headers) : sinon les réponses
+    # court-circuitées par les middlewares au-dessus (redirections, erreurs)
+    # ne reçoivent jamais les en-têtes CORS → bugs CORS intermittents en web.
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # LocaleMiddleware : après SessionMiddleware, avant CommonMiddleware
+    # (position exigée par Django). Interface en français, voir LANGUAGE_CODE.
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    'corsheaders.middleware.CorsMiddleware',
 ]
 
 
@@ -69,8 +91,13 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
-        #'rest_framework.permissions.IsAuthenticated',
+        # API fermée par défaut : toute vue future sans permission_classes
+        # explicite exige désormais une authentification, plutôt que d'être
+        # publique en écriture sans que personne ne le remarque. Les rares
+        # endpoints réellement publics (login, register, mot de passe oublié,
+        # niveaux par département, landing, version d'app, webhook CinetPay)
+        # déclarent AllowAny explicitement sur leur propre vue.
+        'rest_framework.permissions.IsAuthenticated',
     ],
 }
 
@@ -131,7 +158,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "fr"
 
 TIME_ZONE = "UTC"
 
@@ -156,21 +183,18 @@ MEDIA_ROOT = BASE_DIR / 'media'
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# ── Email (Gmail SMTP exemple) ─────────────────────────────────────────────
+# ── Email (Gmail SMTP) ──────────────────────────────────────────────────────
 EMAIL_BACKEND       = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST          = 'smtp.gmail.com'
 EMAIL_PORT          = 587
 EMAIL_USE_TLS       = True
-EMAIL_HOST_USER     = 'mdonabodi99@gmail.com'       # ← votre email Gmail
-EMAIL_HOST_PASSWORD = 'ihbm wygs siyd pbxp'           # ← mot de passe d'application Gmail
-DEFAULT_FROM_EMAIL  = 'mdonabodi99@gmail.com'
+EMAIL_HOST_USER     = env('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD')      # mot de passe d'application Gmail
+DEFAULT_FROM_EMAIL  = EMAIL_HOST_USER
 
 
-# ── Sur PythonAnywhere (variables d'environnement recommandées) ────────────
-
-#EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '')
-#EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-
-# CinetPay
-CINETPAY_API_KEY = os.environ.get('CINETPAY_API_KEY', '105602915965f9bc03546e76.59333046')
-CINETPAY_SITE_ID = os.environ.get('CINETPAY_SITE_ID', '181053')
+# ── CinetPay (paiement) ──────────────────────────────────────────────────────
+# Volontairement SANS valeur par défaut : une clé de paiement absente ne doit
+# jamais retomber silencieusement sur une clé active codée en dur.
+CINETPAY_API_KEY = env('CINETPAY_API_KEY')
+CINETPAY_SITE_ID = env('CINETPAY_SITE_ID')

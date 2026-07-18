@@ -1,0 +1,21 @@
+# Cœur Django/DRF — absents de ce fichier jusqu'ici alors qu'installés
+# manuellement dans le venv (lacune pré-existante découverte en P1.6 : un
+# `pip install -r requirements.txt` sur une machine propre ou en CI
+# n'installait ni Django ni DRF). Versions figées = celles réellement en
+# service dans le venv de développement.
+Django==5.2.4
+djangorestframework==3.16.0
+django-cors-headers==4.9.0
+requests==2.34.2
+django-environ==0.14.0
+psycopg2-binary==2.9.12
+python-dateutil==2.9.0.post0
+Pillow==11.1.0
+
+# P1.6 — documentation API + tests
+drf-spectacular==0.28.0
+pytest==8.3.4
+pytest-django==4.9.0
+pytest-cov==6.0.0
+ruff==0.8.6
+black==24.10.0

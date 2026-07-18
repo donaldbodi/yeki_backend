@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  # Valeurs factices : suffisent pour que Django démarre en environnement de
+  # test (config/settings/test.py, base SQLite en mémoire) sans jamais
+  # envoyer de vrais e-mails ni appeler la vraie API CinetPay. Les vraies
+  # valeurs restent uniquement dans le .env de production, jamais commitées.
+  SECRET_KEY: ci-test-secret-key-not-for-production
+  EMAIL_HOST_USER: ci-test@example.com
+  EMAIL_HOST_PASSWORD: ci-test-password
+  CINETPAY_API_KEY: ci-test-key
+  CINETPAY_SITE_ID: ci-test-site-id
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff black
+      - run: ruff check .
+      - run: black --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest --cov=apps --cov-report=term-missing
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

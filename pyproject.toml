@@ -1,0 +1,23 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = "--reuse-db"
+
+[tool.ruff]
+line-length = 100
+# `yeki/` = monolithe pré-éclatement, en cours de suppression progressive
+# (CDC_BACKEND §3.1, docs/SPLIT_VIEWS.md) : hors périmètre du lint, ce n'est
+# pas du code destiné à perdurer.
+exclude = ["migrations", "venv", ".venv", "staticfiles", "media", "yeki"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # black gère déjà la longueur de ligne
+    "F405",  # faux positifs attendus : config/settings/*.py fait `from .base import *`
+]
+
+[tool.black]
+line-length = 100
+extend-exclude = "(migrations|yeki)"
