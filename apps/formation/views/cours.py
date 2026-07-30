@@ -43,7 +43,7 @@ from apps.formation.serializers import (
     LeconUpdateSerializer,
     LeconSerializer,
 )
-from apps.formation.services import _progression_cours
+from apps.formation.services import _progression_cours, niveaux_distincts, niveaux_formation_disponibles
 
 
 @extend_schema_view(
@@ -68,12 +68,32 @@ class ListeNiveauxView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Récupérer tous les niveaux distincts depuis les cours existants
-        niveaux = Cours.objects.values_list("niveau", flat=True).distinct().order_by("niveau")
+        return Response(niveaux_distincts())
 
-        resultats = list(niveaux)
 
-        return Response(sorted(resultats))
+@extend_schema_view(
+    get=extend_schema(
+        summary="Lister les niveaux de formation professionnelle disponibles",
+        description=(
+            "Retourne les niveaux de formation (formations métier) sous la "
+            "forme `[{code, label}, ...]`. Liste fermée mais administrable "
+            "sans redéploiement (`ParametreSysteme`, clé "
+            "`niveaux_formation_disponibles`) — P11.6."
+        ),
+        tags=["formation"],
+        responses={200: OpenApiTypes.OBJECT},
+        examples=[*ERREURS_COURANTES],
+    ),
+)
+class ListeNiveauxFormationView(APIView):
+    """
+    GET /api/niveaux-formation/
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(niveaux_formation_disponibles())
 
 
 @extend_schema_view(
@@ -473,12 +493,7 @@ class DepartementNiveauxAPIView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, departement_id):
-        niveaux = (
-            Cours.objects.filter(departement_id=departement_id)
-            .values_list("niveau", flat=True)
-            .distinct()
-        )
-        return Response(niveaux)
+        return Response(niveaux_distincts(departement_id))
 
 
 # TODO(audit): vue orpheline, non routée (docs/AUDIT_BACKEND.md §4).
@@ -489,8 +504,8 @@ class DepartementNiveauxAPIView(APIView):
         "son rôle : tous les cours pour admin/enseignant_admin, les cours du "
         "département pour un enseignant_cadre, les cours dont il est enseignant "
         "principal pour un enseignant_principal, ses cours secondaires pour un "
-        "enseignant. Non câblée à ce jour dans les urls (lacune de routage "
-        "documentée, hors périmètre)."
+        "enseignant. Câblée en P9.6 (`GET /cours/`) — alimente l'onglet "
+        "« Tous les cours » de l'administration générale."
     ),
     tags=["formation"],
     parameters=[*PARAMS_PAGINATION],
@@ -500,17 +515,20 @@ class DepartementNiveauxAPIView(APIView):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def liste_cours(request):
-    user = request.user
+    # `user_type` et les FK `Cours.enseignant_principal`/`Departement.cadre`/
+    # `cours_secondaires` vivent tous sur `Profile`, jamais directement sur
+    # `User` (bug trouvé en câblant cette vue en P9.6 — jamais exercé avant
+    # puisque la route n'existait pas encore).
+    profile = request.user.profile
 
-    if getattr(user, "user_type", None) in ["admin", "enseignant_admin"]:
+    if profile.user_type in ["admin", "enseignant_admin"]:
         qs = Cours.objects.all()
-    elif getattr(user, "user_type", None) == "enseignant_cadre":
-        qs = Cours.objects.filter(departement__cadre=user)
-    elif getattr(user, "user_type", None) == "enseignant_principal":
-        qs = Cours.objects.filter(enseignant_principal=user)
-    elif getattr(user, "user_type", None) == "enseignant":
-        # relation ManyToMany 'cours_secondaires' supposée exister sur le modèle
-        qs = user.cours_secondaires.all()
+    elif profile.user_type == "enseignant_cadre":
+        qs = Cours.objects.filter(departement__cadre=profile)
+    elif profile.user_type == "enseignant_principal":
+        qs = Cours.objects.filter(enseignant_principal=profile)
+    elif profile.user_type == "enseignant":
+        qs = profile.cours_secondaires.all()
     else:
         return Response({"error": "Rôle non géré"}, status=status.HTTP_403_FORBIDDEN)
 

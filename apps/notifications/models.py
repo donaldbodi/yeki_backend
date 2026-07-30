@@ -22,6 +22,7 @@ class Notification(models.Model):
     - classement: changement de rang
     - forum: réponse à une question
     - system: notification système
+    - paiement: demande de paiement manuel validée/refusée (P9.2)
     """
 
     TYPE_CHOICES = [
@@ -32,6 +33,7 @@ class Notification(models.Model):
         ("classement", "Classement"),
         ("forum", "Forum"),
         ("system", "Système"),
+        ("paiement", "Paiement"),
     ]
 
     utilisateur = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
@@ -44,7 +46,12 @@ class Notification(models.Model):
     # Lien vers l'objet concerné (optionnel)
     objet_id = models.PositiveIntegerField(null=True, blank=True)
     objet_type = models.CharField(max_length=50, blank=True)
-    action_url = models.CharField(max_length=500, blank=True, help_text="URL de redirection")
+    # P10.3 : renommé depuis `action_url` — aligné sur le nom utilisé par le
+    # CDC_BACKEND et par la charge utile FCM (`data.action_route`), un seul
+    # nom à travers backend + payload + frontend. Chemin go_router déjà
+    # résolu (IDs réels substitués), navigable via `context.go(...)` côté
+    # Flutter (pas un nom de route — go_router route aussi bien par chemin).
+    action_route = models.CharField(max_length=500, blank=True, help_text="Chemin de redirection (go_router)")
 
     class Meta:
         db_table = "yeki_notification"
@@ -99,25 +106,36 @@ def creer_notification(
     contenu: str,
     objet_id: int = None,
     objet_type: str = "",
-    action_url: str = "",
+    action_route: str = "",
 ):
     """
-    Crée une notification pour un utilisateur.
+    Crée une notification pour un utilisateur, et déclenche l'envoi push
+    FCM correspondant EN TÂCHE DE FOND (P10.3 : jamais dans le cycle de
+    requête — un envoi FCM lent ne doit jamais bloquer la réponse HTTP de
+    l'action qui a déclenché cette notification, ex. publication d'un
+    devoir).
     """
     try:
-        Notification.objects.create(
+        notification = Notification.objects.create(
             utilisateur=utilisateur,
             type=type_notif,
             titre=titre,
             contenu=contenu,
             objet_id=objet_id,
             objet_type=objet_type,
-            action_url=action_url,
+            action_route=action_route,
         )
-        return True
     except Exception:
         # Volontairement large : une notification in-app est un
         # accessoire — elle ne doit jamais faire échouer l'action métier
         # (création de devoir, correction, etc.) qui l'a déclenchée.
         logger.exception("Échec création Notification (type=%s)", type_notif)
         return False
+
+    # Import différé : évite un import lourd (firebase_admin) au chargement
+    # de ce module, et un cycle potentiel (apps.notifications.fcm importe
+    # des éléments qui peuvent dépendre indirectement de ce module).
+    from apps.notifications.fcm import envoyer_push_async
+
+    envoyer_push_async(notification)
+    return True

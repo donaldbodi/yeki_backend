@@ -16,7 +16,8 @@ from drf_spectacular.types import OpenApiTypes
 
 from apps.accounts.models import Profile
 from apps.core.schema_examples import ERREURS_COURANTES
-from apps.evaluation.models import Devoir, SoumissionDevoir, EvaluationExercice
+from apps.evaluation.models import Devoir, SoumissionDevoir
+from apps.evaluation.services import ClassementService
 from apps.formation.models import Departement, Cours, Lecon, ProgressionLecon
 
 logger = logging.getLogger(__name__)
@@ -199,12 +200,18 @@ class EnseignantCadreDashboardView(APIView):
                     )
                 )
 
-                # Score moyen à partir des évaluations
-                avg = EvaluationExercice.objects.filter(
-                    exercice__cours__enseignant_principal=ep,
-                    exercice__cours__departement__in=departements,
-                ).aggregate(moy=Avg("score"))["moy"]
-                score_moyen = round((avg or 0) / 20 * 20, 1)
+                # Somme brute des points d'exercices (pas de moyenne, P6.1).
+                # Clé JSON `score_moyen` conservée telle quelle (ticket
+                # backend seul, `cadre_dashboard_page.dart:1141` la
+                # consomme) bien que le nom devienne trompeur — un
+                # renommage exigerait une modification frontend coordonnée,
+                # hors périmètre de ce ticket.
+                score_moyen = round(
+                    ClassementService.score_total_exercices_enseignant(
+                        ep, departements=departements
+                    ),
+                    1,
+                )
 
                 enseignants_data.append(
                     {

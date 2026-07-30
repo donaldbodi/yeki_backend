@@ -5,6 +5,8 @@ from apps.notifications.views import (
     MarquerNotificationLueView,
     MarquerToutesNotificationsLuesView,
     NotificationsNonLuesView,
+    DeviceTokenView,
+    DeviceTokenDeleteView,
 )
 
 urlpatterns = [
@@ -21,5 +23,13 @@ urlpatterns = [
     ),
     path(
         "notifications/non-lues/", NotificationsNonLuesView.as_view(), name="notifications-non-lues"
+    ),
+    path(
+        "notifications/device-token/", DeviceTokenView.as_view(), name="notifications-device-token"
+    ),
+    path(
+        "notifications/device-token/<str:token>/",
+        DeviceTokenDeleteView.as_view(),
+        name="notifications-device-token-delete",
     ),
 ]

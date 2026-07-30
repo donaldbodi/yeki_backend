@@ -1,13 +1,12 @@
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Avg, Sum
 from django.shortcuts import get_object_or_404
 
 from rest_framework import status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from drf_spectacular.types import OpenApiTypes
@@ -291,15 +290,22 @@ class AssignAdminView(APIView):
 
 
 @extend_schema(
-    summary="Lister les parcours",
-    description="Retourne la liste paginée de tous les parcours (Cursus, Prépa Concours, Formations, etc.).",
+    summary="Lister les parcours (public)",
+    description=(
+        "Retourne la liste paginée de tous les parcours (Cursus, Prépa Concours, "
+        "Formations, etc.). Vue publique consultée depuis le formulaire "
+        "d'inscription, avant connexion."
+    ),
     tags=["formation"],
     parameters=[*PARAMS_PAGINATION],
     responses={200: ParcoursSerializer(many=True)},
     examples=[EXEMPLE_PAGINATION, *ERREURS_COURANTES],
 )
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])  # public : consulté depuis le formulaire d'inscription
+# (register_page.dart → _fetchCursus), avant connexion — bug corrigé en P5.4
+# (restait IsAuthenticated alors qu'appelé avant connexion, contrairement à
+# ses deux voisins departements_par_parcours/DepartementNiveauxAPIView)
 def liste_parcours(request):
     parcours = Parcours.objects.select_related("admin").all()
     paginator = YekiPageNumberPagination()
@@ -498,7 +504,7 @@ class ApprenantConcoursFormationsView(PaginatedListMixin, APIView):
 
 @extend_schema(
     summary="Statistiques globales des parcours",
-    description="Retourne le total d'apprenants, de cours et la moyenne globale agrégés sur tous les parcours.",
+    description="Retourne le total d'apprenants et de cours agrégés sur tous les parcours.",
     tags=["formation"],
     responses={200: OpenApiTypes.OBJECT},
     examples=[*ERREURS_COURANTES],
@@ -506,15 +512,22 @@ class ApprenantConcoursFormationsView(PaginatedListMixin, APIView):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def statistiques_globales(request):
-    total_apprenants = Parcours.objects.aggregate(Sum("apprenants"))["apprenants__sum"] or 0
-    total_cours = Parcours.objects.aggregate(Sum("cours"))["cours__sum"] or 0
-    moyenne_globale = Parcours.objects.aggregate(Avg("moyenne"))["moyenne__avg"] or 0.0
+    # Bug pré-existant découvert et corrigé en P6.1 (décision actée avec
+    # l'utilisateur) : `Parcours` n'a jamais eu de champs `apprenants`/
+    # `cours`/`moyenne` — les 3 agrégats plantaient (FieldError) au premier
+    # appel. Endpoint confirmé non appelé par le frontend (aucune
+    # référence à `statistiques-globales` côté Flutter) : corrigé avec les
+    # vraies relations plutôt que remplacé par un nouveau calcul de
+    # moyenne non demandé (règle P6.1 : abandon des moyennes, pas
+    # d'invention d'une fonctionnalité non demandée) — `moyenne_globale`
+    # est donc retirée de la réponse, pas remplacée.
+    total_apprenants = Profile.objects.filter(user_type="apprenant").count()
+    total_cours = Cours.objects.count()
 
     return Response(
         {
             "total_apprenants": total_apprenants,
             "total_cours": total_cours,
-            "moyenne_globale": round(moyenne_globale, 2),
         },
         status=status.HTTP_200_OK,
     )

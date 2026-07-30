@@ -99,6 +99,27 @@ def user_apprenant(db, departement):
 
 
 @pytest.fixture
+def user_apprenant_premium(db, departement):
+    """
+    P9.1 : apprenant avec AbonnementPremium actif — à utiliser dans tout
+    test dont le sujet n'est PAS la matrice d'accès Gratuit/Premium
+    elle-même (mécanique de devoir, d'exercice, etc.), pour éviter qu'un
+    403 de AccesMatricePermission ne fausse un test sans rapport.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.paiement.models import AbonnementPremium
+
+    user = _creer_utilisateur("apprenant_premium_test", "apprenant", departement=departement)
+    AbonnementPremium.objects.create(
+        utilisateur=user, type_abonnement="mensuel", actif=True, fin=timezone.now() + timedelta(days=30)
+    )
+    return user
+
+
+@pytest.fixture
 def user_enseignant(db):
     return _creer_utilisateur("enseignant_test", "enseignant")
 
@@ -146,6 +167,11 @@ def _client_authentifie(user):
 @pytest.fixture
 def client_apprenant(user_apprenant):
     return _client_authentifie(user_apprenant)
+
+
+@pytest.fixture
+def client_apprenant_premium(user_apprenant_premium):
+    return _client_authentifie(user_apprenant_premium)
 
 
 @pytest.fixture

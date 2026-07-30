@@ -125,6 +125,11 @@ class Question(models.Model):
         default=1.0,
         validators=[MinValueValidator(0.25), valider_pas_de_0_25],
     )
+    # P6.2 : explication pédagogique de la bonne réponse, rédigée par
+    # l'enseignant — capturée dans le snapshot figé de chaque tentative
+    # (ExerciceTentative.reponses) pour que l'historique reste
+    # auto-suffisant même si la question est modifiée par la suite.
+    explication = models.TextField(blank=True, default="")
 
     class Meta:
         db_table = "yeki_question"
@@ -141,9 +146,14 @@ class Choix(models.Model):
     # cause confirmée du bug de création QCM échouant sur un simple écart
     # de casse/espace).
     est_correct = models.BooleanField(default=False)
+    # P6.3 : sans ordre, les choix revenaient dans un ordre non
+    # déterministe — même correctif que ChoixReponse.ordre (P2.2, côté
+    # Devoir).
+    ordre = models.PositiveIntegerField(default=1)
 
     class Meta:
         db_table = "yeki_choix"
+        ordering = ["ordre"]
 
     def __str__(self):
         return f"{'✓' if self.est_correct else '✗'} {self.texte}"
@@ -162,7 +172,19 @@ class ExerciceTentative(models.Model):
     )
     exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE, related_name="tentatives")
     tentative_numero = models.PositiveIntegerField(help_text="1, 2, 3… dans l'ordre chronologique")
-    reponses = models.JSONField(default=dict, help_text="Snapshot complet des réponses soumises")
+    reponses = models.JSONField(
+        default=dict,
+        help_text=(
+            "Snapshot AUTO-SUFFISANT (P6.2) : "
+            '{"questions": [{question_id, enonce_snapshot, type, '
+            "choix_snapshot, reponse_apprenant, bonne_reponse, "
+            'est_correct, points_obtenus, points_max, explication}], '
+            '"score", "total", "date"} — figé au moment de la tentative, '
+            "ne dépend plus de l'état actuel de Question/Choix (une "
+            "modification ultérieure de l'exercice ne change plus "
+            "rétroactivement l'historique)."
+        ),
+    )
     score = models.FloatField(default=0.0, help_text="Points obtenus pour cette tentative")
     total_points = models.FloatField(default=0.0, help_text="Points maximum de l'exercice")
     date_tentative = models.DateTimeField(auto_now_add=True)
@@ -664,6 +686,29 @@ class Olympiade(models.Model):
             return True
         return niveau_apprenant.lower() in niveaux
 
+    def cursus_cible(self) -> str | None:
+        """
+        Nom du cursus (`Parcours.nom`) auquel cette olympiade est destinée
+        — dérivé du département de l'organisateur (`Olympiade` n'a pas de
+        FK `departement` directe). `None` si indéterminable (organisateur
+        sans département rattaché) : permissif comme
+        `est_accessible_par_niveau`, une donnée absente ne doit jamais
+        bloquer l'accès (P8.1 — factorise une expression auparavant
+        dupliquée dans `views/olympiades.py`).
+        """
+        if not self.organisateur:
+            return None
+        departement = self.organisateur.departements_cadre.first()
+        if not departement:
+            return None
+        return departement.parcours.nom
+
+    def est_accessible_par_cursus(self, cursus_apprenant: str) -> bool:
+        cible = self.cursus_cible()
+        if not cible or not cursus_apprenant:
+            return True
+        return cursus_apprenant.strip().lower() == cible.strip().lower()
+
     class Meta:
         db_table = "yeki_olympiade"
         ordering = ["-date_debut_olympiade"]
@@ -673,16 +718,30 @@ class Olympiade(models.Model):
 
     @property
     def statut_auto(self):
+        """
+        P8.3 : renvoyait `"fermée"`/`"terminée"` (avec accents) alors que
+        `STATUT_CHOICES` ci-dessus, `ClassementOlympiadeView`/
+        `CalculerClassementView` (`views/olympiades.py`, comparaison
+        `not in ["terminee"]`) et le frontend (switch Dart sur `'terminee'`,
+        `formations_models.dart`) attendent tous la forme SANS accent —
+        une chaîne Python ne correspond jamais à l'autre. Conséquence
+        réelle : le classement d'une olympiade terminée n'était jamais
+        accessible (`ClassementOlympiadeView` renvoyait 403 indéfiniment)
+        et `CalculerClassementView` ne pouvait jamais être appelée avec
+        succès (400 indéfiniment) — la fonctionnalité classement était
+        entièrement inatteignable en pratique, peu importe l'état réel de
+        l'olympiade.
+        """
         now = timezone.now()
         if now < self.date_ouverture_inscription:
             return "bientot"
         if now <= self.date_cloture_inscription:
             return "inscription"
         if now < self.date_debut_olympiade:
-            return "fermée"
+            return "fermee"
         if now <= self.date_fin_olympiade:
             return "en_cours"
-        return "terminée"
+        return "terminee"
 
     def clean(self):
         if self.date_cloture_inscription >= self.date_debut_olympiade:
@@ -792,7 +851,12 @@ class RangApprenant(models.Model):
         Departement, on_delete=models.CASCADE, related_name="rangs_apprenants"
     )
     score = models.FloatField(
-        default=0.0, help_text="Score calculé (0-1000) basé sur les performances"
+        default=0.0,
+        help_text=(
+            "Somme brute des points des exercices du département (dernière "
+            "tentative de chacun, pas de moyenne — P6.1) : sans borne fixe, "
+            "pas normalisé sur 0-100/0-1000."
+        ),
     )
     rang = models.PositiveIntegerField(
         null=True, blank=True, help_text="Position dans le département (1 = meilleur)"
@@ -815,6 +879,43 @@ class RangApprenant(models.Model):
 
     def __str__(self):
         return f"{self.apprenant.username} | {self.departement.nom} | Rang #{self.rang} | Score {self.score:.0f}"
+
+
+class ParametreClassement(models.Model):
+    """
+    Poids appliqués au score de classement selon la SOURCE des points
+    (P6.3, CDC_BACKEND §7.1.5). En base — JAMAIS en dur — pour pouvoir les
+    ajuster sans redéploiement (exigence explicite du ticket : « quitte à
+    modifier l'ensemble des poids déjà attribués »).
+
+    Progression volontairement NON LINÉAIRE entre les étoiles d'exercice
+    (un 5★ vaut bien plus que 5 fois un 1★) — voir la migration de seed
+    pour les valeurs par défaut proposées. `olympiade`/`devoir` sont semés
+    ici pour être prêts, mais RIEN ne les consomme encore dans
+    `ClassementService` (décision actée P6.3 : hors périmètre de ce
+    ticket, chantier séparé — cf. `docs/AUDIT_BACKEND.md` §CDC 7.1.5).
+    """
+
+    SOURCE_CHOICES = [
+        ("etoile_1", "Exercice 1 étoile"),
+        ("etoile_2", "Exercice 2 étoiles"),
+        ("etoile_3", "Exercice 3 étoiles"),
+        ("etoile_4", "Exercice 4 étoiles"),
+        ("etoile_5", "Exercice 5 étoiles"),
+        ("olympiade", "Olympiade"),
+        ("devoir", "Devoir"),
+    ]
+
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, unique=True)
+    poids = models.FloatField()
+
+    class Meta:
+        db_table = "yeki_parametre_classement"
+        verbose_name = "Paramètre de classement"
+        verbose_name_plural = "Paramètres de classement"
+
+    def __str__(self):
+        return f"{self.get_source_display()} : poids {self.poids}"
 
 
 class ScoreDetail(models.Model):

@@ -61,6 +61,13 @@ class HistoriqueActivite(models.Model):
         # ── Connexion ────────────────────────────────────────────
         ("login", "Connexion"),
         ("logout", "Déconnexion"),
+        # ── Paiement manuel (P9.2) ───────────────────────────────
+        ("payment_validated", "Paiement manuel validé"),
+        ("payment_rejected", "Paiement manuel refusé"),
+        ("ecart_montant_paiement", "Écart de montant constaté"),
+        # ── Retrait (P9.4) ───────────────────────────────────────
+        ("retrait_validated", "Retrait validé"),
+        ("retrait_refused", "Retrait refusé"),
     ]
 
     user = models.ForeignKey(
@@ -145,14 +152,36 @@ class AppVersion(models.Model):
         ("web", "Web"),
     ]
 
+    CANAL_CHOICES = [
+        ("stable", "Stable"),
+        ("beta", "Bêta"),
+        ("alpha", "Alpha"),
+    ]
+
     platform = models.CharField(
         max_length=20, choices=PLATFORM_CHOICES, default="android", help_text="Plateforme cible"
+    )
+    canal = models.CharField(
+        max_length=20,
+        choices=CANAL_CHOICES,
+        default="stable",
+        help_text="Canal de diffusion — un client ne reçoit que les versions de son canal.",
     )
     version_code = models.PositiveIntegerField(
         help_text="Numéro de version interne (ex: 2, 3, 4...)"
     )
     version_name = models.CharField(max_length=20, help_text="Nom de version (ex: v1.0.3)")
     download_url = models.URLField(help_text="URL de téléchargement (Firebase Storage)")
+    checksum_sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text=(
+            "Empreinte SHA-256 (hex) du binaire publié — calculée manuellement avant "
+            "publication (ex. `sha256sum app.apk`) et collée ici ; vérifiée côté client "
+            "avant installation. Laissé vide = aucune vérification pour cette version "
+            "(transition tant que les anciennes versions n'ont pas été rétro-remplies)."
+        ),
+    )
     changelog = models.TextField(blank=True, help_text="Description des nouveautés")
     min_version_code = models.PositiveIntegerField(default=1, help_text="Version minimale requise")
     force_update = models.BooleanField(
@@ -169,7 +198,7 @@ class AppVersion(models.Model):
         ordering = ["-version_code"]
         verbose_name = "Version de l'application"
         verbose_name_plural = "Versions de l'application"
-        unique_together = ("platform", "version_code")
+        unique_together = ("platform", "canal", "version_code")
 
     def __str__(self):
         return f"{self.get_platform_display()} - {self.version_name} (code: {self.version_code})"

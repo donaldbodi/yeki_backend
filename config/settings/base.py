@@ -120,7 +120,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
-        "rest_framework.throttling.ScopedRateThrottle",
+        # ScopedRateThrottle natif ne supporte pas le multiplicateur du
+        # scope "otp" ("3/10min") — voir apps/core/throttling.py.
+        "apps.core.throttling.YekiScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": "30/min",
@@ -249,3 +251,8 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # jamais retomber silencieusement sur une clé active codée en dur.
 CINETPAY_API_KEY = env("CINETPAY_API_KEY")
 CINETPAY_SITE_ID = env("CINETPAY_SITE_ID")
+# P9.7 : secret HMAC du webhook CinetPay — AVEC un défaut vide (contrairement
+# à API_KEY/SITE_ID ci-dessus) : l'absence de ce secret ne doit pas empêcher
+# l'application de démarrer, seulement faire échouer (fail-closed, 401) toute
+# vérification de signature au moment de l'appel — voir `CinetPayWebhookView`.
+CINETPAY_WEBHOOK_SECRET = env("CINETPAY_WEBHOOK_SECRET", default="")

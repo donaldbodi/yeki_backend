@@ -31,9 +31,16 @@ def test_baisse_de_prix_est_bien_le_referent_de_la_promotion(departement):
     departement.prix = 700  # baisse -> "promotion"
     departement.save()
 
-    dernier = HistoriquePrixDepartement.objects.filter(
-        departement=departement, champ="prix"
-    ).latest("date")
+    # `.latest("date")` seul est instable ici : les deux `save()` peuvent
+    # tomber sur le même timestamp `auto_now_add` (résolution de l'horloge/
+    # de la base), rendant "le plus récent" ambigu entre les deux lignes.
+    # `id` (auto-incrément, toujours strictement croissant à l'insertion)
+    # lève l'ambiguïté de façon déterministe.
+    dernier = (
+        HistoriquePrixDepartement.objects.filter(departement=departement, champ="prix")
+        .order_by("-date", "-id")
+        .first()
+    )
     assert dernier.nouvelle_valeur < dernier.ancienne_valeur
 
 

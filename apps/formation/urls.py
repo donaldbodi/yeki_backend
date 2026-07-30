@@ -1,10 +1,14 @@
 from django.urls import path
 
 from apps.formation.views import (
+    ListerSupplementsCoursView,
+    CreerSupplementCoursView,
+    SupprimerSupplementCoursView,
     ChangerEnseignantPrincipalView,
     EnseignantCadreDashboardView,
     statistiques_globales,
     EnseignantAdminStatsView,
+    liste_cours,
     liste_parcours,
     parcours_unique,
     ParcoursListCreateView,
@@ -33,6 +37,7 @@ from apps.formation.views import (
     ModuleUpdateView,
     ModuleDeleteView,
     ListeNiveauxView,
+    ListeNiveauxFormationView,
     PaletteCouleursCoursView,
     ApprenantConcoursFormationsView,
     ApprenantDepartementDetailView,
@@ -107,7 +112,27 @@ urlpatterns = [
         name="departements-cours",
     ),
     # ── COURS ─────────────────────────────────────────────────────
+    # P9.6 : route manquante, vue déjà écrite et documentée comme telle
+    # (`liste_cours`, `apps/formation/views/cours.py`) — bloquait
+    # l'onglet « Tous les cours » de l'admin général (toujours vide).
+    path("cours/", liste_cours, name="liste-cours"),
     path("cours/create/", CoursCreateView.as_view(), name="cours-create"),
+    # ── SUPPLÉMENTS DE COURS (P11.9) ───────────────────────────────
+    path(
+        "cours/<int:cours_id>/supplements/",
+        ListerSupplementsCoursView.as_view(),
+        name="cours-supplements-liste",
+    ),
+    path(
+        "cours/<int:cours_id>/supplements/creer/",
+        CreerSupplementCoursView.as_view(),
+        name="cours-supplements-creer",
+    ),
+    path(
+        "supplements/<int:supplement_id>/supprimer/",
+        SupprimerSupplementCoursView.as_view(),
+        name="supplements-supprimer",
+    ),
     path("apprenant/cursus/", ApprenantCursusAPIView.as_view(), name="apprenant-cursus"),
     path(
         "cours/<int:cours_id>/add-enseignant/",
@@ -139,6 +164,7 @@ urlpatterns = [
     path("modules/<int:module_id>/modifier/", ModuleUpdateView.as_view(), name="module-modifier"),
     path("modules/<int:module_id>/supprimer/", ModuleDeleteView.as_view(), name="module-supprimer"),
     path("niveaux/", ListeNiveauxView.as_view(), name="liste-niveaux"),
+    path("niveaux-formation/", ListeNiveauxFormationView.as_view(), name="liste-niveaux-formation"),
     path(
         "cours/palette-couleurs/", PaletteCouleursCoursView.as_view(), name="palette-couleurs-cours"
     ),

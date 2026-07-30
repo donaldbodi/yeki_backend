@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from apps.core.pagination import PaginatedListMixin
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, DeviceToken
 from apps.notifications.serializers import NotificationSerializer
 
 from drf_spectacular.utils import extend_schema, extend_schema_view
@@ -24,7 +24,7 @@ from apps.core.schema_examples import (
             "Retourne la liste paginée des notifications de l'utilisateur "
             "connecté (plus récentes d'abord), sérialisées via "
             "`NotificationSerializer` : `id, type, titre, contenu, est_lue, "
-            "cree_le, action_url`."
+            "cree_le, action_route`."
         ),
         tags=["notifications"],
         parameters=[*PARAMS_PAGINATION],
@@ -127,3 +127,62 @@ class NotificationsNonLuesView(APIView):
     def get(self, request):
         count = Notification.objects.filter(utilisateur=request.user, est_lue=False).count()
         return Response({"non_lues": count})
+
+
+@extend_schema_view(
+    post=extend_schema(
+        summary="Enregistrer/mettre à jour un jeton d'appareil (push FCM)",
+        description=(
+            "Enregistre le jeton FCM de l'appareil de l'utilisateur connecté "
+            "pour recevoir les notifications push, ou met à jour la platefome/"
+            "la dernière utilisation si le jeton existe déjà (`token` est "
+            "unique). Body : `{token, plateforme}` "
+            "(`plateforme` ∈ android|ios|web|desktop)."
+        ),
+        tags=["notifications"],
+        request=OpenApiTypes.OBJECT,
+        responses={200: OpenApiTypes.OBJECT},
+        examples=[*ERREURS_COURANTES],
+    ),
+)
+class DeviceTokenView(APIView):
+    """POST /api/notifications/device-token/"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        token = (request.data.get("token") or "").strip()
+        plateforme = request.data.get("plateforme", "")
+        if not token or plateforme not in dict(DeviceToken.PLATEFORME_CHOICES):
+            return Response(
+                {"detail": "`token` et `plateforme` (android|ios|web|desktop) sont requis."},
+                status=400,
+            )
+        DeviceToken.objects.update_or_create(
+            token=token,
+            defaults={"user": request.user, "plateforme": plateforme, "actif": True},
+        )
+        return Response({"detail": "Jeton enregistré."})
+
+
+@extend_schema_view(
+    delete=extend_schema(
+        summary="Supprimer un jeton d'appareil (à la déconnexion)",
+        description=(
+            "Désactive le jeton d'appareil `token` de l'utilisateur connecté "
+            "— OBLIGATOIRE à la déconnexion, sinon le prochain utilisateur de "
+            "l'appareil reçoit les notifications du précédent (CDC §9.2)."
+        ),
+        tags=["notifications"],
+        responses={204: None},
+        examples=[*ERREURS_COURANTES],
+    ),
+)
+class DeviceTokenDeleteView(APIView):
+    """DELETE /api/notifications/device-token/<token>/"""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, token):
+        DeviceToken.objects.filter(token=token, user=request.user).update(actif=False)
+        return Response(status=204)

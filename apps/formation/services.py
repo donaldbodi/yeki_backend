@@ -1,6 +1,50 @@
 from django.conf import settings
 
+from apps.core.models import ParametreSysteme
 from apps.formation.models import Lecon, Cours, ProgressionLecon
+
+# Valeur par défaut si `ParametreSysteme` ne contient pas encore la clé —
+# mêmes 3 niveaux que l'ancien `choices=` figé sur `Departement.
+# niveau_formation`, mais désormais modifiables sans redéploiement.
+_NIVEAUX_FORMATION_PAR_DEFAUT = "debutant:Débutant,intermediaire:Intermédiaire,avance:Avancé"
+
+
+def niveaux_formation_disponibles():
+    """
+    Niveaux de formation professionnelle (départements "formation métier")
+    — liste fermée mais administrable sans redéploiement via
+    `ParametreSysteme` (clé `niveaux_formation_disponibles`, format
+    `code:Libellé,code:Libellé`) plutôt qu'un `choices=` figé sur le modèle
+    (P11.6 — arbitrage : liste fermée mais administrable).
+    """
+    brut = ParametreSysteme.get("niveaux_formation_disponibles", _NIVEAUX_FORMATION_PAR_DEFAUT)
+    resultat = []
+    for paire in brut.split(","):
+        if ":" not in paire:
+            continue
+        code, _, label = paire.partition(":")
+        code = code.strip()
+        if code:
+            resultat.append({"code": code, "label": label.strip() or code})
+    return resultat
+
+
+def codes_niveaux_formation_disponibles():
+    return [n["code"] for n in niveaux_formation_disponibles()]
+
+
+def niveaux_distincts(departement_id=None):
+    """
+    Liste triée des valeurs de niveau distinctes utilisées par au moins un
+    cours — globale, ou filtrée sur un département si `departement_id` est
+    fourni. Source commune à `ListeNiveauxView` (global) et
+    `DepartementNiveauxAPIView` (par département), qui dupliquaient
+    auparavant la même requête (P5.4).
+    """
+    qs = Cours.objects.all()
+    if departement_id is not None:
+        qs = qs.filter(departement_id=departement_id)
+    return sorted(qs.values_list("niveau", flat=True).distinct())
 
 
 def _progression_cours(user, cours_qs):

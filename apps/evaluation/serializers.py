@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 
-from apps.evaluation.validators import valider_pas_de_cycle_epreuve
+from apps.evaluation.validators import valider_pas_de_0_25, valider_pas_de_cycle_epreuve
 from apps.evaluation.models import (
     Exercice,
     SessionExercice,
@@ -32,11 +32,18 @@ class QuestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ["id", "text", "type", "points", "choix"]
+        fields = ["id", "text", "type", "points", "choix", "explication"]
 
     def get_choix(self, obj):
+        # P6.3 : liste COMPLÈTE (id + texte + est_correct, pas juste le
+        # texte) et ORDONNÉE (Choix.Meta.ordering = ["ordre"]) — la page
+        # d'ajout d'exercices a besoin de savoir quel choix est correct
+        # pour afficher/éditer un QCM existant.
         if obj.type_question.lower() == "qcm":
-            return [c.texte for c in obj.choix.all()]
+            return [
+                {"id": c.id, "texte": c.texte, "est_correct": c.est_correct}
+                for c in obj.choix.all()
+            ]
         return []
 
 
@@ -61,11 +68,24 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ["text", "type_question", "points", "bonne_reponse", "choix"]
+        fields = ["text", "type_question", "points", "bonne_reponse", "choix", "explication"]
         extra_kwargs = {
             "points": {"required": False, "default": 1},
             "bonne_reponse": {"required": False, "allow_blank": True},
+            "explication": {"required": False, "allow_blank": True},
         }
+
+    def validate_points(self, value):
+        # P6.3 : le validateur de modèle (MinValueValidator(0.25) +
+        # valider_pas_de_0_25) n'est jamais invoqué via l'API sans
+        # `full_clean()` explicite (jamais appelé dans les vues) — un
+        # `validate_<champ>` de serializer est, lui, systématiquement
+        # exécuté par DRF pendant `is_valid()`.
+        try:
+            valider_pas_de_0_25(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages)
+        return value
 
     def validate(self, attrs):
         type_q = attrs.get("type_question", "texte")
@@ -95,9 +115,12 @@ class QuestionCreateSerializer(serializers.ModelSerializer):
         question = Question.objects.create(**validated_data)
 
         choix_correct_texte = None
-        for c in choix_data:
+        for ordre, c in enumerate(choix_data, start=1):
             choix = Choix.objects.create(
-                question=question, texte=c["texte"], est_correct=c.get("est_correct", False)
+                question=question,
+                texte=c["texte"],
+                est_correct=c.get("est_correct", False),
+                ordre=ordre,
             )
             if choix.est_correct:
                 choix_correct_texte = choix.texte
@@ -257,7 +280,23 @@ class ChoixReponseAdminSerializer(serializers.ModelSerializer):
         fields = ["id", "texte", "est_correct"]
 
 
+class ChoixReponseCreateSerializer(serializers.ModelSerializer):
+    """P7.1 : miroir exact de `ChoixCreateSerializer` (côté exercice) —
+    remplace le `ListField(DictField)` bruit utilisé jusqu'ici pour
+    `QuestionDevoirCreateUpdateSerializer.choix`, qui ne validait ni la
+    forme ni le nombre de choix corrects."""
+
+    class Meta:
+        model = ChoixReponse
+        fields = ["texte", "est_correct"]
+
+
 class QuestionDevoirSerializer(serializers.ModelSerializer):
+    """Vue apprenant/générique — questions d'un devoir avec leurs choix
+    ORDONNÉS (`ChoixReponse.Meta.ordering`). Fusionne l'ancien doublon
+    `QuestionDevoirDetailSerializer` (champs strictement identiques,
+    signalé dans un TODO depuis l'éclatement de yeki/serializers.py)."""
+
     choix = ChoixReponseSerializer(many=True, read_only=True)
 
     class Meta:
@@ -279,11 +318,24 @@ class QuestionDevoirAdminSerializer(serializers.ModelSerializer):
             "choix",
             "reponse_attendue",
             "reponse_exemple",
+            # P7.4 : indispensable pour regrouper les questions PAR
+            # énoncé côté frontend (ListeQuestionsDevoirView renvoie les
+            # questions à plat, sans ce champ impossible de savoir à
+            # quel EnonceDevoir chacune appartient).
+            "enonce_devoir",
         ]
 
 
 class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
-    choix = serializers.ListField(child=serializers.DictField(), required=False, default=[])
+    """P7.1 : `choix` devient un serializer imbriqué (`ChoixReponseCreateSerializer`)
+    au lieu d'un `ListField(DictField)` brut, et `validate()` impose la
+    même règle QCM que `QuestionCreateSerializer` (côté exercice, P6.3) :
+    un QCM doit avoir exactement un choix marqué `est_correct=True` —
+    jusqu'ici aucune validation de ce type n'existait côté devoir, et
+    `ChoixReponse` était créé sans `ordre` explicite (retombait sur le
+    défaut `1` pour tous les choix, ordre non déterministe)."""
+
+    choix = ChoixReponseCreateSerializer(many=True, required=False, default=[])
 
     class Meta:
         model = QuestionDevoir
@@ -301,12 +353,51 @@ class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
             "ordre": {"required": False},
         }
 
+    def validate_points(self, value):
+        # P6.3 : même correctif que QuestionCreateSerializer — le
+        # validateur de modèle n'est jamais invoqué via l'API sans
+        # `full_clean()` explicite.
+        try:
+            valider_pas_de_0_25(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages)
+        return value
+
     def validate(self, attrs):
-        type_q = attrs.get("type_question", "texte")
-        choix = attrs.get("choix", [])
-        if type_q == "qcm" and len(choix) < 2:
-            raise serializers.ValidationError("Un QCM doit avoir au moins 2 choix.")
-        if type_q == "texte":
+        # P7.2 : en modification partielle (PATCH, ex. ModifierQuestionDevoirView,
+        # routée pour la première fois), ces règles ne doivent s'appliquer
+        # QUE si le champ concerné fait effectivement partie de CETTE
+        # requête — sans quoi un simple `PATCH {"enonce": "..."}` sur une
+        # question texte existante levait à tort « réponse attendue
+        # obligatoire », `reponse_attendue` n'étant jamais renvoyé par un
+        # appelant qui ne modifie que l'énoncé.
+        type_q = attrs.get(
+            "type_question",
+            self.instance.type_question if self.partial and self.instance else "texte",
+        )
+        # P7.3 : QCM interdit sur un devoir à correction manuelle — texte
+        # libre uniquement (l'enseignant corrige lui-même, pas de choix à
+        # cocher). Ne se déclenche que si le type QCM est effectivement
+        # visé par CETTE requête (création, ou modification qui le fixe
+        # explicitement) — cohérent avec la garde partial ci-dessus.
+        if type_q == "qcm" and self.context.get("type_correction") == "manuel":
+            raise serializers.ValidationError(
+                {"type_question": "Le QCM n'est pas autorisé pour un devoir à correction manuelle."}
+            )
+        if type_q == "qcm" and ("choix" in attrs or not self.partial):
+            choix = attrs.get("choix", [])
+            if len(choix) < 2:
+                raise serializers.ValidationError({"choix": "Un QCM doit avoir au moins 2 choix."})
+            nb_corrects = sum(1 for c in choix if c.get("est_correct"))
+            if nb_corrects == 0:
+                raise serializers.ValidationError(
+                    {"choix": "Un QCM doit avoir un choix marqué comme correct (est_correct=True)."}
+                )
+            if nb_corrects > 1:
+                raise serializers.ValidationError(
+                    {"choix": "Un QCM ne peut avoir qu'un seul choix correct."}
+                )
+        if type_q == "texte" and ("reponse_attendue" in attrs or not self.partial):
             if self.context.get("type_correction") == "auto":
                 if not attrs.get("reponse_attendue", "").strip():
                     raise serializers.ValidationError(
@@ -319,9 +410,12 @@ class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         choix_data = validated_data.pop("choix", [])
         question = QuestionDevoir.objects.create(**validated_data)
-        for c in choix_data:
+        for ordre, c in enumerate(choix_data, start=1):
             ChoixReponse.objects.create(
-                question=question, texte=c.get("texte", ""), est_correct=c.get("est_correct", False)
+                question=question,
+                texte=c["texte"],
+                est_correct=c.get("est_correct", False),
+                ordre=ordre,
             )
         return question
 
@@ -332,27 +426,14 @@ class QuestionDevoirCreateUpdateSerializer(serializers.ModelSerializer):
         instance.save()
         if choix_data is not None:
             instance.choix.all().delete()
-            for c in choix_data:
+            for ordre, c in enumerate(choix_data, start=1):
                 ChoixReponse.objects.create(
                     question=instance,
-                    texte=c.get("texte", ""),
+                    texte=c["texte"],
                     est_correct=c.get("est_correct", False),
+                    ordre=ordre,
                 )
         return instance
-
-
-# TODO(correction): QuestionDevoirDetailSerializer et QuestionDevoirSerializer
-# (ci-dessus) sont strictement identiques (même modèle, mêmes champs) — doublon
-# exact découvert lors de l'éclatement de yeki/serializers.py, non documenté
-# dans docs/AUDIT_BACKEND.md. Non fusionnés ici pour respecter la règle
-# "déplacer, ne pas réécrire" ; à fusionner dans une tâche de correction dédiée
-# après confirmation (voir docs/SPLIT_VIEWS.md).
-class QuestionDevoirDetailSerializer(serializers.ModelSerializer):
-    choix = ChoixReponseSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = QuestionDevoir
-        fields = ["id", "enonce", "type_question", "points", "ordre", "choix"]
 
 
 class DevoirListSerializer(serializers.ModelSerializer):
@@ -420,18 +501,30 @@ class DevoirListSerializer(serializers.ModelSerializer):
 class EnonceDevoirSerializer(serializers.ModelSerializer):
     """
     P2.3 : un énoncé de devoir avec ses propres questions (remplace
-    `Devoir.enonces_supplementaires`, @deprecated).
+    `Devoir.enonces_supplementaires`, @deprecated). Questions ORDONNÉES
+    (`QuestionDevoir.Meta.ordering`) — P7.1.
     """
 
-    questions = QuestionDevoirDetailSerializer(many=True, read_only=True)
+    questions = QuestionDevoirSerializer(many=True, read_only=True)
 
     class Meta:
         model = EnonceDevoir
         fields = ["id", "contenu", "ordre", "questions"]
 
 
+class EnonceDevoirUpdateSerializer(serializers.ModelSerializer):
+    """P7.1 : édition du contenu d'un énoncé (`PATCH /devoirs/enonces/<id>/`)
+    — `ordre` reste géré par le serveur (création/suppression), pas
+    éditable via ce serializer."""
+
+    class Meta:
+        model = EnonceDevoir
+        fields = ["contenu"]
+        extra_kwargs = {"contenu": {"required": True, "allow_blank": False}}
+
+
 class DevoirDetailSerializer(serializers.ModelSerializer):
-    questions = QuestionDevoirDetailSerializer(many=True, read_only=True)
+    questions = QuestionDevoirSerializer(many=True, read_only=True)
     enonces = EnonceDevoirSerializer(many=True, read_only=True)
     peut_modifier_questions = serializers.BooleanField(read_only=True)
     nb_sorties = serializers.SerializerMethodField()
@@ -470,6 +563,12 @@ class DevoirDetailSerializer(serializers.ModelSerializer):
 
 
 class DevoirCreateSerializer(serializers.ModelSerializer):
+    """P7.2 : `est_publie` n'est PLUS un champ de ce serializer — un devoir
+    naît toujours non publié (défaut du modèle). La publication ne passe
+    QUE par `PublierDevoirView` (`POST .../publier/`), seule à même de
+    renvoyer l'avertissement explicite exigé (« vous ne pourrez plus
+    ajouter ni modifier de question ni d'énoncé »)."""
+
     enonces_supplementaires = serializers.ListField(
         child=serializers.CharField(), required=False, default=[]
     )
@@ -491,7 +590,6 @@ class DevoirCreateSerializer(serializers.ModelSerializer):
             "concours_lie",
             "formation_liee",
             "cours_lie",
-            "est_publie",
             "acces_restreint",
             "type_correction",
             "fichier_correction",
@@ -541,6 +639,14 @@ class DevoirCreateSerializer(serializers.ModelSerializer):
 
 
 class DevoirUpdateSerializer(serializers.ModelSerializer):
+    """P7.2 : `est_publie` retiré (voir `DevoirCreateSerializer`, même
+    raison — passe uniquement par `PublierDevoirView`). Le blocage
+    « aucune modification si publié » (CDC §7.2.2, point 4 : « même
+    contrôle » que les questions) est désormais géré au niveau de
+    `ModifierDevoirView` (garde globale, tous champs), pas ici champ par
+    champ — cette classe ne garde qu'un contrôle propre à son domaine :
+    `enonce` non-vide s'il est fourni."""
+
     enonces_supplementaires = serializers.ListField(
         child=serializers.CharField(), required=False, default=[]
     )
@@ -562,7 +668,6 @@ class DevoirUpdateSerializer(serializers.ModelSerializer):
             "concours_lie",
             "formation_liee",
             "cours_lie",
-            "est_publie",
             "acces_restreint",
             "type_correction",
             "fichier_correction",
@@ -572,21 +677,28 @@ class DevoirUpdateSerializer(serializers.ModelSerializer):
             "titre": {"required": False},
             "enonce": {"required": False},
             "type_correction": {"required": False},
-            "est_publie": {"required": False},
         }
 
     def validate(self, data):
-        if self.instance and self.instance.est_publie:
-            if "enonce" in data:
-                raise serializers.ValidationError(
-                    {"enonce": "Un devoir publié ne peut pas être modifié."}
-                )
-            if "enonces_supplementaires" in data:
-                raise serializers.ValidationError(
-                    {
-                        "enonces_supplementaires": "Un devoir publié ne peut pas avoir de nouveaux énoncés."
-                    }
-                )
+        # P7.2, point 1 : `enonce` obligatoire — déjà vrai à la création
+        # (DevoirCreateSerializer), manquait ici pour la modification.
+        if "enonce" in data and not data["enonce"].strip():
+            raise serializers.ValidationError({"enonce": "L'énoncé est obligatoire."})
+        # P7.3 : deuxième porte d'entrée pour « QCM interdit en correction
+        # manuelle » — `QuestionDevoirCreateUpdateSerializer` bloque déjà la
+        # création/modification d'une question QCM sur un devoir manuel,
+        # mais rien n'empêchait de repasser un devoir déjà pourvu de
+        # questions QCM de `auto` à `manuel` via ce serializer-ci.
+        if (
+            data.get("type_correction") == "manuel"
+            and self.instance
+            and self.instance.questions.filter(type_question="qcm").exists()
+        ):
+            raise serializers.ValidationError(
+                {
+                    "type_correction": "Impossible de passer en correction manuelle : ce devoir contient déjà des questions QCM."
+                }
+            )
         return data
 
 
@@ -624,6 +736,10 @@ class SoumissionDetailSerializer(serializers.ModelSerializer):
 
 class SoumissionResultatSerializer(serializers.ModelSerializer):
     devoir_titre = serializers.CharField(source="devoir.titre", read_only=True)
+    # P7.6 : dénominateur de la note, absent jusqu'ici — le frontend du
+    # résultat devait sinon deviner `note_sur` (aucun appelant de la route
+    # ne le transmettait), même patron que `sorties_max` juste au-dessus.
+    note_sur = serializers.IntegerField(source="devoir.note_sur", read_only=True)
     questions_detail = serializers.SerializerMethodField()
     fichier_correction_url = serializers.SerializerMethodField()
 
@@ -634,6 +750,7 @@ class SoumissionResultatSerializer(serializers.ModelSerializer):
             "devoir_titre",
             "statut",
             "note",
+            "note_sur",
             "commentaire",
             "soumis_le",
             "corrige_le",
@@ -644,29 +761,53 @@ class SoumissionResultatSerializer(serializers.ModelSerializer):
         ]
 
     def get_questions_detail(self, obj):
-        reponses = obj.reponses.select_related("question", "choix").all()
+        # P7.3 : `choix` (snapshot complet des options, pas seulement celle
+        # sélectionnée) — même patron que `_corriger_reponses_exercice`
+        # (apps/evaluation/views/exercices.py), absent jusqu'ici côté
+        # devoir. Sans lui, un apprenant sur une question QCM ne voyait
+        # QUE le texte de son propre choix, sans jamais voir LES options ni
+        # laquelle était correcte — cause la plus probable du bug signalé
+        # « l'apprenant ne voit pas la réponse correcte ».
+        reponses = obj.reponses.select_related("question", "choix").prefetch_related(
+            "question__choix"
+        )
         result = []
         for rep in reponses:
+            question = rep.question
             result.append(
                 {
-                    "question_id": rep.question.id,
-                    "question_enonce": rep.question.enonce,
-                    "type_question": rep.question.type_question,
+                    "question_id": question.id,
+                    "question_enonce": question.enonce,
+                    "type_question": question.type_question,
                     "reponse_utilisateur": rep.reponse,
                     "choix_selectionne": rep.choix.texte if rep.choix else None,
+                    "choix": (
+                        [
+                            {"id": c.id, "texte": c.texte, "est_correct": c.est_correct}
+                            for c in question.choix.all()
+                        ]
+                        if question.type_question == "qcm"
+                        else []
+                    ),
                     "est_correct": rep.est_correct,
                     "points_obtenus": rep.points_obtenus,
-                    "points_max": rep.question.points,
+                    "points_max": question.points,
                     "bonne_reponse": (
-                        rep.question.reponse_attendue
-                        if rep.question.type_question == "texte"
+                        question.reponse_attendue
+                        if question.type_question == "texte"
                         else (
-                            rep.question.choix.filter(est_correct=True).first().texte
-                            if rep.question.choix.filter(est_correct=True).exists()
+                            question.choix.filter(est_correct=True).first().texte
+                            if question.choix.filter(est_correct=True).exists()
                             else None
                         )
                     ),
-                    "reponse_exemple": rep.question.reponse_exemple,
+                    "reponse_exemple": question.reponse_exemple,
+                    # P7.3 : pas de commentaire PAR question dans le modèle
+                    # (seul `SoumissionDevoir.commentaire` existe, décision
+                    # actée — voir docs/ecarts ou le plan P7.3) — recopié
+                    # ici pour que chaque question du résultat porte le mot
+                    # justificatif de l'enseignant sans nouveau champ/migration.
+                    "commentaire_enseignant": obj.commentaire or "",
                 }
             )
         return result

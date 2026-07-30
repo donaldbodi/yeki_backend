@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from datetime import timedelta
 
 from django.db import transaction
@@ -23,9 +25,9 @@ from apps.core.schema_examples import (
     EXEMPLE_PAGINATION,
     PARAMS_PAGINATION,
 )
+from apps.core.permissions import AccesMatricePermission
 from apps.core.services import _get_client_ip
 from apps.formation.models import Cours
-from apps.notifications.models import creer_notification
 from apps.evaluation.models import (
     Devoir,
     EnonceDevoir,
@@ -40,6 +42,7 @@ from apps.evaluation.serializers import (
     DevoirCreateSerializer,
     DevoirUpdateSerializer,
     EnonceDevoirSerializer,
+    EnonceDevoirUpdateSerializer,
     ReponseSubmitSerializer,
     SoumissionDetailSerializer,
     SoumissionResultatSerializer,
@@ -111,7 +114,9 @@ class ListeDevoirsView(PaginatedListMixin, APIView):
       - cours_id      : filtrer par cours lié
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "voir"
 
     def get(self, request):
         qs = Devoir.objects.filter(est_publie=True).order_by("-date_limite")
@@ -167,10 +172,13 @@ class ListeDevoirsView(PaginatedListMixin, APIView):
 class DetailDevoirView(APIView):
     """GET /api/devoirs/<id>/"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "voir"
 
     def get(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
+        self.check_object_permissions(request, devoir)
 
         # Vérifier que le devoir est ouvert (ou déjà commencé par l'apprenant)
         soum = SoumissionDevoir.objects.filter(utilisateur=request.user, devoir=devoir).first()
@@ -204,16 +212,24 @@ class DetailDevoirView(APIView):
 class DemarrerDevoirView(APIView):
     """POST /api/devoirs/<id>/demarrer/"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "soumettre"
 
     def post(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
+        self.check_object_permissions(request, devoir)
 
         # Vérifier que la date de début est passée
         if timezone.now() < devoir.date_debut:
+            # P7.2, point 6 : affichage en heure de Douala (TIME_ZONE du
+            # projet), pas en UTC — `.strftime()` sur un datetime aware
+            # non localisé affiche le fuseau de stockage (UTC), pas celui
+            # configuré pour l'app (`timezone.localtime()` convertit).
+            date_debut_douala = timezone.localtime(devoir.date_debut)
             return Response(
                 {
-                    "detail": f"Ce devoir sera disponible à partir du {devoir.date_debut.strftime('%d/%m/%Y à %H:%M')}."
+                    "detail": f"Ce devoir sera disponible à partir du {date_debut_douala.strftime('%d/%m/%Y à %H:%M')}."
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -263,58 +279,50 @@ class DemarrerDevoirView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
-        summary="Signaler une sortie du devoir (vue non routée)",
+        summary="Signaler une sortie du devoir",
         description=(
-            "Enregistre une sortie du devoir. Si le nombre de sorties atteint le "
-            "maximum autorisé, les réponses fournies dans le corps sont enregistrées "
-            "et le devoir est soumis automatiquement. "
-            "Vue orpheline (non routée dans les urls actuelles) — doublon fonctionnel "
-            "probable de `SignalerFocusDevoirView` ; conservée telle quelle."
+            "Enregistre une SORTIE de page (pas une soumission — P7.3 : « tentatives » "
+            "désigne le nombre de sorties tolérées, pas des soumissions multiples). Si "
+            "le nombre de sorties atteint `tentatives_max`, les réponses fournies sont "
+            "corrigées et le devoir est soumis automatiquement EN L'ÉTAT, exactement "
+            "comme une soumission explicite."
         ),
         tags=["evaluation"],
         responses={200: OpenApiTypes.OBJECT},
         examples=[*ERREURS_ECRITURE],
     ),
 )
-# TODO(audit): vue orpheline, non routée (docs/AUDIT_BACKEND.md §2.2) —
-# doublon fonctionnel quasi certain de SignalerFocusDevoirView (routée sur
-# devoirs/<id>/focus-perdu/). Conservée telle quelle.
 class SortirDevoirView(APIView):
     """
     POST /api/devoirs/<id>/sortir/
     Enregistre une sortie du devoir. Si le nombre de sorties atteint le maximum,
-    soumet automatiquement le devoir.
+    corrige et soumet automatiquement le devoir (P7.3).
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "soumettre"
 
     @transaction.atomic
     def post(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
+        self.check_object_permissions(request, devoir)
 
         soum = get_object_or_404(
             SoumissionDevoir, devoir=devoir, utilisateur=request.user, statut="en_cours"
         )
 
-        # Incrémenter le compteur de sorties
+        # Incrémenter le compteur de sorties — la sortie seule NE SOUMET
+        # JAMAIS (P7.3, exigence explicite répétée dans le ticket).
         soum.sorties += 1
         soum.save(update_fields=["sorties"])
 
-        # Si le nombre de sorties atteint le maximum, soumettre automatiquement
+        # Sorties épuisées → soumission automatique EN L'ÉTAT, corrigée
+        # exactement comme une soumission explicite (même fonction que
+        # SoumettreDevoirView — aucune logique dupliquée).
         if soum.sorties >= devoir.tentatives_max:
-            # Récupérer les réponses actuelles
             reponses = request.data.get("reponses", {})
-
-            # Enregistrer les réponses
-            for question in devoir.questions.all():
-                user_rep = reponses.get(str(question.id), "").strip()
-                repobj, _ = ReponseDevoir.objects.get_or_create(soumission=soum, question=question)
-                repobj.reponse = user_rep
-                repobj.save()
-
-            soum.statut = "soumis"
-            soum.soumis_le = timezone.now()
-            soum.save(update_fields=["statut", "soumis_le"])
+            _corriger_et_soumettre_devoir(devoir, soum, reponses)
 
             return Response(
                 {
@@ -322,6 +330,8 @@ class SortirDevoirView(APIView):
                     "force_submit": True,
                     "sorties": soum.sorties,
                     "sorties_max": devoir.tentatives_max,
+                    "statut": soum.statut,
+                    "note": soum.note,
                 }
             )
 
@@ -333,6 +343,89 @@ class SortirDevoirView(APIView):
                 "force_submit": False,
             }
         )
+
+
+def _normaliser_texte(texte) -> str:
+    """
+    Normalise un texte pour une comparaison tolérante (P7.3, correction
+    auto des questions texte libre) : casse, accents, ponctuation finale,
+    espaces multiples. Une comparaison stricte transformerait chaque
+    question texte en piège et l'enseignant recevrait des plaintes
+    légitimes. Accent-folding repris de la logique déjà écrite pour le
+    backfill `Choix.est_correct` (migrations/0002_...py, P2.2) plutôt que
+    réinventée (règle 1).
+    """
+    texte = (texte or "").strip().lower()
+    texte = unicodedata.normalize("NFKD", texte)
+    texte = "".join(c for c in texte if not unicodedata.combining(c))
+    texte = re.sub(r"[.!?,;:]+$", "", texte)  # ponctuation finale
+    texte = re.sub(r"\s+", " ", texte).strip()  # espaces multiples
+    return texte
+
+
+def _corriger_et_soumettre_devoir(devoir, soum, reponses):
+    """
+    Corrige les réponses (QCM via `Choix.est_correct`, texte via
+    `_normaliser_texte` en correction auto) et finalise la soumission
+    (statut, note si auto, horodatage). Factorisée pour être appelée
+    IDENTIQUEMENT depuis `SoumettreDevoirView` ET `SortirDevoirView`
+    (sortie forcée par épuisement des tentatives, P7.3) — aucune logique
+    dupliquée entre les deux vues, même patron que
+    `_corriger_reponses_exercice` (apps/evaluation/views/exercices.py).
+    """
+    score = 0.0
+    total = 0.0
+
+    for question in devoir.questions.prefetch_related("choix").all():
+        total += question.points
+        user_rep = reponses.get(str(question.id), "").strip()
+
+        repobj, _ = ReponseDevoir.objects.get_or_create(soumission=soum, question=question)
+
+        if question.type_question == "qcm":
+            choix_selectionne = question.choix.filter(texte=user_rep).first()
+            repobj.reponse = user_rep
+            repobj.choix = choix_selectionne
+            if choix_selectionne and choix_selectionne.est_correct:
+                repobj.est_correct = True
+                repobj.points_obtenus = question.points
+                score += question.points
+            else:
+                repobj.est_correct = False
+                repobj.points_obtenus = 0
+        else:
+            repobj.reponse = user_rep
+            # P7.3 : comparaison normalisée (casse/accents/ponctuation
+            # finale/espaces multiples) — auparavant un simple
+            # `.strip().lower()`, cause probable de plaintes légitimes.
+            if devoir.type_correction == "auto":
+                repobj.est_correct = _normaliser_texte(user_rep) == _normaliser_texte(
+                    question.reponse_attendue
+                )
+                repobj.points_obtenus = question.points if repobj.est_correct else 0
+                if repobj.est_correct:
+                    score += question.points
+            else:
+                repobj.est_correct = None  # correction manuelle
+
+        repobj.save()
+
+    now = timezone.now()
+    soum.soumis_le = now
+    soum.statut = "en_retard" if soum.est_en_retard else "soumis"
+
+    if devoir.type_correction == "auto":
+        # QCM ET texte (comparaison normalisée) sont déjà corrigés dans la
+        # boucle ci-dessus : on enregistre la note dans tous les cas, qu'il
+        # y ait ou non des questions texte (correction précédente : la note
+        # n'était enregistrée que pour les devoirs 100% QCM, perdant le
+        # score des devoirs mixtes QCM+texte en correction automatique).
+        soum.note = round((score / total) * devoir.note_sur, 2) if total > 0 else 0
+        soum.statut = "corrige"
+        soum.corrige_le = now
+
+    soum.save()
+    return score, total
 
 
 @extend_schema_view(
@@ -354,11 +447,16 @@ class SortirDevoirView(APIView):
 class SoumettreDevoirView(APIView):
     """POST /api/devoirs/<id>/soumettre/"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "soumettre"
 
     @transaction.atomic
     def post(self, request, devoir_id):
-        devoir = get_object_or_404(Devoir, pk=devoir_id)
+        # P7.2, point 7 : même filtre défensif que DemarrerDevoirView — un
+        # devoir non publié ne doit pas pouvoir recevoir de soumission.
+        devoir = get_object_or_404(Devoir, pk=devoir_id, est_publie=True)
+        self.check_object_permissions(request, devoir)
         soum = get_object_or_404(SoumissionDevoir, devoir=devoir, utilisateur=request.user)
 
         if soum.statut in ["soumis", "corrige"]:
@@ -375,73 +473,7 @@ class SoumettreDevoirView(APIView):
         serializer_in.is_valid(raise_exception=True)
         reponses = serializer_in.validated_data["reponses"]
 
-        # ── Enregistrer les réponses & corriger les QCM ──────────
-        score = 0.0
-        total = 0.0
-        # TODO(pré-existant, non corrigé — "déplacer, ne pas réécrire") :
-        # `has_texte` est mis à True plus bas mais n'est jamais relu (repéré
-        # en P1.6 via ruff F841) — semble être le reliquat d'un signal
-        # "nécessite correction manuelle" jamais branché sur la soumission.
-        has_texte = False  # noqa: F841
-
-        for question in devoir.questions.prefetch_related("choix").all():
-            total += question.points
-            user_rep = reponses.get(str(question.id), "").strip()
-
-            repobj, _ = ReponseDevoir.objects.get_or_create(soumission=soum, question=question)
-
-            if question.type_question == "qcm":
-                # TODO(pré-existant, non corrigé — "déplacer, ne pas
-                # réécrire") : `choix_correct` est calculé puis jamais utilisé
-                # (repéré en P1.6 via ruff F841) — la correction se fait déjà
-                # correctement via `choix_selectionne.est_correct` ci-dessous,
-                # mais ce calcul mort suggère une logique de vérification
-                # croisée jamais branchée ou retirée par erreur.
-                choix_correct = question.choix.filter(est_correct=True).first()  # noqa: F841
-                choix_selectionne = question.choix.filter(texte=user_rep).first()
-                repobj.reponse = user_rep
-                repobj.choix = choix_selectionne
-                if choix_selectionne and choix_selectionne.est_correct:
-                    repobj.est_correct = True
-                    repobj.points_obtenus = question.points
-                    score += question.points
-                else:
-                    repobj.est_correct = False
-                    repobj.points_obtenus = 0
-            else:
-                repobj.reponse = user_rep
-                # Pour correction auto, comparer avec reponse_attendue
-                if devoir.type_correction == "auto":
-                    repobj.est_correct = (
-                        user_rep.strip().lower() == question.reponse_attendue.strip().lower()
-                    )
-                    repobj.points_obtenus = question.points if repobj.est_correct else 0
-                    if repobj.est_correct:
-                        score += question.points
-                else:
-                    repobj.est_correct = None  # correction manuelle
-                has_texte = True  # noqa: F841 — voir TODO plus haut
-
-            repobj.save()
-
-        # ── Mise à jour soumission ────────────────────────────────
-        now = timezone.now()
-        soum.soumis_le = now
-        soum.statut = "en_retard" if soum.est_en_retard else "soumis"
-
-        if devoir.type_correction == "auto":
-            # QCM ET texte (comparaison exacte à reponse_attendue) sont
-            # déjà corrigés dans la boucle ci-dessus : on enregistre la
-            # note dans tous les cas, qu'il y ait ou non des questions
-            # texte (correction précédente : la note n'était enregistrée
-            # que pour les devoirs 100% QCM, perdant le score des devoirs
-            # mixtes QCM+texte en correction automatique).
-            note = round((score / total) * devoir.note_sur, 2) if total > 0 else 0
-            soum.note = note
-            soum.statut = "corrige"
-            soum.corrige_le = now
-
-        soum.save()
+        _corriger_et_soumettre_devoir(devoir, soum, reponses)
 
         return Response(
             {
@@ -471,6 +503,10 @@ class SoumettreDevoirView(APIView):
 class ResultatDevoirView(APIView):
     """GET /api/devoirs/<id>/resultat/"""
 
+    # P9.1 : pas de gating AccesMatricePermission ici — une SoumissionDevoir
+    # n'existe que si DemarrerDevoirView (déjà gaté) a réussi ; consulter le
+    # résultat d'une soumission déjà faite ne doit pas redevenir bloqué si
+    # le Premium a expiré entre-temps.
     permission_classes = [IsAuthenticated]
 
     def get(self, request, devoir_id):
@@ -497,19 +533,19 @@ class ResultatDevoirView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
-        summary="Dupliquer un devoir (vue non routée)",
+        summary="Dupliquer un devoir",
         description=(
             "Crée une copie non publiée d'un devoir existant, avec toutes ses "
-            "questions et choix de réponse. Réservé à l'enseignant principal du cours "
-            "lié (ou à l'organisateur si c'est un devoir d'olympiade). "
-            "Vue orpheline (non routée dans les urls actuelles)."
+            "questions et choix de réponse (copie profonde). Réservé au créateur du "
+            "devoir ou à un enseignant du même cours (principal ou secondaire) — "
+            "permission plus large que les autres endpoints de gestion, qui restent "
+            "réservés au seul enseignant principal (P7.2)."
         ),
         tags=["evaluation"],
         responses={201: OpenApiTypes.OBJECT},
         examples=[*ERREURS_ECRITURE],
     ),
 )
-# TODO(audit): vue orpheline, non routée (docs/AUDIT_BACKEND.md §2.2).
 class DupliquerDevoirView(APIView):
     """
     POST /api/devoirs/<id>/dupliquer/
@@ -527,10 +563,22 @@ class DupliquerDevoirView(APIView):
 
         source = get_object_or_404(Devoir, pk=devoir_id)
 
-        # Vérifier que l'utilisateur est autorisé à gérer ce devoir
-        if not _profile_autorise_gerer_devoir(source, profile):
+        # P7.2 : permission volontairement plus large qu'ailleurs, propre
+        # à CETTE action (« le créateur ou un enseignant du même cours »,
+        # texte exact du ticket) — n'affecte pas
+        # `_profile_autorise_gerer_devoir`, partagée par tous les autres
+        # endpoints de gestion (modifier/publier/questions), qui restent
+        # volontairement réservés au seul enseignant principal.
+        autorise = profile == source.cree_par
+        cours = source.cours_lie
+        if cours is not None:
+            autorise = autorise or profile == cours.enseignant_principal or cours.enseignants.filter(pk=profile.pk).exists()
+        olympiade = getattr(source, "olympiade_config", None)
+        if olympiade is not None:
+            autorise = autorise or olympiade.organisateur == profile
+        if not autorise:
             return Response(
-                {"detail": "Seul l'enseignant principal peut dupliquer ce devoir."},
+                {"detail": "Seul le créateur du devoir ou un enseignant du même cours peut le dupliquer."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -579,12 +627,16 @@ class DupliquerDevoirView(APIView):
                 reponse_attendue=q.reponse_attendue,
                 reponse_exemple=q.reponse_exemple,
             )
-            # Copier les choix
+            # Copier les choix (ordre préservé — sans quoi tous les choix
+            # copiés retombent sur le défaut `ordre=1`, ordre non
+            # déterministe, même classe de bug déjà corrigée en P7.1 pour
+            # la création directe de question).
             for choix in q.choix.all():
                 ChoixReponse.objects.create(
                     question=nouvelle_question,
                     texte=choix.texte,
                     est_correct=choix.est_correct,
+                    ordre=choix.ordre,
                 )
 
         return Response(
@@ -622,11 +674,11 @@ def _profile_autorise_gerer_devoir(devoir, profile) -> bool:
 
 @extend_schema_view(
     patch=extend_schema(
-        summary="Modifier une question de devoir (vue non routée)",
+        summary="Modifier une question de devoir",
         description=(
             "Modifie une question d'un devoir non encore publié. Réservé à "
-            "l'enseignant principal du cours lié. Vue orpheline (non routée dans les "
-            "urls actuelles)."
+            "l'enseignant principal du cours lié. 409 Conflict si le devoir est déjà "
+            "publié (P7.2, cohérence avec les endpoints d'énoncés/questions de P7.1)."
         ),
         tags=["evaluation"],
         request=QuestionDevoirCreateUpdateSerializer,
@@ -634,7 +686,6 @@ def _profile_autorise_gerer_devoir(devoir, profile) -> bool:
         examples=[*ERREURS_ECRITURE],
     ),
 )
-# TODO(audit): vue orpheline, non routée (docs/AUDIT_BACKEND.md §2.2).
 class ModifierQuestionDevoirView(APIView):
     """
     PATCH /api/devoirs/questions/<question_id>/modifier/
@@ -660,12 +711,10 @@ class ModifierQuestionDevoirView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Vérifier que le devoir n'est pas publié
+        # P7.2 : 409 (pas 403) — cohérence avec EnonceDevoirDetailView/
+        # AjouterQuestionEnonceDevoirView (P7.1).
         if devoir.est_publie:
-            return Response(
-                {"detail": "Impossible de modifier une question d'un devoir déjà publié."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            raise ConflictError("Ce devoir est déjà publié : ses questions ne peuvent plus être modifiées.")
 
         serializer = QuestionDevoirCreateUpdateSerializer(
             question,
@@ -680,18 +729,17 @@ class ModifierQuestionDevoirView(APIView):
 
 @extend_schema_view(
     delete=extend_schema(
-        summary="Supprimer une question de devoir (vue non routée)",
+        summary="Supprimer une question de devoir",
         description=(
             "Supprime une question d'un devoir non encore publié. Réservé à "
-            "l'enseignant principal du cours lié. Vue orpheline (non routée dans les "
-            "urls actuelles)."
+            "l'enseignant principal du cours lié. 409 Conflict si le devoir est déjà "
+            "publié (P7.2, cohérence avec les endpoints d'énoncés/questions de P7.1)."
         ),
         tags=["evaluation"],
         responses={204: None},
         examples=[*ERREURS_ECRITURE],
     ),
 )
-# TODO(audit): vue orpheline, non routée (docs/AUDIT_BACKEND.md §2.2).
 class SupprimerQuestionDevoirView(APIView):
     """
     DELETE /api/devoirs/questions/<question_id>/supprimer/
@@ -716,12 +764,9 @@ class SupprimerQuestionDevoirView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Vérifier que le devoir n'est pas publié
+        # P7.2 : 409 (pas 403) — cohérence avec le reste du module.
         if devoir.est_publie:
-            return Response(
-                {"detail": "Impossible de supprimer une question d'un devoir déjà publié."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            raise ConflictError("Ce devoir est déjà publié : ses questions ne peuvent plus être supprimées.")
 
         question.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -733,8 +778,8 @@ class SupprimerQuestionDevoirView(APIView):
         description=(
             "Modifie les champs d'un devoir existant. Réservé à l'enseignant "
             "principal du cours lié (ou à l'organisateur pour un devoir d'olympiade). "
-            "Contient un bug pré-existant documenté (variable `cours` non définie) — "
-            "voir le TODO ci-dessous, non corrigé dans cette tâche de documentation."
+            "409 Conflict si le devoir est déjà publié — même contrôle que pour les "
+            "questions/énoncés (P7.2, CDC §7.2.2)."
         ),
         tags=["evaluation"],
         request=DevoirUpdateSerializer,
@@ -746,12 +791,6 @@ class ModifierDevoirView(APIView):
     """
     PATCH /api/devoirs/<devoir_id>/modifier/
     Permet à l'enseignant principal de modifier un devoir.
-
-    # TODO(bug pré-existant, non corrigé — "déplacer, ne pas réécrire") :
-    # `cours` n'est jamais défini dans cette méthode (seul `devoir` l'est).
-    # `cours.titre` ci-dessous lève donc un NameError à chaque appel réel
-    # de cet endpoint. Bug présent tel quel avant l'éclatement de
-    # yeki/views.py — signalé ici, à corriger dans une tâche dédiée.
     """
 
     permission_classes = [IsAuthenticated]
@@ -759,6 +798,10 @@ class ModifierDevoirView(APIView):
     @transaction.atomic
     def patch(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id)
+        # P7.2 : corrige le NameError pré-existant (`cours` n'était jamais
+        # défini, seul `devoir` l'était) — `cours` peut être None pour un
+        # devoir d'olympiade (`cours_lie=None`).
+        cours = devoir.cours_lie
 
         try:
             profile = request.user.profile
@@ -771,6 +814,12 @@ class ModifierDevoirView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # P7.2, point 4 : « même contrôle » que les questions — AUCUN champ
+        # n'est modifiable une fois le devoir publié (le serializer ne
+        # bloquait auparavant que enonce/enonces_supplementaires).
+        if devoir.est_publie:
+            raise ConflictError("Ce devoir est déjà publié et ne peut plus être modifié.")
+
         serializer = DevoirUpdateSerializer(devoir, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
@@ -781,7 +830,7 @@ class ModifierDevoirView(APIView):
             description=f"Devoir « {updated.titre} » modifié",
             data={
                 "devoir": updated.titre,
-                "cours": cours.titre,  # noqa: F821 — bug pré-existant documenté ci-dessus
+                "cours": cours.titre if cours else None,
             },
             objet_id=updated.id,
             objet_type="Devoir",
@@ -805,13 +854,13 @@ class ModifierDevoirView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
-        summary="Publier un devoir (vue non routée)",
+        summary="Publier un devoir",
         description=(
             "Publie un devoir (le rend accessible aux apprenants et non modifiable), "
             "et notifie les apprenants du cours concerné. Réservé à l'enseignant "
-            "principal du cours lié. Vue orpheline (non routée) contenant un bug "
-            "pré-existant documenté (variable `cours` non définie) — non corrigé "
-            "dans cette tâche de documentation."
+            "principal du cours lié. Renvoie un avertissement explicite : au-delà de "
+            "ce point, plus aucune question ni énoncé ne peut être ajouté ou modifié "
+            "(P7.2, point 5)."
         ),
         tags=["evaluation"],
         request=None,
@@ -819,19 +868,19 @@ class ModifierDevoirView(APIView):
         examples=[*ERREURS_ECRITURE],
     ),
 )
-# TODO(audit): vue orpheline, non routée (docs/AUDIT_BACKEND.md §2.2).
-# TODO(bug pré-existant, non corrigé — "déplacer, ne pas réécrire") : `cours`
-# n'est jamais défini dans cette méthode. `cours.titre`, `Cours.nb_devoirs = ...`
-# (affectation sur la CLASSE, pas une instance — no-op), `cours.save(...)` et
-# `cours.departement...` lèvent tous un NameError/comportement incorrect dès
-# le premier appel réel. Bug présent tel quel avant l'éclatement de
-# yeki/views.py — signalé ici, à corriger dans une tâche dédiée.
 class PublierDevoirView(APIView):
+    """POST /api/devoirs/<devoir_id>/publier/"""
+
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id)
+        # P7.2 : corrige le NameError pré-existant (`cours` n'était jamais
+        # défini) — `cours` est None pour un devoir d'olympiade
+        # (`cours_lie=None`), auquel cas il n'y a ni statistique de cours
+        # ni cohorte d'apprenants de cours à notifier ici.
+        cours = devoir.cours_lie
 
         try:
             profile = request.user.profile
@@ -844,8 +893,9 @@ class PublierDevoirView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # P7.2 : 409 (pas 400) — cohérence avec le reste du module.
         if devoir.est_publie:
-            return Response({"detail": "Ce devoir est déjà publié."}, status=400)
+            raise ConflictError("Ce devoir est déjà publié.")
 
         if not devoir.questions.exists():
             return Response(
@@ -856,10 +906,11 @@ class PublierDevoirView(APIView):
         devoir.est_publie = True
         devoir.save(update_fields=["est_publie"])
 
-        Cours.nb_devoirs = Devoir.objects.filter(
-            cours_lie=cours, est_publie=True  # noqa: F821 — bug pré-existant documenté ci-dessus
-        ).count()
-        cours.save(update_fields=["nb_devoirs"])  # noqa: F821 — idem
+        if cours is not None:
+            # Corrige l'affectation sur la CLASSE (`Cours.nb_devoirs = ...`,
+            # no-op) en affectation sur l'INSTANCE.
+            cours.nb_devoirs = Devoir.objects.filter(cours_lie=cours, est_publie=True).count()
+            cours.save(update_fields=["nb_devoirs"])
 
         enregistrer_activite(
             user=request.user,
@@ -867,36 +918,26 @@ class PublierDevoirView(APIView):
             description=f"Devoir « {devoir.titre} » publié",
             data={
                 "devoir": devoir.titre,
-                "cours": cours.titre,  # noqa: F821 — idem
+                "cours": cours.titre if cours else None,
             },
             objet_id=devoir.id,
             objet_type="Devoir",
         )
 
-        # Créer des notifications pour les apprenants du cours
-        apprenants = Profile.objects.filter(
-            user_type="apprenant",
-            cursus=cours.departement.parcours.nom,  # noqa: F821 — idem
-            is_active=True,
-        ).select_related("user")
-
-        for apprenant in apprenants:
-            creer_notification(
-                utilisateur=apprenant.user,
-                type_notif="devoir",
-                titre=f"Nouveau devoir : {devoir.titre}",
-                contenu=f"Le devoir '{devoir.titre}' est maintenant disponible dans le cours '{cours.titre}'.",  # noqa: F821 — idem
-                objet_id=devoir.id,
-                objet_type="Devoir",
-                action_url=f"/devoirs/{devoir.id}/composer",
-            )
+        # Notification aux apprenants du cours : signal post_save sur
+        # Devoir (apps/evaluation/signals.py, P10.3) — plus d'appel manuel
+        # ici (un devoir d'olympiade, cours_lie=None, est déjà exclu par
+        # le signal).
 
         return Response(
             {
                 "detail": "Devoir publié avec succès. Il ne peut plus être modifié.",
                 "id": devoir.id,
                 "est_publie": True,
-                "message": "Une fois publié, vous ne pouvez plus ajouter ou modifier les questions.",
+                # Point 5 : l'enseignant DOIT être informé, au moment de
+                # publier, qu'il ne pourra plus ajouter/modifier de
+                # question ni d'énoncé.
+                "message": "Une fois publié, vous ne pouvez plus ajouter ou modifier les questions ni les énoncés.",
             },
             status=200,
         )
@@ -989,7 +1030,9 @@ class DevoirsCoursView(PaginatedListMixin, APIView):
     Retourne les devoirs liés à un cours spécifique avec le statut de l'apprenant.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "voir"
 
     def get(self, request, cours_id):
         cours = get_object_or_404(Cours, pk=cours_id)
@@ -1061,6 +1104,13 @@ class DevoirsCoursView(PaginatedListMixin, APIView):
                     "moyenne": round(moyenne, 2),
                 }
 
+            # P7.4 : `coefficient`/`fichier_correction_url` manquaient —
+            # sans eux l'écran de gestion enseignant devrait refaire un
+            # appel réseau séparé pour des champs déjà en base ici.
+            fichier_correction_url = None
+            if devoir.fichier_correction:
+                fichier_correction_url = request.build_absolute_uri(devoir.fichier_correction.url)
+
             result.append(
                 {
                     "id": devoir.id,
@@ -1072,10 +1122,12 @@ class DevoirsCoursView(PaginatedListMixin, APIView):
                     "est_expire": devoir.est_expire,
                     "nb_questions": devoir.questions.count(),
                     "note_sur": float(devoir.note_sur),
+                    "coefficient": float(devoir.coefficient),
                     "duree_minutes": devoir.duree_minutes,
                     "tentatives_max": devoir.tentatives_max,
                     "est_publie": devoir.est_publie,
                     "type_correction": getattr(devoir, "type_correction", "auto"),
+                    "fichier_correction_url": fichier_correction_url,
                     "ma_soumission": soumission_data,
                     "stats": stats,
                 }
@@ -1216,12 +1268,15 @@ class SoumettreDevoirFichierView(APIView):
     de type correction manuelle.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "soumettre"
     parser_classes = [MultiPartParser, FormParser]
 
     @transaction.atomic
     def post(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id)
+        self.check_object_permissions(request, devoir)
 
         if not devoir.est_ouvert:
             return Response(
@@ -1290,77 +1345,13 @@ class SoumettreDevoirFichierView(APIView):
 
 
 @extend_schema_view(
-    post=extend_schema(
-        summary="Ajouter une question à un devoir",
-        description=(
-            "Ajoute une question (avec ses choix éventuels pour un QCM) à un devoir "
-            "non encore publié. Réservé à l'enseignant principal du cours lié (ou à "
-            "l'organisateur pour un devoir d'olympiade)."
-        ),
+    get=extend_schema(
+        summary="Lister les énoncés d'un devoir",
+        description="Retourne les énoncés du devoir, ORDONNÉS, avec leurs questions imbriquées (elles-mêmes ordonnées).",
         tags=["evaluation"],
-        request=QuestionDevoirCreateUpdateSerializer,
-        responses={201: QuestionDevoirAdminSerializer},
-        examples=[*ERREURS_ECRITURE],
+        responses={200: EnonceDevoirSerializer(many=True)},
+        examples=[*ERREURS_COURANTES],
     ),
-)
-class AjouterQuestionDevoirView(APIView):
-    """
-    POST /api/devoirs/<devoir_id>/questions/ajouter/
-    Ajoute une question à un devoir. Utilise les mêmes garde-fous que
-    ModifierQuestionDevoirView / SupprimerQuestionDevoirView : réservé à
-    l'enseignant principal, interdit une fois le devoir publié.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, devoir_id):
-        devoir = get_object_or_404(Devoir, pk=devoir_id)
-
-        try:
-            profile = request.user.profile
-        except Profile.DoesNotExist:
-            return Response({"detail": "Profil introuvable."}, status=404)
-
-        if not _profile_autorise_gerer_devoir(devoir, profile):
-            return Response(
-                {"detail": "Seul l'enseignant principal peut ajouter des questions."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Même garde que ModifierQuestionDevoirView / SupprimerQuestionDevoirView :
-        # impossible d'ajouter une question à un devoir déjà publié (des
-        # apprenants pourraient déjà être en train de composer).
-        if devoir.est_publie:
-            return Response(
-                {"detail": "Impossible d'ajouter une question à un devoir déjà publié."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        data = request.data.copy()
-        data["ordre"] = data.get("ordre", devoir.questions.count() + 1)
-
-        serializer = QuestionDevoirCreateUpdateSerializer(
-            data=data, context={"type_correction": devoir.type_correction}
-        )
-        serializer.is_valid(raise_exception=True)
-        choix_data = serializer.validated_data.pop("choix", [])
-        question = QuestionDevoir.objects.create(devoir=devoir, **serializer.validated_data)
-
-        if question.type_question == "qcm" and choix_data:
-            for c in choix_data:
-                ChoixReponse.objects.create(
-                    question=question,
-                    texte=c.get("texte", ""),
-                    est_correct=c.get("est_correct", False),
-                )
-
-        return Response(
-            QuestionDevoirAdminSerializer(question).data, status=status.HTTP_201_CREATED
-        )
-
-
-@extend_schema_view(
     post=extend_schema(
         summary="Ajouter un énoncé à un devoir",
         description=(
@@ -1377,17 +1368,23 @@ class AjouterQuestionDevoirView(APIView):
         examples=[*ERREURS_ECRITURE],
     ),
 )
-class AjouterEnonceDevoirView(APIView):
+class EnoncesDevoirView(APIView):
     """
-    POST /api/devoirs/<devoir_id>/enonces/ajouter/
-    Ajoute un énoncé supplémentaire à un devoir (P2.3 — CDC §7.2.1 : « un
-    énoncé a plusieurs questions, ces questions »). Un devoir a toujours au
-    moins un énoncé (ordre=1, créé automatiquement à la création du devoir,
-    voir DevoirCreateSerializer.create) ; cette vue permet d'en ajouter
-    d'autres (ordre=2, 3…) avant publication.
+    GET/POST /api/devoirs/<devoir_id>/enonces/
+    P7.1 (CDC §7.2.1 : « un énoncé a plusieurs questions, ces questions »).
+    Un devoir a toujours au moins un énoncé (ordre=1, créé automatiquement
+    à la création du devoir, voir DevoirCreateSerializer.create) ; cette
+    vue liste les énoncés existants et permet d'en ajouter d'autres
+    (ordre=2, 3…) avant publication.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Devoir
+    acces_action = "voir"
+
+    def get(self, request, devoir_id):
+        devoir = get_object_or_404(Devoir, pk=devoir_id)
+        return Response(EnonceDevoirSerializer(devoir.enonces.all(), many=True).data)
 
     @transaction.atomic
     def post(self, request, devoir_id):
@@ -1422,6 +1419,151 @@ class AjouterEnonceDevoirView(APIView):
 
 
 @extend_schema_view(
+    patch=extend_schema(
+        summary="Modifier un énoncé de devoir",
+        description="Modifie le contenu d'un énoncé d'un devoir non encore publié. 409 Conflict si publié.",
+        tags=["evaluation"],
+        request=EnonceDevoirUpdateSerializer,
+        responses={200: EnonceDevoirSerializer},
+        examples=[*ERREURS_ECRITURE],
+    ),
+    delete=extend_schema(
+        summary="Supprimer un énoncé de devoir",
+        description=(
+            "Supprime un énoncé (et ses questions/choix en cascade) d'un devoir non "
+            "encore publié. 409 Conflict si le devoir est déjà publié, ou si c'est le "
+            "DERNIER énoncé restant du devoir (un devoir doit toujours en conserver "
+            "au moins un). Les énoncés restants sont renumérotés pour rester contigus."
+        ),
+        tags=["evaluation"],
+        responses={204: None},
+        examples=[*ERREURS_ECRITURE],
+    ),
+)
+class EnonceDevoirDetailView(APIView):
+    """PATCH/DELETE /api/devoirs/enonces/<enonce_id>/ — P7.1."""
+
+    permission_classes = [IsAuthenticated]
+
+    def _get_enonce_et_verifier(self, request, enonce_id):
+        enonce = get_object_or_404(EnonceDevoir, pk=enonce_id)
+        devoir = enonce.devoir
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return None, None, Response({"detail": "Profil introuvable."}, status=404)
+        if not _profile_autorise_gerer_devoir(devoir, profile):
+            return None, None, Response(
+                {"detail": "Seul l'enseignant principal peut gérer les énoncés de ce devoir."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return enonce, devoir, None
+
+    @transaction.atomic
+    def patch(self, request, enonce_id):
+        enonce, devoir, erreur = self._get_enonce_et_verifier(request, enonce_id)
+        if erreur:
+            return erreur
+
+        if devoir.est_publie:
+            raise ConflictError("Ce devoir est déjà publié : ses énoncés ne peuvent plus être modifiés.")
+
+        serializer = EnonceDevoirUpdateSerializer(enonce, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated = serializer.save()
+        return Response(EnonceDevoirSerializer(updated).data)
+
+    @transaction.atomic
+    def delete(self, request, enonce_id):
+        enonce, devoir, erreur = self._get_enonce_et_verifier(request, enonce_id)
+        if erreur:
+            return erreur
+
+        if devoir.est_publie:
+            raise ConflictError("Ce devoir est déjà publié : ses énoncés ne peuvent plus être supprimés.")
+
+        if devoir.enonces.count() <= 1:
+            raise ConflictError("Impossible de supprimer le dernier énoncé restant d'un devoir.")
+
+        enonce.delete()
+
+        # Renumérote les énoncés restants pour rester contigus (1..N) —
+        # sans cela, `EnoncesDevoirView.post` (ordre = count() + 1)
+        # pourrait recréer un `ordre` déjà utilisé par un énoncé restant
+        # et violer `unique_together = ("devoir", "ordre")`.
+        restants = list(devoir.enonces.order_by("ordre"))
+        for nouvel_ordre, e in enumerate(restants, start=1):
+            if e.ordre != nouvel_ordre:
+                e.ordre = nouvel_ordre
+                e.save(update_fields=["ordre"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema_view(
+    post=extend_schema(
+        summary="Ajouter une question à un énoncé de devoir",
+        description=(
+            "Ajoute une question (avec ses choix éventuels pour un QCM) à un énoncé "
+            "d'un devoir non encore publié — la question est rattachée à CET énoncé "
+            "(`enonce_devoir`), pas seulement au devoir. Réservé à l'enseignant "
+            "principal du cours lié (ou à l'organisateur pour un devoir d'olympiade). "
+            "409 Conflict si le devoir est déjà publié."
+        ),
+        tags=["evaluation"],
+        request=QuestionDevoirCreateUpdateSerializer,
+        responses={201: QuestionDevoirAdminSerializer},
+        examples=[*ERREURS_ECRITURE],
+    ),
+)
+class AjouterQuestionEnonceDevoirView(APIView):
+    """
+    POST /api/devoirs/enonces/<enonce_id>/questions/ — P7.1.
+    Remplace `AjouterQuestionDevoirView` (qui créait des `QuestionDevoir`
+    sans jamais rattacher `enonce_devoir`, malgré le modèle le permettant
+    — exactement le bug dénoncé par le commanditaire : « un énoncé a
+    plusieurs questions, CES questions »).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, enonce_id):
+        enonce = get_object_or_404(EnonceDevoir, pk=enonce_id)
+        devoir = enonce.devoir
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+
+        if not _profile_autorise_gerer_devoir(devoir, profile):
+            return Response(
+                {"detail": "Seul l'enseignant principal peut ajouter des questions."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # CDC §7.2.2 : 409 (pas 403) — cohérent avec EnoncesDevoirView/
+        # EnonceDevoirDetailView, qui appliquent déjà ce même code après
+        # publication.
+        if devoir.est_publie:
+            raise ConflictError("Ce devoir est déjà publié : aucune question ne peut plus être ajoutée.")
+
+        data = request.data.copy()
+        data["ordre"] = data.get("ordre", devoir.questions.count() + 1)
+
+        serializer = QuestionDevoirCreateUpdateSerializer(
+            data=data, context={"type_correction": devoir.type_correction}
+        )
+        serializer.is_valid(raise_exception=True)
+        question = serializer.save(devoir=devoir, enonce_devoir=enonce)
+
+        return Response(
+            QuestionDevoirAdminSerializer(question).data, status=status.HTTP_201_CREATED
+        )
+
+
+@extend_schema_view(
     get=extend_schema(
         summary="Lister les questions d'un devoir",
         description="Retourne la liste paginée des questions d'un devoir (avec leurs choix), ordonnées par `ordre`.",
@@ -1438,6 +1580,22 @@ class ListeQuestionsDevoirView(PaginatedListMixin, APIView):
 
     def get(self, request, devoir_id):
         devoir = get_object_or_404(Devoir, pk=devoir_id)
+
+        # P7.4 : garde manquante jusqu'ici — cette vue renvoie
+        # `QuestionDevoirAdminSerializer` (est_correct/reponse_attendue
+        # inclus), réservée à l'enseignant qui gère le devoir. Sans
+        # cette vérification, n'importe quel utilisateur authentifié
+        # pouvait voir les bonnes réponses avant même de composer.
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profil introuvable."}, status=404)
+        if not _profile_autorise_gerer_devoir(devoir, profile):
+            return Response(
+                {"detail": "Seul l'enseignant principal peut consulter les questions."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         questions = devoir.questions.prefetch_related("choix").order_by("ordre")
         page = self.paginate_queryset(questions)
         return self.get_paginated_response(QuestionDevoirAdminSerializer(page, many=True).data)
@@ -1581,15 +1739,8 @@ class CorrigerSoumissionView(APIView):
         soum.corrige_le = timezone.now()
         soum.save(update_fields=["note", "statut", "commentaire", "corrige_le"])
 
-        creer_notification(
-            utilisateur=soum.utilisateur,
-            type_notif="correction",
-            titre="Devoir corrigé",
-            contenu=f"Votre devoir « {soum.devoir.titre} » a été corrigé : {note}/{note_sur}.",
-            objet_id=soum.devoir.id,
-            objet_type="Devoir",
-            action_url=f"/devoirs/{soum.devoir.id}/resultat",
-        )
+        # Notification à l'apprenant : signal post_save sur SoumissionDevoir
+        # (apps/evaluation/signals.py, P10.3) — plus d'appel manuel ici.
 
         enregistrer_activite(
             user=request.user,
@@ -1653,16 +1804,41 @@ class DetailSoumissionEnseignantView(APIView):
         nom = f"{u.first_name} {u.last_name}".strip()
 
         reponses = []
-        for rep in soum.reponses.select_related("question", "choix").all():
+        for rep in soum.reponses.select_related("question", "choix").prefetch_related(
+            "question__choix"
+        ):
+            question = rep.question
             reponses.append(
                 {
-                    "question_id": rep.question.id,
-                    "question_texte": rep.question.texte,
-                    "type_question": rep.question.type_question,
+                    "question_id": question.id,
+                    # P7.3 : corrige `rep.question.texte` — champ inexistant
+                    # sur QuestionDevoir (seul `enonce` existe), levait un
+                    # AttributeError à chaque appel réel de cette vue.
+                    "question_enonce": question.enonce,
+                    "type_question": question.type_question,
                     "reponse": rep.reponse,
                     "est_correct": rep.est_correct,
                     "points_obtenus": rep.points_obtenus,
-                    "points_max": rep.question.points,
+                    "points_max": question.points,
+                    # P7.3 : parité avec la vue apprenant — utile à
+                    # l'enseignant pour une correction manuelle.
+                    "bonne_reponse": (
+                        question.reponse_attendue
+                        if question.type_question == "texte"
+                        else (
+                            question.choix.filter(est_correct=True).first().texte
+                            if question.choix.filter(est_correct=True).exists()
+                            else None
+                        )
+                    ),
+                    "choix": (
+                        [
+                            {"id": c.id, "texte": c.texte, "est_correct": c.est_correct}
+                            for c in question.choix.all()
+                        ]
+                        if question.type_question == "qcm"
+                        else []
+                    ),
                 }
             )
 

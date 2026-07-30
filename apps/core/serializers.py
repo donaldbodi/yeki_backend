@@ -32,9 +32,11 @@ class AppVersionSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "platform",
+            "canal",
             "version_code",
             "version_name",
             "download_url",
+            "checksum_sha256",
             "changelog",
             "min_version_code",
             "force_update",
@@ -43,7 +45,7 @@ class AppVersionSerializer(serializers.ModelSerializer):
             "release_date",
             "created_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["created_at"]
 
 
 class AppVersionCreateSerializer(serializers.ModelSerializer):
@@ -51,9 +53,11 @@ class AppVersionCreateSerializer(serializers.ModelSerializer):
         model = AppVersion
         fields = [
             "platform",
+            "canal",
             "version_code",
             "version_name",
             "download_url",
+            "checksum_sha256",
             "changelog",
             "min_version_code",
             "force_update",

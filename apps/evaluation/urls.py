@@ -20,15 +20,21 @@ from apps.evaluation.views import (
     DetailDevoirView,
     DemarrerDevoirView,
     SoumettreDevoirView,
+    SortirDevoirView,
     SignalerFocusDevoirView,
     MesSoumissionsView,
     ResultatDevoirView,
     DevoirsCoursView,
     CreerDevoirCoursView,
     ModifierDevoirView,
+    PublierDevoirView,
+    DupliquerDevoirView,
+    ModifierQuestionDevoirView,
+    SupprimerQuestionDevoirView,
     ListeQuestionsDevoirView,
-    AjouterQuestionDevoirView,
-    AjouterEnonceDevoirView,
+    EnoncesDevoirView,
+    EnonceDevoirDetailView,
+    AjouterQuestionEnonceDevoirView,
     SoumissionsDevoirEnseignantView,
     DetailSoumissionEnseignantView,
     CorrigerSoumissionView,
@@ -46,6 +52,8 @@ from apps.evaluation.views import (
     MonInscriptionOlympiadeView,
     OlympiadesPourMoiView,
     ClassementDepartementView,
+    ClassementHistoriqueView,
+    ClassementPeriodesView,
     MonScoreGlobalView,
     RecalculerClassementView,
     CadreOlympiadesView,
@@ -119,6 +127,9 @@ urlpatterns = [
         "devoirs/<int:devoir_id>/soumettre/", SoumettreDevoirView.as_view(), name="soumettre-devoir"
     ),
     path(
+        "devoirs/<int:devoir_id>/sortir/", SortirDevoirView.as_view(), name="devoir-sortir"
+    ),
+    path(
         "devoirs/<int:devoir_id>/focus-perdu/",
         SignalerFocusDevoirView.as_view(),
         name="focus-devoir",
@@ -130,20 +141,37 @@ urlpatterns = [
         "cours/<int:cours_id>/devoirs/creer/", CreerDevoirCoursView.as_view(), name="devoir-creer"
     ),
     path("devoirs/<int:devoir_id>/modifier/", ModifierDevoirView.as_view(), name="devoir-modifier"),
+    path("devoirs/<int:devoir_id>/publier/", PublierDevoirView.as_view(), name="devoir-publier"),
+    path("devoirs/<int:devoir_id>/dupliquer/", DupliquerDevoirView.as_view(), name="devoir-dupliquer"),
+    path(
+        "devoirs/questions/<int:question_id>/modifier/",
+        ModifierQuestionDevoirView.as_view(),
+        name="devoir-question-modifier",
+    ),
+    path(
+        "devoirs/questions/<int:question_id>/supprimer/",
+        SupprimerQuestionDevoirView.as_view(),
+        name="devoir-question-supprimer",
+    ),
     path(
         "devoirs/<int:devoir_id>/questions/",
         ListeQuestionsDevoirView.as_view(),
         name="devoir-questions-liste",
     ),
     path(
-        "devoirs/<int:devoir_id>/questions/ajouter/",
-        AjouterQuestionDevoirView.as_view(),
-        name="devoir-question-ajouter",
+        "devoirs/<int:devoir_id>/enonces/",
+        EnoncesDevoirView.as_view(),
+        name="devoir-enonces",
     ),
     path(
-        "devoirs/<int:devoir_id>/enonces/ajouter/",
-        AjouterEnonceDevoirView.as_view(),
-        name="devoir-enonce-ajouter",
+        "devoirs/enonces/<int:enonce_id>/",
+        EnonceDevoirDetailView.as_view(),
+        name="devoir-enonce-detail",
+    ),
+    path(
+        "devoirs/enonces/<int:enonce_id>/questions/",
+        AjouterQuestionEnonceDevoirView.as_view(),
+        name="devoir-enonce-question-ajouter",
     ),
     path(
         "devoirs/<int:devoir_id>/soumissions/",
@@ -239,6 +267,16 @@ urlpatterns = [
         "classement/departement/<int:departement_id>/",
         ClassementDepartementView.as_view(),
         name="classement-departement",
+    ),
+    path(
+        "classement/departement/<int:departement_id>/periodes/",
+        ClassementPeriodesView.as_view(),
+        name="classement-periodes",
+    ),
+    path(
+        "classement/departement/<int:departement_id>/historique/",
+        ClassementHistoriqueView.as_view(),
+        name="classement-historique",
     ),
     path("classement/mon-score/", MonScoreGlobalView.as_view(), name="mon-score"),
     path(

@@ -12,6 +12,9 @@ psycopg2-binary==2.9.12
 python-dateutil==2.9.0.post0
 Pillow==11.1.0
 
+# P10.3 — envoi des notifications push (Firebase Cloud Messaging)
+firebase-admin==6.5.0
+
 # P1.6 — documentation API + tests
 drf-spectacular==0.28.0
 pytest==8.3.4

@@ -114,4 +114,4 @@ def test_correction_qcm_utilise_est_correct(exercice):
 
     score, total, details = _corriger_reponses_exercice(exercice, {str(question.id): "Paris"})
     assert score == 1
-    assert details[0]["correct"] is True
+    assert details[0]["est_correct"] is True

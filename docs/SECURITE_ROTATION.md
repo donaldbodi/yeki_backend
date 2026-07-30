@@ -80,7 +80,28 @@ des heures d'usage, avec information préalable si possible.
    et en production.
 4. Vérifier un paiement de test avant de considérer la rotation terminée.
 
-### 4. Après rotation
+### 4. Secret HMAC du webhook CinetPay (`CINETPAY_WEBHOOK_SECRET`)
+
+Introduit en P9.7 — **pas concerné par la fuite du 2026-07-16** (n'existait
+pas encore à cette date), mais rotable selon la même logique que la clé
+CinetPay si un jour compromis (ex. secret vu dans un log, un webhook de
+test mal nettoyé, etc.).
+
+1. Se connecter au tableau de bord marchand CinetPay > Notifications, et
+   régénérer le secret de signature du webhook.
+2. Mettre à jour `CINETPAY_WEBHOOK_SECRET` dans le `.env` local et en
+   production.
+3. Vérifier qu'un appel webhook réel (ou simulé en bac à sable) est
+   toujours accepté avec la nouvelle valeur — sinon TOUT paiement CinetPay
+   réel échouerait silencieusement à créditer (le webhook fail-closed sans
+   crier, par design, voir `CinetPayWebhookView`).
+
+**Absence de valeur** (`.env` vide ou variable non définie) : le webhook
+refuse systématiquement toute requête (401) plutôt que de désactiver la
+vérification — ne jamais confondre "secret non configuré" avec "vérification
+non nécessaire".
+
+### 5. Après rotation
 
 - Vérifier que `.env` local et les variables d'environnement du serveur de
   production contiennent bien les nouvelles valeurs (jamais les anciennes).

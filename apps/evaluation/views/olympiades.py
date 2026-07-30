@@ -74,6 +74,23 @@ class ListeOlympiadesView(PaginatedListMixin, APIView):
     def get(self, request):
         qs = Olympiade.objects.all().order_by("-date_debut_olympiade")
 
+        # Visibilité par niveau/cursus (P8.1, règle jusqu'ici jamais
+        # appliquée à la lecture — seulement à la notification en création).
+        # Un apprenant ne voit que les olympiades qui lui sont destinées ;
+        # un enseignant/cadre/admin voit tout (supervision).
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            profile = None
+
+        if profile is not None and profile.user_type == "apprenant":
+            qs = [
+                o
+                for o in qs
+                if o.est_accessible_par_niveau(profile.niveau)
+                and o.est_accessible_par_cursus(profile.cursus)
+            ]
+
         statut = request.query_params.get("statut")
 
         serializer = OlympiadeListSerializer(qs, many=True, context={"request": request})
@@ -134,6 +151,26 @@ class SInscrireOlympiadeView(APIView):
         now = timezone.now()
 
         # ── Vérifications ────────────────────────────────────────
+        # Visibilité par niveau/cursus (P8.1) — la vraie porte : filtrer la
+        # liste (`ListeOlympiadesView`) n'empêche pas un appel direct sur
+        # l'ID d'une olympiade non destinée à cet apprenant.
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            profile = None
+
+        if profile is not None and profile.user_type == "apprenant":
+            if not olympiade.est_accessible_par_niveau(profile.niveau):
+                return Response(
+                    {"detail": "Cette olympiade n'est pas accessible à votre niveau."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if not olympiade.est_accessible_par_cursus(profile.cursus):
+                return Response(
+                    {"detail": "Cette olympiade n'est pas accessible à votre cursus."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         if now < olympiade.date_ouverture_inscription:
             return Response(
                 {"detail": "Les inscriptions ne sont pas encore ouvertes."},
@@ -236,6 +273,15 @@ class PayerParticipationOlympiadeView(APIView):
             EXEMPLE_THROTTLED,
         ],
     )
+    # P8.1 : `wallet.debiter()` et `wallet_cadre.crediter()` sont CHACUNE
+    # décorées `@transaction.atomic` indépendamment (apps/paiement/models.py)
+    # — sans cet englobant, ce sont deux transactions séparées : un échec
+    # après le débit de l'apprenant (mais avant le crédit du cadre) laisse
+    # l'apprenant débité sans qu'aucun compte ne soit crédité. Englober les
+    # deux dans une transaction unique (les décorateurs internes deviennent
+    # de simples savepoints imbriqués, sans risque) garantit que tout ou
+    # rien est appliqué.
+    @transaction.atomic
     def post(self, request, olympiade_id):
         olympiade = get_object_or_404(Olympiade, pk=olympiade_id)
 
@@ -623,6 +669,26 @@ class CalculerClassementView(APIView):
             )
             insc.classement = rang
             insc.save(update_fields=["classement"])
+
+        # Notifier chaque participant — P8.3 : jusqu'ici, calculer le
+        # classement ne notifiait PERSONNE (seul `enregistrer_activite`
+        # ci-dessous, un journal d'audit, pas une notification visible par
+        # l'apprenant). Même patron que la notification de création
+        # ci-dessus (P8.1, ligne ~908).
+        for insc in inscriptions:
+            creer_notification(
+                utilisateur=insc.apprenant,
+                # "classement" (pas "olympiade", générique) — type dédié
+                # existant pour ce cas exact (« changement de rang »,
+                # apps/notifications/models.py).
+                type_notif="classement",
+                titre=f"Classement disponible : {olympiade.titre}",
+                contenu=f"Le classement de l'olympiade « {olympiade.titre} » est disponible.",
+                objet_id=olympiade.id,
+                objet_type="Olympiade",
+                action_route=f"/olympiades/{olympiade.id}/classement",
+            )
+
         enregistrer_activite(
             user=request.user,
             action="ranking_computed",
@@ -667,7 +733,7 @@ class MonInscriptionOlympiadeView(APIView):
 
 class CreerOlympiadeParCadreView(APIView):
     """
-    POST /api/olympiades/creer/
+    POST /api/olympiades/cadre/creer/
     Création d'une olympiade par un enseignant_cadre (Partie 3.2) :
     - Gratuite pour le cadre (aucun paiement de création).
     - Plus de validation par l'enseignant admin : publiée immédiatement.
@@ -866,7 +932,7 @@ class CreerOlympiadeParCadreView(APIView):
                     contenu=f"Une nouvelle olympiade '{olympiade.titre}' est disponible. Inscrivez-vous maintenant !",
                     objet_id=olympiade.id,
                     objet_type="Olympiade",
-                    action_url=f"/olympiades/{olympiade.id}/inscription",
+                    action_route=f"/olympiades/{olympiade.id}/inscription",
                 )
 
         enregistrer_activite(
@@ -995,8 +1061,9 @@ class CadreModifierOlympiadeView(APIView):
             )
         if "date_debut_olympiade" in data:
             updates["date_debut_olympiade"] = _parse_date_aware(data["date_debut_olympiade"])
-        if "date_fin_olympiade" in data:
-            updates["date_fin_olympiade"] = _parse_date_aware(data["date_fin_olympiade"])
+        # `date_fin_olympiade` n'est JAMAIS acceptée du client (P8.1, même
+        # règle qu'à la création) — TOUJOURS recalculée ci-dessous à partir
+        # de date_debut_olympiade/duree_minutes (nouveaux ou existants).
         if "duree_minutes" in data:
             updates["duree_minutes"] = int(data["duree_minutes"])
         if "nb_questions" in data:
@@ -1024,6 +1091,14 @@ class CadreModifierOlympiadeView(APIView):
 
         if not updates:
             return Response({"detail": "Aucune modification spécifiée."}, status=400)
+
+        # `date_fin_olympiade` recalculée serveur (P8.1) dès que la date de
+        # début ou la durée change — jamais acceptée brute du client, même
+        # règle qu'à la création (`CreerOlympiadeParCadreView`).
+        if "date_debut_olympiade" in updates or "duree_minutes" in updates:
+            nouveau_debut = updates.get("date_debut_olympiade", olympiade.date_debut_olympiade)
+            nouvelle_duree = updates.get("duree_minutes", olympiade.duree_minutes)
+            updates["date_fin_olympiade"] = nouveau_debut + timedelta(minutes=nouvelle_duree)
 
         # Appliquer les modifications
         for key, value in updates.items():
@@ -1196,9 +1271,12 @@ class LierDevoirOlympiadeView(APIView):
         )
 
         # Calculer le prix global avec la nouvelle tarification
+        # `cursus_cible()` (P8.1) factorise cette dérivation, auparavant
+        # écrite en dur ici — et ne lève plus d'exception si l'organisateur
+        # n'a pas (ou plus) de département rattaché.
         nb_apprenants = Profile.objects.filter(
             user_type="apprenant",
-            cursus=olympiade.organisateur.departements_cadre.first().parcours.nom,
+            cursus=olympiade.cursus_cible(),
             is_active=True,
         ).count()
 

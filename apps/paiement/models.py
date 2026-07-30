@@ -23,6 +23,10 @@ class Paiement(models.Model):
         ("acces_departement", "Accès département (concours/formation)"),
         ("olympiade", "Participation olympiade"),
         ("olympiade_participation", "Participation apprenant à une olympiade"),
+        # P9.2 : catégories couvertes par la validation manuelle
+        # (DemandePaiementManuelle) sans équivalent ci-dessus.
+        ("recharge_wallet", "Recharge portefeuille (manuel)"),
+        ("supplement_presentiel", "Supplément présentiel"),
     ]
     MOYEN_CHOICES = [
         ("mtn_momo", "MTN Mobile Money"),
@@ -60,6 +64,32 @@ class Paiement(models.Model):
 
     # Commission Yeki prélevée (15% si paiement > 0 pour département)
     commission_yeki = models.PositiveIntegerField(default=0, help_text="Part Yeki en FCFA")
+
+    # P9.2 : lien vers la demande de paiement manuel d'origine, s'il y en a
+    # une (traçabilité — remonter du Paiement vers la demande vérifiée par
+    # le Service Client). Référence par nom : DemandePaiementManuelle est
+    # défini plus bas dans ce même fichier.
+    demande_manuelle = models.ForeignKey(
+        "DemandePaiementManuelle",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="paiements_traces",
+    )
+
+    # P9.7 : département concerné pour un paiement de catégorie "formation"
+    # (`acces_departement`) — quel que soit le fournisseur (manuel ou
+    # CinetPay). Avant ce champ, seul `demande_manuelle.departement` portait
+    # cette information, donc absente pour tout paiement CinetPay : le
+    # tableau de bord admin (P9.6) ne pouvait pas filtrer ces lignes par
+    # département.
+    departement = models.ForeignKey(
+        Departement,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="paiements",
+    )
 
     class Meta:
         db_table = "yeki_paiement"
@@ -174,11 +204,6 @@ class AbonnementPremium(models.Model):
 # Sert à payer : IA (débit auto), cours, formations, olympiades.
 # La commission Yeki (IA) va dans le compte principal Yeki.
 # ══════════════════════════════════════════════════════════════════
-
-TARIF_IA_PAR_TOKEN = 0.002  # 0.002 FCFA par token OpenAI (gpt-3.5-turbo)
-COMMISSION_YEKI_IA = 5  # 5 FCFA commission Yeki par requête IA
-TARIF_IA_MIN_PAR_REQUETE = 10  # minimum 10 FCFA par requête IA
-
 
 class YekiWallet(models.Model):
     """Portefeuille rechargeable de l'utilisateur."""
@@ -393,10 +418,22 @@ class DemandePaiementManuelle(models.Model):
     objet_id = models.PositiveIntegerField(
         null=True, blank=True, help_text="ID de l'olympiade / formation concernée"
     )
-    montant = models.PositiveIntegerField()
+    montant = models.PositiveIntegerField(help_text="Montant déclaré par l'apprenant à la soumission")
+    # P9.2 : montant réellement constaté par le Service Client à la
+    # validation — distinct de `montant` (déclaré). Nullable tant que la
+    # demande est en_attente. Sert de base à la répartition/au crédit ; un
+    # écart avec `montant` est journalisé dans HistoriqueActivite.
+    montant_constate = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Constaté par le Service Client à la validation"
+    )
     operateur = models.CharField(max_length=20, choices=OPERATEURS_MOBILE_MONEY)
     id_transaction = models.CharField(max_length=100, help_text="Saisi par l'apprenant")
     numero_emetteur = models.CharField(max_length=20, blank=True)
+    # P9.2 : optionnel, rempli seulement si categorie="abonnement" — évite
+    # de devoir déduire mensuel/annuel du montant (fragile).
+    type_abonnement = models.CharField(
+        max_length=10, choices=AbonnementPremium.TYPE_CHOICES, blank=True, default=""
+    )
     statut = models.CharField(max_length=15, choices=STATUTS, default="en_attente", db_index=True)
     motif_refus = models.TextField(blank=True)
     traite_par = models.ForeignKey(

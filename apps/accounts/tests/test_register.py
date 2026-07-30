@@ -5,11 +5,14 @@ changement de comportement : ces 3 champs n'étaient pas exigés auparavant).
 """
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.formation.models import Parcours
+
+User = get_user_model()
 
 
 def _payload_base(**overrides):
@@ -67,3 +70,75 @@ def test_inscription_complete_valide_201(parcours, departement):
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.data["role"] == "apprenant"
+
+
+@pytest.mark.django_db
+def test_inscription_name_persiste_sur_user_first_last_name(parcours, departement):
+    """
+    P5.4 : "name" était exigé par le sérialiseur mais jamais écrit nulle
+    part (ni User, ni Profile) — corrigé, scindé sur le premier espace.
+    """
+    client = APIClient()
+    response = client.post(
+        reverse("register"),
+        _payload_base(
+            name="Aïcha Ndongo",
+            parcours=parcours.id,
+            departement=departement.id,
+            niveau="Terminale",
+        ),
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    user = User.objects.get(username="nouvel_apprenant")
+    assert user.first_name == "Aïcha"
+    assert user.last_name == "Ndongo"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "user_type",
+    ["admin", "enseignant_admin", "enseignant_cadre", "enseignant_principal", "service_client"],
+)
+def test_inscription_publique_refuse_les_roles_privilegies(parcours, departement, user_type):
+    """
+    P5.4 : faille de sécurité corrigée — l'auto-inscription publique
+    (AllowAny) ne doit jamais permettre de choisir un rôle privilégié.
+    """
+    client = APIClient()
+    response = client.post(
+        reverse("register"),
+        _payload_base(
+            user_type=user_type,
+            parcours=parcours.id,
+            departement=departement.id,
+            niveau="Terminale",
+        ),
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "user_type" in response.data["error"]["fields"]
+    assert not User.objects.filter(username="nouvel_apprenant").exists()
+
+
+@pytest.mark.django_db
+def test_inscription_publique_accepte_enseignant(parcours, departement):
+    """« enseignant » reste autorisé sur l'inscription publique (contrairement
+    aux rôles enseignant_admin/enseignant_cadre/enseignant_principal, réservés
+    à apps/accounts/views/admin_enseignants.py)."""
+    client = APIClient()
+    response = client.post(
+        reverse("register"),
+        _payload_base(
+            user_type="enseignant",
+            parcours=parcours.id,
+            departement=departement.id,
+            niveau="Terminale",
+        ),
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["role"] == "enseignant"

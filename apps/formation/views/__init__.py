@@ -1,5 +1,6 @@
 from apps.formation.views.cours import (  # noqa: F401
     ListeNiveauxView,
+    ListeNiveauxFormationView,
     PaletteCouleursCoursView,
     AddEnseignantSecondaireView,
     RemoveEnseignantSecondaireView,
@@ -55,4 +56,9 @@ from apps.formation.views.dashboards import (  # noqa: F401
     PrincipalRendusDevoirsAPIView,
     EnseignantAdminStatsView,
     enseignant_principal_cours,
+)
+from apps.formation.views.supplements import (  # noqa: F401
+    ListerSupplementsCoursView,
+    CreerSupplementCoursView,
+    SupprimerSupplementCoursView,
 )

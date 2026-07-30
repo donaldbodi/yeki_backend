@@ -1,6 +1,11 @@
 """
 Tests P2.4 : DemandeRetrait — montant minimum, solde suffisant, et gel
 (débit immédiat) du solde à la création (CDC §5.6).
+
+P9.4 : restriction aux cadres (`user_type='enseignant_cadre'`) — les
+fixtures sont passées de `client_apprenant`/`user_apprenant` à
+`client_enseignant_cadre`/`user_enseignant_cadre`, plus un test 403 dédié
+pour un apprenant qui tenterait la même requête.
 """
 
 import pytest
@@ -11,12 +16,22 @@ from apps.paiement.models import DemandeRetrait, YekiWallet
 
 
 @pytest.mark.django_db
-def test_montant_sous_le_minimum_400(client_apprenant, user_apprenant):
-    wallet = YekiWallet.get_or_create_wallet(user_apprenant)
+def test_403_si_non_cadre(client_apprenant):
+    response = client_apprenant.post(
+        reverse("retrait-demander"),
+        {"montant_brut": 2000, "operateur": "orange_money", "numero_destination": "237690000000"},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.django_db
+def test_montant_sous_le_minimum_400(client_enseignant_cadre, user_enseignant_cadre):
+    wallet = YekiWallet.get_or_create_wallet(user_enseignant_cadre)
     wallet.solde = 5000
     wallet.save()
 
-    response = client_apprenant.post(
+    response = client_enseignant_cadre.post(
         reverse("retrait-demander"),
         {"montant_brut": 500, "operateur": "orange_money", "numero_destination": "237690000000"},
         format="json",
@@ -25,12 +40,12 @@ def test_montant_sous_le_minimum_400(client_apprenant, user_apprenant):
 
 
 @pytest.mark.django_db
-def test_solde_insuffisant_402(client_apprenant, user_apprenant):
-    wallet = YekiWallet.get_or_create_wallet(user_apprenant)
+def test_solde_insuffisant_402(client_enseignant_cadre, user_enseignant_cadre):
+    wallet = YekiWallet.get_or_create_wallet(user_enseignant_cadre)
     wallet.solde = 500
     wallet.save()
 
-    response = client_apprenant.post(
+    response = client_enseignant_cadre.post(
         reverse("retrait-demander"),
         {"montant_brut": 2000, "operateur": "orange_money", "numero_destination": "237690000000"},
         format="json",
@@ -40,12 +55,12 @@ def test_solde_insuffisant_402(client_apprenant, user_apprenant):
 
 
 @pytest.mark.django_db
-def test_creation_gele_le_solde_immediatement(client_apprenant, user_apprenant):
-    wallet = YekiWallet.get_or_create_wallet(user_apprenant)
+def test_creation_gele_le_solde_immediatement(client_enseignant_cadre, user_enseignant_cadre):
+    wallet = YekiWallet.get_or_create_wallet(user_enseignant_cadre)
     wallet.solde = 5000
     wallet.save()
 
-    response = client_apprenant.post(
+    response = client_enseignant_cadre.post(
         reverse("retrait-demander"),
         {"montant_brut": 3000, "operateur": "orange_money", "numero_destination": "237690000000"},
         format="json",
@@ -60,6 +75,6 @@ def test_creation_gele_le_solde_immediatement(client_apprenant, user_apprenant):
     wallet.refresh_from_db()
     assert wallet.solde == 2000  # gelé : débité immédiatement
 
-    demande = DemandeRetrait.objects.get(beneficiaire=user_apprenant.profile)
+    demande = DemandeRetrait.objects.get(beneficiaire=user_enseignant_cadre.profile)
     assert demande.montant_brut == 3000
     assert demande.frais_operateur == 0

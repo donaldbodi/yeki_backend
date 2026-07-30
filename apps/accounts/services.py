@@ -11,15 +11,6 @@ def _get_profile(user):
         return None
 
 
-def _is_premium(user):
-    from apps.paiement.models import AbonnementPremium
-
-    try:
-        return user.abonnement.est_actif
-    except AbonnementPremium.DoesNotExist:
-        return False
-
-
 def _nom_profil(profile):
     n = f"{profile.user.first_name} {profile.user.last_name}".strip()
     return n or profile.user.username

@@ -1,5 +1,3 @@
-from django.db.models import Avg
-
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from apps.accounts.models import Profile
 from apps.accounts.services import _nom_profil
+from apps.evaluation.services import ClassementService
 from apps.formation.models import Parcours, Departement, Cours, Lecon
 from apps.formation.serializers import ParcoursSerializer, DepartementSerializer, CoursSerializer
 
@@ -142,21 +141,31 @@ class AdminGeneralDashboardView(APIView):
             "nb_lecons": Lecon.objects.count(),
         }
 
+        # Somme brute des points d'exercices de leurs cours (pas de moyenne,
+        # P6.1) — un enseignant avec plus d'exercices/apprenants a
+        # mécaniquement un score plus élevé, choix assumé (voir
+        # ClassementService). Un appel par enseignant candidat (pas de
+        # requête agrégée unique possible avec ce calcul) : acceptable ici,
+        # dashboard admin peu fréquenté, pas un chemin critique.
         top_enseignants = []
-        enseignants_top = (
-            Profile.objects.filter(user_type__in=["enseignant_principal", "enseignant"])
-            .annotate(score_moyen=Avg("cours_principal__exercices__evaluationexercice__score"))
-            .order_by("-score_moyen")[:10]
-        )
+        candidats = Profile.objects.filter(user_type__in=["enseignant_principal", "enseignant"])
+        classement_enseignants = sorted(
+            (
+                (e, ClassementService.score_total_exercices_enseignant(e))
+                for e in candidats
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:10]
 
-        for e in enseignants_top:
-            if e.score_moyen:
+        for e, score in classement_enseignants:
+            if score:
                 top_enseignants.append(
                     {
                         "id": e.id,
                         "nom": _nom_profil(e),
                         "role": e.user_type,
-                        "score": round(e.score_moyen / 20 * 20, 1) if e.score_moyen else 0,
+                        "score": round(score, 1),
                     }
                 )
 

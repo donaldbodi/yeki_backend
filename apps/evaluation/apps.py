@@ -4,3 +4,6 @@ from django.apps import AppConfig
 class EvaluationConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "apps.evaluation"
+
+    def ready(self):
+        import apps.evaluation.signals  # noqa: F401

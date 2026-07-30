@@ -70,14 +70,15 @@ class Departement(models.Model):
 
     niveau_formation = models.CharField(
         max_length=20,
-        choices=[
-            ("debutant", "Débutant"),
-            ("intermediaire", "Intermédiaire"),
-            ("avance", "Avancé"),
-        ],
         blank=True,
         default="debutant",
-        help_text="Niveau de la formation (pour les formations métier)",
+        help_text=(
+            "Niveau de la formation (pour les formations métier) — liste "
+            "fermée mais administrable sans redéploiement, voir "
+            "`ParametreSysteme` clé `niveaux_formation_disponibles` "
+            "(services.niveaux_formation_disponibles) plutôt qu'un "
+            "`choices=` figé ici (P11.6)."
+        ),
     )
 
     # ── Présentation visuelle (tous les types) ────────────────────
@@ -265,6 +266,24 @@ class Departement(models.Model):
         """Indique si un paiement présentiel est requis en plus"""
         return self.prix_presentiel > 0
 
+    def label_catalogue(self):
+        """
+        Label catalogue (P9.1, CDC_BACKEND §5.2) : "Offre gratuite" si
+        prix_mensuel == 0, sinon "Promotion" si le dernier changement
+        historisé sur prix_mensuel/prix_annuel est une baisse, sinon None
+        (aucun badge). Basé sur HistoriquePrixDepartement (P2.4), jusqu'ici
+        jamais exploité par aucune vue/serializer.
+        """
+        if self.prix_mensuel == 0:
+            return "Offre gratuite"
+        dernieres = self.historique_prix.filter(champ__in=["prix_mensuel", "prix_annuel"]).order_by(
+            "-date"
+        )
+        for ligne in dernieres[:2]:
+            if ligne.nouvelle_valeur < ligne.ancienne_valeur:
+                return "Promotion"
+        return None
+
     def get_niveaux_accessibles_list(self):
         """Retourne la liste des niveaux accessibles"""
         if not self.niveaux_accessibles:
@@ -309,7 +328,11 @@ class Departement(models.Model):
 # Champs de Departement historisés par le signal (apps/formation/signals.py)
 # — portée limitée au prix : seule motivation donnée par le CDC (rendre la
 # règle « promotion » calculable), pas un audit générique de tout champ.
-CHAMPS_PRIX_HISTORISES = ["prix", "prix_presentiel"]
+# P9.1 : étendu à prix_mensuel/prix_annuel (les 2 champs obligatoires de la
+# tarification Premium par département) — pas aux présentiels facultatifs,
+# qui ne pilotent ni "Offre gratuite" ni "Promotion" (voir
+# Departement.label_catalogue).
+CHAMPS_PRIX_HISTORISES = ["prix", "prix_presentiel", "prix_mensuel", "prix_annuel"]
 
 
 class HistoriquePrixDepartement(models.Model):
@@ -564,17 +587,33 @@ class Lecon(models.Model):
 
 class SupplementCours(models.Model):
     """
-    Contenu annexe rattaché à une leçon (lien, PDF, vidéo, PowerPoint),
-    affiché en défilement vertical façon TikTok depuis DetailLeconPage.
+    Contenu annexe (lien, PDF, PowerPoint, autre), affiché en défilement
+    vertical façon TikTok depuis DetailLeconPage.
+
+    P11.9 — arbitrage tranché avec l'utilisateur : rattaché au COURS
+    (obligatoire) + à une LEÇON (facultative). Si `lecon` est renseignée,
+    le supplément n'apparaît QUE sur cette leçon ; sinon il est visible
+    sur tout le cours (voir `apps/formation/views/supplements.py` pour le
+    filtrage). Schéma initial (avant ce ticket) était l'inverse — `lecon`
+    obligatoire, aucune FK `cours` — corrigé par la migration
+    `0004_supplementcours_cours`.
     """
 
     TYPE_CHOICES = [
         ("lien", "Lien"),
         ("pdf", "PDF"),
-        ("video", "Vidéo"),
         ("ppt", "PowerPoint"),
+        ("autre", "Autre"),
     ]
-    lecon = models.ForeignKey(Lecon, on_delete=models.CASCADE, related_name="supplements")
+    cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="supplements")
+    lecon = models.ForeignKey(
+        Lecon,
+        on_delete=models.CASCADE,
+        related_name="supplements",
+        null=True,
+        blank=True,
+        help_text="Facultatif — si renseigné, le supplément n'apparaît que sur cette leçon.",
+    )
     titre = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     type_contenu = models.CharField(max_length=20, choices=TYPE_CHOICES)
@@ -589,13 +628,16 @@ class SupplementCours(models.Model):
         verbose_name = "Supplément de cours"
 
     def __str__(self):
-        return f"{self.titre} ({self.get_type_contenu_display()}) — {self.lecon.titre}"
+        cible = self.lecon.titre if self.lecon else self.cours.titre
+        return f"{self.titre} ({self.get_type_contenu_display()}) — {cible}"
 
     def clean(self):
-        if self.type_contenu in ("pdf", "video", "ppt") and not self.fichier and not self.url:
+        if self.lecon_id and self.cours_id and self.lecon.cours_id != self.cours_id:
+            raise ValidationError("Cette leçon n'appartient pas au cours indiqué.")
+        if self.type_contenu in ("pdf", "ppt") and not self.fichier and not self.url:
             raise ValidationError("Un fichier ou une URL est requis pour ce type de contenu.")
-        if self.type_contenu == "lien" and not self.url:
-            raise ValidationError("Une URL est requise pour un supplément de type lien.")
+        if self.type_contenu in ("lien", "autre") and not self.url:
+            raise ValidationError("Une URL est requise pour ce type de contenu.")
 
 
 class ProgressionLecon(models.Model):

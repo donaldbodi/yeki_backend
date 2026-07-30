@@ -138,6 +138,14 @@ class CreerDepartementView(APIView):
         # === CONSTRUCTION DES CHAMPS DE BASE ===
         prix = _i("prix")
         prix_presentiel = _i("prix_presentiel")
+        # P9.1 : 4 prix Premium par département — prix_mensuel/prix_annuel
+        # obligatoires côté produit mais acceptés en facultatif ici (0 par
+        # défaut, même convention que prix/prix_presentiel legacy) ; les
+        # présentiels restent facultatifs.
+        prix_mensuel = _i("prix_mensuel")
+        prix_annuel = _i("prix_annuel")
+        prix_presentiel_mensuel = _i("prix_presentiel_mensuel")
+        prix_presentiel_annuel = _i("prix_presentiel_annuel")
         type_parc = parcours.type_parcours
 
         if type_parc == "prepa":
@@ -168,6 +176,10 @@ class CreerDepartementView(APIView):
             "couleur": "#2884A0",  # Couleur par défaut, retirée du formulaire
             "prix": prix,
             "prix_presentiel": prix_presentiel,
+            "prix_mensuel": prix_mensuel,
+            "prix_annuel": prix_annuel,
+            "prix_presentiel_mensuel": prix_presentiel_mensuel,
+            "prix_presentiel_annuel": prix_presentiel_annuel,
             "est_actif": True,
             "mode": _s("mode", "hybride"),
             "acces_restreint": _b("acces_restreint"),
@@ -284,7 +296,13 @@ class AdminUpdateDepartementView(APIView):
 
         # ── Validation et nettoyage des données ──────────────────
 
-        # Gérer les niveaux accessibles
+        # Gérer les niveaux accessibles — `DepartementUpdateSerializer`
+        # déclare ce champ en `ListField` (attend une liste), pas une
+        # chaîne : le pré-traitement joignait par erreur en chaîne avant
+        # validation, provoquant un 400 sur quasi tout PATCH incluant ce
+        # champ (bug "modification de département" P11.6). Corrigé en ne
+        # normalisant plus qu'en liste — le `.update()` du serializer fait
+        # déjà lui-même la jointure en chaîne pour le stockage.
         if "niveaux_accessibles" in data:
             niveaux = data.get("niveaux_accessibles", [])
             if isinstance(niveaux, str):
@@ -294,8 +312,7 @@ class AdminUpdateDepartementView(APIView):
                     niveaux = [n.strip() for n in niveaux.split(",") if n.strip()]
             elif not isinstance(niveaux, list):
                 niveaux = []
-            # Le serializer attend une string, on convertit
-            data["niveaux_accessibles"] = ",".join(niveaux) if niveaux else ""
+            data["niveaux_accessibles"] = niveaux
 
         # Supprimer les champs qui ne sont pas dans le serializer
         # Ces champs existent dans le modèle mais pas dans le serializer
@@ -683,6 +700,17 @@ class EnseignantCadreDepartementUpdateView(APIView):
             updates["couleur"] = data["couleur"]
         if "prix" in data:
             updates["prix"] = int(data["prix"])
+        if "prix_presentiel" in data:
+            updates["prix_presentiel"] = int(data["prix_presentiel"])
+        # P9.1 : 4 prix Premium par département.
+        if "prix_mensuel" in data:
+            updates["prix_mensuel"] = int(data["prix_mensuel"])
+        if "prix_annuel" in data:
+            updates["prix_annuel"] = int(data["prix_annuel"])
+        if "prix_presentiel_mensuel" in data:
+            updates["prix_presentiel_mensuel"] = int(data["prix_presentiel_mensuel"])
+        if "prix_presentiel_annuel" in data:
+            updates["prix_presentiel_annuel"] = int(data["prix_presentiel_annuel"])
         if "est_actif" in data:
             updates["est_actif"] = data["est_actif"]
 
@@ -700,6 +728,11 @@ class EnseignantCadreDepartementUpdateView(APIView):
                     "description": departement.description,
                     "couleur": departement.couleur,
                     "prix": departement.prix,
+                    "prix_presentiel": departement.prix_presentiel,
+                    "prix_mensuel": departement.prix_mensuel,
+                    "prix_annuel": departement.prix_annuel,
+                    "prix_presentiel_mensuel": departement.prix_presentiel_mensuel,
+                    "prix_presentiel_annuel": departement.prix_presentiel_annuel,
                     "est_actif": departement.est_actif,
                 },
             },

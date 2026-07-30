@@ -1,5 +1,7 @@
 from django.db import transaction
+from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -13,6 +15,9 @@ from drf_spectacular.types import OpenApiTypes
 from apps.accounts.models import Profile
 from apps.core.models import enregistrer_activite
 from apps.core.pagination import PaginatedListMixin
+from apps.core.permissions import AccesMatricePermission
+from apps.core.services import AccesService
+from apps.notifications.models import creer_notification
 from apps.core.schema_examples import (
     ERREURS_COURANTES,
     ERREURS_ECRITURE,
@@ -26,8 +31,8 @@ from apps.evaluation.models import (
     Question,
     ExerciceTentative,
     EvaluationExercice,
-    ReponseExercice,
 )
+from apps.evaluation.services import ClassementService
 from apps.evaluation.serializers import (
     ExerciceSerializer,
     ExerciceCreateSerializer,
@@ -101,7 +106,13 @@ class ListeExercicesCoursView(PaginatedListMixin, APIView):
         # Filtres
         module_id = request.query_params.get("module_id")
         if module_id:
-            exercices = exercices.filter(module_id=module_id)
+            # P6.3 : un exercice rattaché à une leçon DU module doit aussi
+            # apparaître (pas seulement ceux rattachés directement au
+            # module) — sinon « cliquer sur un module » masquait les
+            # exercices liés à ses leçons.
+            exercices = exercices.filter(
+                Q(module_id=module_id) | Q(lecon__module_id=module_id)
+            )
 
         lecon_id = request.query_params.get("lecon_id")
         if lecon_id:
@@ -117,6 +128,14 @@ class ListeExercicesCoursView(PaginatedListMixin, APIView):
 
         # CORRECTION : Ne pas annoter avec nb_questions, le serializer le calcule
         exercices = exercices.order_by("-id")
+
+        # P9.1 : matrice d'accès Gratuit/Premium — un gratuit voit les
+        # exercices 1★/2★ (vitrine), pas au-delà. Filtrage de queryset
+        # (pas la permission_class, qui est tout-ou-rien) : voir
+        # AccesService.etoiles_max_visibles.
+        seuil = AccesService.etoiles_max_visibles(request.user)
+        if seuil is not None:
+            exercices = exercices.filter(etoiles__lte=seuil)
 
         page = self.paginate_queryset(exercices)
         serializer = ExerciceSerializer(page, many=True, context={"request": request})
@@ -199,7 +218,12 @@ def _corriger_reponses_exercice(exercice, reponses):
     """
     Corrige les réponses fournies pour un exercice donné.
     Retourne (score, total, details) où `details` est une liste de
-    dictionnaires prêts à être renvoyés au frontend.
+    dictionnaires au format SNAPSHOT complet (P6.2, CDC_BACKEND §6.1) :
+    question_id, enonce_snapshot, type, choix_snapshot, reponse_apprenant,
+    bonne_reponse, est_correct, points_obtenus, points_max, explication —
+    figé au moment de la correction, indépendant de tout état futur de
+    `Question`/`Choix`. C'est cette forme canonique qui est stockée telle
+    quelle dans `ExerciceTentative.reponses["questions"]`.
     Factorisé pour être appelé identiquement depuis SoumettreEvaluationView
     et SortirExerciceView (aucune logique dupliquée entre les deux vues).
     """
@@ -227,51 +251,144 @@ def _corriger_reponses_exercice(exercice, reponses):
         if is_correct:
             score += points
 
+        choix_snapshot = (
+            [
+                {"id": c.id, "texte": c.texte, "est_correct": c.est_correct}
+                for c in question.choix.all()
+            ]
+            if question.type_question == "qcm"
+            else []
+        )
+
         details.append(
             {
                 "question_id": question.id,
-                "question": question.text,
-                "reponse_utilisateur": user_rep,
+                "enonce_snapshot": question.text,
+                "type": question.type_question,
+                "choix_snapshot": choix_snapshot,
+                "reponse_apprenant": user_rep,
                 "bonne_reponse": question.bonne_reponse,
-                "correct": is_correct,
+                "est_correct": is_correct,
                 "points_obtenus": points_obtenus,
                 "points_max": points,
+                "explication": question.explication,
             }
         )
     return score, total, details
 
 
-def _enregistrer_evaluation_finale(user, exercice, tentative, details):
+def _detail_soumission(d):
     """
-    Met à jour (ou crée) l'EvaluationExercice "officielle" de l'utilisateur
-    pour cet exercice : elle reflète TOUJOURS la dernière tentative, et
-    conserve le détail des réponses dans ReponseExercice pour compatibilité
-    avec le code existant qui consomme EvaluationExercice.reponses.
+    Adapte le schéma canonique (snapshot P6.2) vers les noms de clés
+    HISTORIQUES du champ `detail` renvoyé immédiatement par
+    SortirExerciceView/SoumettreEvaluationView — inchangés pour ne pas
+    casser `passer_exercice.dart`, qui les consomme déjà tels quels.
     """
-    evaluation, _created = EvaluationExercice.objects.update_or_create(
-        user=user,
-        exercice=exercice,
-        defaults={
-            "score": tentative.score,
-            "total": tentative.total_points,
-            "tentative_finale": tentative,
-        },
-    )
-    # Rafraîchir le détail des réponses associées à cette évaluation
-    evaluation.reponses.all().delete()
-    for d in details:
-        try:
-            question = Question.objects.get(id=d["question_id"])
-        except Question.DoesNotExist:
-            continue
-        ReponseExercice.objects.create(
-            evaluation=evaluation,
-            question=question,
-            reponse=d["reponse_utilisateur"],
-            est_correct=d["correct"],
-            points_obtenus=d["points_obtenus"],
+    return {
+        "question_id": d["question_id"],
+        "question": d["enonce_snapshot"],
+        "reponse_utilisateur": d["reponse_apprenant"],
+        "bonne_reponse": d["bonne_reponse"],
+        "correct": d["est_correct"],
+        "points_obtenus": d["points_obtenus"],
+        "points_max": d["points_max"],
+        "explication": d["explication"],
+    }
+
+
+def _detail_historique(d):
+    """
+    Adapte le schéma canonique vers les noms de clés HISTORIQUES du champ
+    `reponses` de `HistoriqueTentativesExerciceView` (et désormais de
+    `ResultatExerciceView.historique[].reponses`) — `points_obtenus` et
+    `explication` sont de PURS AJOUTS (absents avant P6.2, un lecteur
+    Flutter qui ne les connaît pas encore les ignore sans risque).
+    """
+    return {
+        "question_id": d["question_id"],
+        "question": d["enonce_snapshot"],
+        "reponse": d["reponse_apprenant"],
+        "bonne_reponse": d["bonne_reponse"],
+        "est_correct": d["est_correct"],
+        "points_obtenus": d["points_obtenus"],
+        "points_max": d["points_max"],
+        "explication": d["explication"],
+    }
+
+
+def _corriger_epreuve_composee(exercice, user):
+    """
+    Note d'une ÉPREUVE (P6.3, décision actée) : SOMME des scores des
+    exercices de `exercice.exercices_composes`, PAS ses propres
+    `questions` (souvent vides pour un pur conteneur). Chaque composant
+    contribue son total plein de points (tenté ou non — dénominateur
+    stable, ne rétrécit pas si l'apprenant n'a pas encore touché à un
+    composant) et son score actuel (0 s'il n'a jamais été tenté).
+    Retourne (score, total, details) où `details` est
+    `[{"exercice_id", "titre", "score", "total"}, ...]` — pas de detail
+    par question, une épreuve n'a pas de réponses propres à corriger.
+    """
+    score = 0.0
+    total = 0.0
+    details = []
+    for composant in exercice.exercices_composes.all():
+        total_composant = composant.questions.aggregate(total=Sum("points"))["total"] or 0.0
+        evaluation = EvaluationExercice.objects.filter(user=user, exercice=composant).first()
+        score_composant = evaluation.score if evaluation else 0.0
+
+        score += score_composant
+        total += total_composant
+
+        details.append(
+            {
+                "exercice_id": composant.id,
+                "titre": composant.titre,
+                "score": score_composant,
+                "total": total_composant,
+            }
         )
-    return evaluation
+    return score, total, details
+
+
+def _detail_tentative_pour_lecture(tentative_reponses, adapter):
+    """
+    Lit le snapshot d'une tentative quelle que soit sa forme : detail
+    question-par-question pour un exercice normal (sous la clé
+    `"questions"`, adapté via `adapter` — `_detail_soumission` ou
+    `_detail_historique` selon l'appelant) ; liste d'exercices composants
+    pour une épreuve (sous la clé `"exercices"`, P6.3 — déjà dans sa forme
+    finale, aucun renommage de clé nécessaire, concept nouveau sans
+    convention historique à préserver).
+    """
+    data = tentative_reponses or {}
+    if "exercices" in data:
+        return data["exercices"]
+    return [adapter(d) for d in data.get("questions", [])]
+
+
+def _verifier_gain_de_rang(user, exercice):
+    """
+    P6.3 : après chaque soumission, recalcule le classement du département
+    de l'exercice et détecte si `user` a gagné des places. Si oui, crée la
+    notification `type="classement"` (déjà définie dans
+    `apps/notifications/models.py`, jusqu'ici jamais utilisée) et renvoie
+    le gain pour l'injecter dans la réponse HTTP de soumission. Retourne
+    `None` si pas de gain (rien à ajouter à la réponse).
+    """
+    gain = ClassementService.recalculer_et_detecter_gain(user, exercice.cours.departement)
+    if gain:
+        creer_notification(
+            utilisateur=user,
+            type_notif="classement",
+            titre="Vous avez gagné des places au classement !",
+            contenu=(
+                f"Vous êtes passé du rang {gain['ancien_rang']} au rang "
+                f"{gain['nouveau_rang']} dans le classement de votre département."
+            ),
+            objet_type="Departement",
+            objet_id=exercice.cours.departement_id,
+        )
+    return gain
 
 
 @extend_schema_view(
@@ -302,12 +419,15 @@ class SortirExerciceView(APIView):
       supplémentaire : on renvoie simplement l'état "épuisé".
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Exercice
+    acces_action = "soumettre"
 
     @transaction.atomic
     def post(self, request, exercice_id):
         user = request.user
         exercice = get_object_or_404(Exercice, id=exercice_id)
+        self.check_object_permissions(request, exercice)
 
         # Récupérer la session en cours
         session = SessionExercice.objects.filter(
@@ -334,38 +454,58 @@ class SortirExerciceView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        reponses = request.data.get("reponses", {})
-        score, total, details = _corriger_reponses_exercice(exercice, reponses)
+        # P6.3 : une épreuve n'a pas de réponses propres à corriger — sa
+        # note est la somme des scores actuels de ses exercices composés.
+        if exercice.est_epreuve:
+            score, total, details = _corriger_epreuve_composee(exercice, user)
+            snapshot_key = "exercices"
+            est_terminee = True
+            detail_http = details
+        else:
+            reponses_brutes = request.data.get("reponses", {})
+            score, total, details = _corriger_reponses_exercice(exercice, reponses_brutes)
+            snapshot_key = "questions"
+            est_terminee = len(reponses_brutes) >= exercice.questions.count()
+            detail_http = [_detail_soumission(d) for d in details]
 
         tentative = ExerciceTentative.objects.create(
             apprenant=user,
             exercice=exercice,
             tentative_numero=ExerciceTentative.prochain_numero(user, exercice),
-            reponses=reponses,
+            # Snapshot auto-suffisant (P6.2) : figé au moment de la
+            # tentative, ne dépend plus de l'état futur de Question/Choix.
+            reponses={
+                snapshot_key: details,
+                "score": score,
+                "total": total,
+                "date": timezone.now().isoformat(),
+            },
             score=score,
             total_points=total,
             est_soumise=False,  # sortie anticipée, pas une validation explicite
-            est_terminee=(len(reponses) >= exercice.questions.count()),
+            est_terminee=est_terminee,
         )
 
-        _enregistrer_evaluation_finale(user, exercice, tentative, details)
+        ClassementService.enregistrer_evaluation_finale(user, exercice, tentative)
+        gain_de_rang = _verifier_gain_de_rang(user, exercice)
 
         note_sur_20 = (score / total) * 20 if total > 0 else 0
 
-        return Response(
-            {
-                "score": score,
-                "total": total,
-                "note": round(note_sur_20, 1),
-                "note_sur": 20,
-                "detail": details,
-                "tentative_numero": tentative.tentative_numero,
-                "tentatives_restantes": max(0, exercice.tentatives_max - (nb_tentatives + 1)),
-                "message": "Exercice soumis automatiquement avec les réponses actuelles.",
-                "auto_soumis": True,
-            },
-            status=status.HTTP_200_OK,
-        )
+        reponse = {
+            "score": score,
+            "total": total,
+            "note": round(note_sur_20, 1),
+            "note_sur": 20,
+            "detail": detail_http,
+            "tentative_numero": tentative.tentative_numero,
+            "tentatives_restantes": max(0, exercice.tentatives_max - (nb_tentatives + 1)),
+            "message": "Exercice soumis automatiquement avec les réponses actuelles.",
+            "auto_soumis": True,
+        }
+        if gain_de_rang:
+            reponse.update(gain_de_rang)
+
+        return Response(reponse, status=status.HTTP_200_OK)
 
 
 @extend_schema_view(
@@ -649,23 +789,32 @@ class SoumettreEvaluationView(APIView):
     à SortirExerciceView qui gère la sortie anticipée / auto-soumission.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Exercice
+    acces_action = "soumettre"
 
     @transaction.atomic
     def post(self, request, exercice_id):
         user = request.user
         exercice = get_object_or_404(Exercice, id=exercice_id)
+        self.check_object_permissions(request, exercice)
 
         # Tentatives déjà enregistrées (source de vérité = ExerciceTentative)
         nb_tentatives = ExerciceTentative.objects.filter(apprenant=user, exercice=exercice).count()
 
+        # P6.2 : harmonisé avec SortirExerciceView — une fois les
+        # tentatives épuisées, la soumission n'est plus REJETÉE (l'ancien
+        # 403 empêchait tout accès) mais acceptée sans effet : aucune
+        # nouvelle tentative n'est créée, la note officielle n'est pas
+        # modifiée. La correction reste consultable à tout moment via
+        # ResultatExerciceView/HistoriqueTentativesExerciceView.
         if nb_tentatives >= exercice.tentatives_max:
             return Response(
                 {
-                    "detail": f"Nombre maximum de tentatives atteint ({exercice.tentatives_max}).",
+                    "detail": f"Nombre maximum de tentatives atteint ({exercice.tentatives_max}). Cette soumission n'est pas comptée.",
                     "tentatives_epuisees": True,
                 },
-                status=status.HTTP_403_FORBIDDEN,
+                status=status.HTTP_200_OK,
             )
 
         # Récupérer / créer la session en cours
@@ -679,45 +828,64 @@ class SoumettreEvaluationView(APIView):
         # devient une auto-soumission (mêmes règles que SortirExerciceView)
         temps_ecoule = session.temps_restant() <= 0
 
-        reponses = request.data.get("reponses", {})
-        score, total, details = _corriger_reponses_exercice(exercice, reponses)
+        # P6.3 : une épreuve n'a pas de réponses propres à corriger — sa
+        # note est la somme des scores actuels de ses exercices composés.
+        if exercice.est_epreuve:
+            score, total, details = _corriger_epreuve_composee(exercice, user)
+            snapshot_key = "exercices"
+            est_terminee = True
+            detail_http = details
+        else:
+            reponses_brutes = request.data.get("reponses", {})
+            score, total, details = _corriger_reponses_exercice(exercice, reponses_brutes)
+            snapshot_key = "questions"
+            est_terminee = len(reponses_brutes) >= exercice.questions.count()
+            detail_http = [_detail_soumission(d) for d in details]
 
         tentative = ExerciceTentative.objects.create(
             apprenant=user,
             exercice=exercice,
             tentative_numero=ExerciceTentative.prochain_numero(user, exercice),
-            reponses=reponses,
+            # Snapshot auto-suffisant (P6.2), voir SortirExerciceView.
+            reponses={
+                snapshot_key: details,
+                "score": score,
+                "total": total,
+                "date": timezone.now().isoformat(),
+            },
             score=score,
             total_points=total,
             est_soumise=not temps_ecoule,
-            est_terminee=(len(reponses) >= exercice.questions.count()),
+            est_terminee=est_terminee,
         )
 
-        _enregistrer_evaluation_finale(user, exercice, tentative, details)
+        ClassementService.enregistrer_evaluation_finale(user, exercice, tentative)
+        gain_de_rang = _verifier_gain_de_rang(user, exercice)
 
         session.termine = True
         session.save(update_fields=["termine"])
 
         note_sur_20 = (score / total) * 20 if total > 0 else 0
 
-        return Response(
-            {
-                "score": score,
-                "total": total,
-                "note": round(note_sur_20, 1),
-                "note_sur": 20,
-                "detail": details,
-                "tentative_numero": tentative.tentative_numero,
-                "tentatives_restantes": max(0, exercice.tentatives_max - (nb_tentatives + 1)),
-                "message": (
-                    "Temps écoulé, examen soumis automatiquement."
-                    if temps_ecoule
-                    else "Examen soumis avec succès."
-                ),
-                "auto_soumis": temps_ecoule,
-            },
-            status=status.HTTP_200_OK,
-        )
+        reponse = {
+            "score": score,
+            "total": total,
+            "note": round(note_sur_20, 1),
+            "note_sur": 20,
+            "detail": detail_http,
+            "tentative_numero": tentative.tentative_numero,
+            "tentatives_restantes": max(0, exercice.tentatives_max - (nb_tentatives + 1)),
+            "message": (
+                "Temps écoulé, examen soumis automatiquement."
+                if temps_ecoule
+                else "Examen soumis avec succès."
+            ),
+            "auto_soumis": temps_ecoule,
+        }
+        if gain_de_rang:
+            reponse.update(gain_de_rang)
+
+        return Response(reponse, status=status.HTTP_200_OK)
 
 
 @extend_schema_view(
@@ -748,8 +916,6 @@ class HistoriqueTentativesExerciceView(PaginatedListMixin, APIView):
         exercice = get_object_or_404(Exercice, id=exercice_id)
         user = request.user
 
-        questions_par_id = {q.id: q for q in exercice.questions.all()}
-
         tentatives = ExerciceTentative.objects.filter(apprenant=user, exercice=exercice).order_by(
             "-tentative_numero"
         )
@@ -758,35 +924,13 @@ class HistoriqueTentativesExerciceView(PaginatedListMixin, APIView):
 
         result = []
         for t in page:
-            reponses_detail = []
-            for question_id_str, reponse_brute in (t.reponses or {}).items():
-                question = (
-                    questions_par_id.get(int(question_id_str))
-                    if question_id_str.isdigit()
-                    else None
-                )
-                if not question:
-                    continue
-                # P2.2 : même correctif que _corriger_reponses_exercice —
-                # QCM jugé via Choix.est_correct, pas bonne_reponse en texte.
-                reponse_normalisee = reponse_brute.strip().lower()
-                if question.type_question == "qcm":
-                    choix_selectionne = question.choix.filter(
-                        texte__iexact=reponse_normalisee
-                    ).first()
-                    est_correct = bool(choix_selectionne and choix_selectionne.est_correct)
-                else:
-                    est_correct = reponse_normalisee == question.bonne_reponse.strip().lower()
-                reponses_detail.append(
-                    {
-                        "question_id": question.id,
-                        "question": question.text,
-                        "reponse": reponse_brute,
-                        "bonne_reponse": question.bonne_reponse,
-                        "est_correct": est_correct,
-                        "points_max": question.points,
-                    }
-                )
+            # P6.2 : snapshot FIGÉ au moment de la tentative — ne re-dérive
+            # plus la correction contre l'état actuel de Question/Choix
+            # (une modification ultérieure de l'exercice ne change donc
+            # plus rétroactivement une correction déjà rendue, et une
+            # question supprimée depuis reste visible dans l'historique).
+            # P6.3 : ou liste d'exercices composants si c'est une épreuve.
+            reponses_detail = _detail_tentative_pour_lecture(t.reponses, _detail_historique)
 
             result.append(
                 {
@@ -848,6 +992,9 @@ class ResultatExerciceView(APIView):
         tentatives = ExerciceTentative.objects.filter(apprenant=user, exercice=exercice).order_by(
             "-tentative_numero"
         )
+        # P6.2 : chaque tentative porte désormais son propre snapshot figé
+        # (voir SortirExerciceView/SoumettreEvaluationView) — plus de
+        # re-dérivation live contre l'état actuel de Question/Choix.
         historique = [
             {
                 "id": t.id,
@@ -859,11 +1006,22 @@ class ResultatExerciceView(APIView):
                     round((t.score / t.total_points) * 20, 1) if t.total_points > 0 else 0
                 ),
                 "est_soumise": t.est_soumise,
+                "reponses": _detail_tentative_pour_lecture(t.reponses, _detail_historique),
             }
             for t in tentatives
         ]
 
         nb_tentatives = tentatives.count()
+
+        # Détail de la note officielle (dernière tentative valide) — clé
+        # `detail` déjà attendue par le Flutter (`_buildDetailQuestion`,
+        # jusqu'ici toujours vide faute d'être renvoyée par ce endpoint).
+        tentative_finale = evaluation.tentative_finale
+        detail_note_officielle = (
+            _detail_tentative_pour_lecture(tentative_finale.reponses, _detail_soumission)
+            if tentative_finale
+            else []
+        )
 
         return Response(
             {
@@ -874,6 +1032,7 @@ class ResultatExerciceView(APIView):
                 "score": evaluation.score,
                 "total": evaluation.total,
                 "date": evaluation.date,
+                "detail": detail_note_officielle,
                 "historique": historique,
                 "tentatives_restantes": max(0, exercice.tentatives_max - nb_tentatives),
                 "tentatives_max": exercice.tentatives_max,
@@ -923,11 +1082,14 @@ class HistoriqueEvaluationsView(PaginatedListMixin, APIView):
     ),
 )
 class DemarrerExerciceView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Exercice
+    acces_action = "soumettre"
 
     def post(self, request, exercice_id):
         user = request.user
         exercice = get_object_or_404(Exercice, id=exercice_id)
+        self.check_object_permissions(request, exercice)
 
         # Vérifier les tentatives déjà faites (source de vérité = ExerciceTentative)
         tentatives = ExerciceTentative.objects.filter(apprenant=user, exercice=exercice).count()
@@ -991,13 +1153,16 @@ class DemarrerExerciceView(APIView):
     ),
 )
 class ExerciceDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = Exercice
+    acces_action = "voir"
 
     def get(self, request, exercice_id):
         user = request.user
         exercice = get_object_or_404(
             Exercice.objects.prefetch_related("questions__choix"), id=exercice_id
         )
+        self.check_object_permissions(request, exercice)
 
         # Vérifier si une session est en cours
         session = SessionExercice.objects.filter(
@@ -1030,7 +1195,17 @@ class ExerciceDetailView(APIView):
                 "type": q.type_question,
                 "points": q.points,
                 "bonne_reponse": q.bonne_reponse,  # À ne pas exposer en prod
-                "choix": [c.texte for c in q.choix.all()] if q.type_question == "qcm" else [],
+                # P6.3 : complet (id/est_correct) et ordonné (Choix.Meta.ordering),
+                # même correctif que QuestionSerializer.get_choix — doublon de
+                # logique appauvrie corrigé ici aussi (règle 1).
+                "choix": (
+                    [
+                        {"id": c.id, "texte": c.texte, "est_correct": c.est_correct}
+                        for c in q.choix.all()
+                    ]
+                    if q.type_question == "qcm"
+                    else []
+                ),
             }
             questions_data.append(q_data)
 

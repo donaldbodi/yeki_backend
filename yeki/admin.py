@@ -22,27 +22,30 @@ admin.site.register(ReponseOlympiade)
 admin.site.register(QuestionForum)
 admin.site.register(ReponseQuestion)
 admin.site.register(LikeReponse)
-admin.site.register(CinetPayTransaction)
+# CinetPayTransaction : enregistrement déplacé vers apps/paiement/admin.py
+# (P9.4) — doublon avec le sien, plus riche (list_display/filtres/recherche)
+# ; règle 1, un seul enregistrement par modèle.
 admin.site.register(WalletTransaction)
 
 @admin.register(AppVersion)
 class AppVersionAdmin(admin.ModelAdmin):
     list_display = [
-        'version_name', 
-        'version_code', 
-        'platform', 
-        'is_active', 
+        'version_name',
+        'version_code',
+        'platform',
+        'canal',
+        'is_active',
         'force_update',
         'release_date'
     ]
-    list_filter = ['platform', 'is_active', 'force_update']
+    list_filter = ['platform', 'canal', 'is_active', 'force_update']
     search_fields = ['version_name', 'changelog']
     ordering = ['-version_code', '-release_date']
     readonly_fields = ['created_at', 'updated_at']
-    
+
     fieldsets = (
         ('Informations', {
-            'fields': ('platform', 'version_code', 'version_name', 'download_url', 'file_size')
+            'fields': ('platform', 'canal', 'version_code', 'version_name', 'download_url', 'checksum_sha256', 'file_size')
         }),
         ('Détails', {
             'fields': ('changelog', 'release_date')

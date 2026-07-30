@@ -89,15 +89,14 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_user_type(self, value):
-        allowed = [
-            "apprenant",
-            "enseignant",
-            "enseignant_principal",
-            "enseignant_cadre",
-            "enseignant_admin",
-            "admin",
-            "service_client",
-        ]
+        # P5.4 : l'auto-inscription publique (AllowAny) ne doit JAMAIS
+        # permettre de choisir un rôle privilégié — faille trouvée lors de
+        # la refonte de l'écran d'inscription (n'importe qui pouvait
+        # s'auto-créer admin/enseignant_admin/service_client et recevoir
+        # un token immédiatement utilisable). La création des autres rôles
+        # reste réservée à apps/accounts/views/admin_enseignants.py,
+        # authentifié et réservé aux administrateurs.
+        allowed = ["apprenant", "enseignant"]
         if value not in allowed:
             raise serializers.ValidationError(f"Type d'utilisateur invalide. Valeurs : {allowed}")
         return value
@@ -111,6 +110,14 @@ class RegisterSerializer(serializers.Serializer):
             username=validated_data["username"],
             email=email,
         )
+        # P5.4 : "name" était exigé mais jamais persisté nulle part (ni
+        # User.first_name/last_name, ni Profile) — bug corrigé ici. Un seul
+        # champ "nom complet" côté écran/API, scindé sur le premier espace.
+        name = (validated_data.get("name") or "").strip()
+        if name:
+            first, *rest = name.split(" ", 1)
+            user.first_name = first
+            user.last_name = rest[0] if rest else ""
         user.set_password(validated_data["password"])
         user.save()
 

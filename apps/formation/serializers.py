@@ -2,11 +2,22 @@ from rest_framework import serializers
 
 from apps.accounts.serializers import EnseignantSerializer, EnseignantCadreLightSerializer
 from apps.accounts.models import Profile
-from apps.formation.models import Parcours, Departement, DemandeAccesFormation, Cours, Module, Lecon
+from apps.core.services import AccesService
+from apps.formation.models import (
+    Parcours,
+    Departement,
+    DemandeAccesFormation,
+    Cours,
+    Module,
+    Lecon,
+    SupplementCours,
+)
+from apps.formation.services import codes_niveaux_formation_disponibles
 
 
 class LeconSerializer(serializers.ModelSerializer):
     fichier_pdf = serializers.SerializerMethodField()
+    video = serializers.SerializerMethodField()
     created_by = EnseignantSerializer(read_only=True)
 
     class Meta:
@@ -30,6 +41,15 @@ class LeconSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.fichier_pdf.url)
             return obj.fichier_pdf.url
         return None
+
+    def get_video(self, obj):
+        # P9.1 : matrice d'accès — GRATUIT = PDF seulement, la vidéo est
+        # réservée aux abonnés Premium (AccesService.peut_voir_video_lecon).
+        request = self.context.get("request")
+        user = request.user if request else None
+        if not obj.video or not AccesService.peut_voir_video_lecon(user):
+            return None
+        return request.build_absolute_uri(obj.video.url) if request else obj.video.url
 
 
 class LeconCreateSerializer(serializers.ModelSerializer):
@@ -197,6 +217,7 @@ class DepartementSerializer(serializers.ModelSerializer):
     cours = CoursSerializer(many=True, read_only=True)
     niveaux_accessibles = serializers.SerializerMethodField()
     demandes_acces = serializers.SerializerMethodField()
+    label_catalogue = serializers.SerializerMethodField()
 
     class Meta:
         model = Departement
@@ -214,6 +235,11 @@ class DepartementSerializer(serializers.ModelSerializer):
             "est_actif",
             "prix",
             "prix_presentiel",
+            "prix_mensuel",
+            "prix_annuel",
+            "prix_presentiel_mensuel",
+            "prix_presentiel_annuel",
+            "label_catalogue",
             "created_at",
             "est_prepa_concours",
             "nom_concours",
@@ -241,6 +267,9 @@ class DepartementSerializer(serializers.ModelSerializer):
 
     def get_niveaux_accessibles(self, obj):
         return obj.get_niveaux_accessibles_list()
+
+    def get_label_catalogue(self, obj):
+        return obj.label_catalogue()
 
     def get_demandes_acces(self, obj):
         request = self.context.get("request")
@@ -294,6 +323,10 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             "description",
             "prix",
             "prix_presentiel",
+            "prix_mensuel",
+            "prix_annuel",
+            "prix_presentiel_mensuel",
+            "prix_presentiel_annuel",
             "est_prepa_concours",
             "nom_concours",
             "organisme_concours",
@@ -321,6 +354,10 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             "description": {"required": False, "allow_blank": True},
             "prix": {"required": False, "min_value": 0},
             "prix_presentiel": {"required": False, "min_value": 0},
+            "prix_mensuel": {"required": False, "min_value": 0},
+            "prix_annuel": {"required": False, "min_value": 0},
+            "prix_presentiel_mensuel": {"required": False, "min_value": 0},
+            "prix_presentiel_annuel": {"required": False, "min_value": 0},
             "est_prepa_concours": {"required": False},
             "est_formation_metier": {"required": False},
             "est_formation_classique": {"required": False},
@@ -352,9 +389,10 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
                 )
             if est_metier:
                 niveau = data.get("niveau_formation", instance.niveau_formation)
-                if niveau and niveau not in ["debutant", "intermediaire", "avance"]:
+                codes_valides = codes_niveaux_formation_disponibles()
+                if niveau and niveau not in codes_valides:
                     raise serializers.ValidationError(
-                        "Niveau de formation invalide. Choisissez: debutant, intermediaire, avance"
+                        f"Niveau de formation invalide. Choisissez : {', '.join(codes_valides)}"
                     )
         return data
 
@@ -410,6 +448,10 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
             "couleur",
             "prix",
             "prix_presentiel",
+            "prix_mensuel",
+            "prix_annuel",
+            "prix_presentiel_mensuel",
+            "prix_presentiel_annuel",
             "parcours",
             "image",
             "est_prepa_concours",
@@ -440,6 +482,10 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
             "couleur": {"required": False, "default": "#2884A0"},
             "prix": {"required": False, "default": 0},
             "prix_presentiel": {"required": False, "default": 0},
+            "prix_mensuel": {"required": False, "default": 0},
+            "prix_annuel": {"required": False, "default": 0},
+            "prix_presentiel_mensuel": {"required": False, "default": 0},
+            "prix_presentiel_annuel": {"required": False, "default": 0},
             "image": {"required": False},
             "mode": {"required": False, "default": "hybride"},
             "est_prepa_concours": {"required": False, "default": False},
@@ -465,9 +511,10 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
                 )
             if est_metier:
                 niveau = data.get("niveau_formation", "debutant")
-                if niveau not in ["debutant", "intermediaire", "avance"]:
+                codes_valides = codes_niveaux_formation_disponibles()
+                if niveau not in codes_valides:
                     raise serializers.ValidationError(
-                        "Niveau de formation invalide. Choisissez: debutant, intermediaire, avance"
+                        f"Niveau de formation invalide. Choisissez : {', '.join(codes_valides)}"
                     )
         return data
 
@@ -492,6 +539,7 @@ class DepartementCreateSerializer(serializers.ModelSerializer):
 class ApprenantDepartementDetailSerializer(serializers.ModelSerializer):
     est_accessible = serializers.SerializerMethodField()
     demande_statut = serializers.SerializerMethodField()
+    label_catalogue = serializers.SerializerMethodField()
 
     class Meta:
         model = Departement
@@ -503,6 +551,11 @@ class ApprenantDepartementDetailSerializer(serializers.ModelSerializer):
             "couleur",
             "prix",
             "prix_presentiel",
+            "prix_mensuel",
+            "prix_annuel",
+            "prix_presentiel_mensuel",
+            "prix_presentiel_annuel",
+            "label_catalogue",
             "est_prepa_concours",
             "nom_concours",
             "organisme_concours",
@@ -526,6 +579,9 @@ class ApprenantDepartementDetailSerializer(serializers.ModelSerializer):
             "est_accessible",
             "demande_statut",
         ]
+
+    def get_label_catalogue(self, obj):
+        return obj.label_catalogue()
 
     def get_est_accessible(self, obj):
         user = self.context.get("request").user
@@ -576,10 +632,12 @@ class LeconLightSerializer(serializers.ModelSerializer):
         return None
 
     def get_video(self, obj):
-        if obj.video:
-            request = self.context.get("request")
-            return request.build_absolute_uri(obj.video.url)
-        return None
+        # P9.1 : matrice d'accès — GRATUIT = PDF seulement.
+        request = self.context.get("request")
+        user = request.user if request else None
+        if not obj.video or not AccesService.peut_voir_video_lecon(user):
+            return None
+        return request.build_absolute_uri(obj.video.url)
 
 
 class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
@@ -665,3 +723,49 @@ class LeconUpdateSerializer(serializers.ModelSerializer):
                 "Le module cible doit appartenir au même cours que cette leçon."
             )
         return module
+
+
+class SupplementCoursSerializer(serializers.ModelSerializer):
+    """P11.9 — `cours` est passé par la vue (URL), jamais par le corps de
+    la requête : un enseignant principal ne doit pouvoir créer un
+    supplément que sur SON cours, pas sur un cours arbitraire choisi côté
+    client."""
+
+    class Meta:
+        model = SupplementCours
+        fields = [
+            "id",
+            "cours",
+            "lecon",
+            "titre",
+            "description",
+            "type_contenu",
+            "fichier",
+            "url",
+            "ordre",
+            "created_at",
+        ]
+        read_only_fields = ["id", "cours", "created_at"]
+
+    def validate(self, data):
+        # `cours` est en lecture seule (voir docstring) : pas dans `data`
+        # à la création, fourni par la vue via le contexte plutôt que le
+        # corps de la requête.
+        cours = getattr(self.instance, "cours", None) or self.context.get("cours")
+        instance = SupplementCours(
+            cours=cours,
+            lecon=data.get("lecon", getattr(self.instance, "lecon", None)),
+            type_contenu=data.get("type_contenu", getattr(self.instance, "type_contenu", None)),
+            fichier=data.get("fichier", getattr(self.instance, "fichier", None)),
+            url=data.get("url", getattr(self.instance, "url", None)),
+        )
+        instance.clean()
+        return data
+
+    def validate_lecon(self, lecon):
+        if lecon is None:
+            return lecon
+        cours = self.context.get("cours")
+        if cours is not None and lecon.cours_id != cours.id:
+            raise serializers.ValidationError("Cette leçon n'appartient pas à ce cours.")
+        return lecon

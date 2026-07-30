@@ -17,6 +17,7 @@ from drf_spectacular.types import OpenApiTypes
 
 from apps.accounts.models import Profile
 from apps.core.pagination import PaginatedListMixin
+from apps.core.permissions import AccesMatricePermission
 from apps.core.schema_examples import (
     ERREURS_COURANTES,
     ERREURS_ECRITURE,
@@ -56,7 +57,9 @@ class DetailQuestionView(APIView):
     GET /api/forum/questions/<pk>/ - Détail d'une question avec ses réponses
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "voir"
 
     def get(self, request, pk):
         try:
@@ -69,6 +72,7 @@ class DetailQuestionView(APIView):
             )
         except QuestionForum.DoesNotExist:
             return Response({"detail": "Question introuvable."}, status=404)
+        self.check_object_permissions(request, question)
 
         # Incrémenter les vues de manière atomique
         QuestionForum.objects.filter(pk=pk).update(nb_vues=F("nb_vues") + 1)
@@ -178,7 +182,9 @@ class DetailQuestionView(APIView):
     ),
 )
 class ListeQuestionsView(PaginatedListMixin, APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "voir"
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
@@ -311,7 +317,9 @@ class ListeQuestionsView(PaginatedListMixin, APIView):
     ),
 )
 class ForumMessagesPollingView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "voir"
 
     def get(self, request, room):
         since_raw = request.query_params.get("since")
@@ -378,13 +386,16 @@ class ForumMessagesPollingView(APIView):
 class ResoudreQuestionView(APIView):
     """PATCH /api/forum/questions/<pk>/resoudre/ → marquer comme résolue"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "soumettre"
 
     def patch(self, request, pk):
         try:
             question = QuestionForum.objects.get(pk=pk, auteur=request.user)
         except QuestionForum.DoesNotExist:
             return Response(status=404)
+        self.check_object_permissions(request, question)
         question.est_resolue = not question.est_resolue
         question.save()
         return Response({"est_resolue": question.est_resolue})
@@ -408,13 +419,16 @@ class ResoudreQuestionView(APIView):
 class RepondreQuestionView(APIView):
     """POST /api/forum/questions/<pk>/repondre/ → ajouter une réponse"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "soumettre"
 
     def post(self, request, pk):
         try:
             question = QuestionForum.objects.get(pk=pk)
         except QuestionForum.DoesNotExist:
             return Response({"detail": "Question introuvable."}, status=404)
+        self.check_object_permissions(request, question)
 
         contenu = request.data.get("contenu", "").strip()
         if not contenu:
@@ -457,13 +471,16 @@ class RepondreQuestionView(APIView):
 class LikerReponseView(APIView):
     """POST /api/forum/reponses/<pk>/liker/ → liker/unliker une réponse"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "soumettre"
 
     def post(self, request, pk):
         try:
             reponse = ReponseQuestion.objects.get(pk=pk)
         except ReponseQuestion.DoesNotExist:
             return Response(status=404)
+        self.check_object_permissions(request, reponse.question)
 
         like, created = LikeReponse.objects.get_or_create(reponse=reponse, utilisateur=request.user)
         if not created:
@@ -501,7 +518,9 @@ class LikerReponseView(APIView):
 class MarquerSolutionView(APIView):
     """PATCH /api/forum/reponses/<pk>/solution/ → marquer comme solution"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "soumettre"
 
     def patch(self, request, pk):
         try:
@@ -513,6 +532,7 @@ class MarquerSolutionView(APIView):
                 return Response(status=403)
         except ReponseQuestion.DoesNotExist:
             return Response(status=404)
+        self.check_object_permissions(request, reponse.question)
 
         reponse.est_solution = not reponse.est_solution
         reponse.save()
@@ -550,7 +570,9 @@ class MarquerSolutionView(APIView):
 class StatsForumView(APIView):
     """GET /api/forum/stats/ → statistiques pour la page forum"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = QuestionForum
+    acces_action = "voir"
 
     def get(self, request):
         total = QuestionForum.objects.count()

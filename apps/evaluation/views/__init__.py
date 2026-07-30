@@ -32,8 +32,9 @@ from apps.evaluation.views.devoirs import (  # noqa: F401
     DevoirsCoursView,
     CreerDevoirCoursView,
     SoumettreDevoirFichierView,
-    AjouterQuestionDevoirView,
-    AjouterEnonceDevoirView,
+    EnoncesDevoirView,
+    EnonceDevoirDetailView,
+    AjouterQuestionEnonceDevoirView,
     ListeQuestionsDevoirView,
     SoumissionsDevoirEnseignantView,
     CorrigerSoumissionView,
@@ -61,6 +62,8 @@ from apps.evaluation.views.olympiades import (  # noqa: F401
 )
 from apps.evaluation.views.classement import (  # noqa: F401
     ClassementDepartementView,
+    ClassementHistoriqueView,
+    ClassementPeriodesView,
     MonScoreGlobalView,
     RecalculerClassementView,
 )

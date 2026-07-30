@@ -118,15 +118,15 @@ class IsEnseignantAdminDuParcours(BasePermission):
         return parcours.admin.user_id == request.user.id
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# TODO(arbitrage) : IsServiceClient demandée dans la tâche « fermer l'API
-# par défaut », mais aucun rôle « service client » n'existe dans
-# Profile.USER_TYPES ni ailleurs dans le modèle de données actuel (seule
-# trace : le texte « Contactez le service client » affiché à l'apprenant,
-# pas un rôle backend). Fail-closed en attendant une réponse : cette
-# permission refuse tout le monde plutôt que de deviner un mapping vers un
-# rôle existant (ex. admin). Voir question posée dans la conversation.
-# ─────────────────────────────────────────────────────────────────────────
-class IsServiceClient(BasePermission):
-    def has_permission(self, request, view):
-        return False
+class IsServiceClient(_HasUserType):
+    """Vrai pour le rôle Service Client (`Profile.USER_TYPES`).
+
+    Remplace un ancien stub fail-closed (P9.4) dont le commentaire était
+    devenu faux : `'service_client'` existe bel et bien dans
+    `Profile.USER_TYPES` (apps/accounts/models.py) et est déjà vérifié
+    « à la main » dans plusieurs vues (`FileAttentePaiementsServiceClientView`,
+    `ValiderPaiementManuelView`, `RefuserPaiementManuelView`) via un
+    `if profile.user_type != "service_client"` recopié à chaque fois —
+    cette classe centralise enfin ce contrôle (règle 1 : pas de 3ᵉ/4ᵉ copie)."""
+
+    user_types = ('service_client',)
