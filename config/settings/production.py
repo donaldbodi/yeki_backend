@@ -4,7 +4,7 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = False
 
-ALLOWED_HOSTS = ["yeki.pythonanywhere.com"]
+ALLOWED_HOSTS = ["yeki.pythonanywhere.com", "http://localhost:64940"]
 
 DATABASES = {
     "default": {
