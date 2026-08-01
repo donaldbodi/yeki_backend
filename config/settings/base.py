@@ -41,7 +41,7 @@ DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 
 CORS_ALLOWED_ORIGINS = [
     "https://yeki.pythonanywhere.com",
-    "http://localhost:53299",
+    "http://localhost:64940",
     "https://yeki-84b1a.web.app",
 ]
 
