@@ -294,7 +294,11 @@ class AssignAdminView(APIView):
     description=(
         "Retourne la liste paginée de tous les parcours (Cursus, Prépa Concours, "
         "Formations, etc.). Vue publique consultée depuis le formulaire "
-        "d'inscription, avant connexion."
+        "d'inscription, avant connexion. Filtre optionnel `type_parcours` "
+        "(ex. `cursus`) — l'inscription apprenant ne doit proposer que les "
+        "parcours de type Cursus, Formations/Prépa Concours étant des "
+        "contenus « haut de gamme » accessibles séparément après coup via "
+        "une demande d'accès (DemandeAccesFormation)."
     ),
     tags=["formation"],
     parameters=[*PARAMS_PAGINATION],
@@ -308,6 +312,9 @@ class AssignAdminView(APIView):
 # ses deux voisins departements_par_parcours/DepartementNiveauxAPIView)
 def liste_parcours(request):
     parcours = Parcours.objects.select_related("admin").all()
+    type_parcours = request.query_params.get("type_parcours")
+    if type_parcours:
+        parcours = parcours.filter(type_parcours=type_parcours)
     paginator = YekiPageNumberPagination()
     page = paginator.paginate_queryset(parcours, request)
     serializer = ParcoursSerializer(page, many=True)

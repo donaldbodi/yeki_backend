@@ -538,6 +538,7 @@ class StatutAbonnementView(APIView):
                     "debut": abo.debut,
                     "fin": abo.fin,
                     "jours_restants": max(0, (abo.fin - timezone.now()).days),
+                    "tarifs": AbonnementPremium.TARIFS,
                 }
             )
         except AbonnementPremium.DoesNotExist:
@@ -548,6 +549,7 @@ class StatutAbonnementView(APIView):
                     "debut": None,
                     "fin": None,
                     "jours_restants": 0,
+                    "tarifs": AbonnementPremium.TARIFS,
                 }
             )
 

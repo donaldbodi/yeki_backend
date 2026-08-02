@@ -48,6 +48,12 @@ class Profile(models.Model):
 
     is_active = models.BooleanField(default=False)
 
+    # Ajouté à l'inscription (obligatoire pour un nouvel apprenant, voir
+    # RegisterSerializer) — nullable ici pour ne pas casser les Profile
+    # existants créés avant ce champ. CDC_BACKEND §9.3 : sert notamment à
+    # la configuration AdMob (tagForChildDirectedTreatment/
+    # tagForUnderAgeOfConsent).
+    date_naissance = models.DateField(null=True, blank=True)
     phone = models.CharField(max_length=20, blank=True)
     whatsapp = models.CharField(
         max_length=20, blank=True, help_text="Numéro WhatsApp pour les répétiteurs"

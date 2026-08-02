@@ -36,6 +36,8 @@ class ProfileSerializer(serializers.ModelSerializer):
             "is_active",
             "avatar",
             "bio",
+            "phone",
+            "date_naissance",
         ]
 
 
@@ -56,6 +58,12 @@ class RegisterSerializer(serializers.Serializer):
         queryset=Departement.objects.all(), required=True
     )
     niveau = serializers.CharField(required=True, allow_blank=False)
+
+    # Ajoutés à la demande explicite du produit (aucune règle CDC ne les
+    # rend obligatoires, mais aucune ne l'interdit non plus — voir
+    # docs/ecarts/p2_inscription_cursus_root_cause.md).
+    phone = serializers.CharField(required=True, max_length=20)
+    date_naissance = serializers.DateField(required=True)
 
     cursus = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     sub_cursus = serializers.CharField(required=False, allow_null=True, allow_blank=True)
@@ -121,15 +129,29 @@ class RegisterSerializer(serializers.Serializer):
         user.set_password(validated_data["password"])
         user.save()
 
+        # Bug corrigé : `cursus` n'était jamais envoyé par le frontend
+        # (champ resté optionnel, toujours `None` en pratique) alors que
+        # `ApprenantCursusAPIView` (apps/formation/views/cours.py) exige
+        # `profile.cursus` non vide pour lister le moindre cours — un
+        # nouvel apprenant ne voyait donc jamais aucun cours. `parcours`
+        # est déjà obligatoire à l'inscription : dérivé directement de
+        # l'objet réellement sélectionné plutôt que d'une chaîne
+        # re-saisie, garantit par construction la correspondance avec
+        # `Parcours.nom` attendue par cette vue.
+        parcours = validated_data.get("parcours")
+        cursus = parcours.nom if parcours else validated_data.get("cursus")
+
         profile = Profile.objects.create(
             user=user,
             user_type=validated_data.get("user_type"),
             departement=validated_data.get("departement"),
-            cursus=validated_data.get("cursus"),
+            cursus=cursus,
             sub_cursus=validated_data.get("sub_cursus"),
             niveau=validated_data.get("niveau"),
             filiere=validated_data.get("filiere"),
             licence=validated_data.get("licence"),
+            phone=validated_data.get("phone", ""),
+            date_naissance=validated_data.get("date_naissance"),
         )
 
         if profile.user_type == "apprenant":
@@ -202,6 +224,7 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
             "email",
             "username",
             "phone",
+            "date_naissance",
             "bio",
             "ville",
             "cursus",

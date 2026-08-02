@@ -22,6 +22,11 @@ def _payload_base(**overrides):
         "username": "nouvel_apprenant",
         "password": "MotDePasse123",
         "user_type": "apprenant",
+        # Ajoutés au ticket "inscription (2 champs + filtre parcours)" —
+        # required=True côté RegisterSerializer, voir docs/ecarts/
+        # p2_inscription_cursus_root_cause.md.
+        "phone": "690000000",
+        "date_naissance": "2005-01-01",
     }
     payload.update(overrides)
     return payload
@@ -121,6 +126,31 @@ def test_inscription_publique_refuse_les_roles_privilegies(parcours, departement
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "user_type" in response.data["error"]["fields"]
     assert not User.objects.filter(username="nouvel_apprenant").exists()
+
+
+@pytest.mark.django_db
+def test_inscription_derive_cursus_depuis_parcours_selectionne(parcours, departement):
+    """
+    Bug corrigé : `profile.cursus` n'était jamais rempli (le frontend ne
+    l'envoyait jamais, le champ restait optionnel) — `ApprenantCursusAPIView`
+    exige pourtant `profile.cursus` non vide et correspondant à un vrai
+    `Parcours.nom` pour lister le moindre cours : un nouvel apprenant ne
+    voyait donc jamais aucun cours. `cursus` est désormais dérivé
+    directement de l'objet `Parcours` réellement sélectionné (déjà
+    obligatoire à l'inscription), garantissant la correspondance par
+    construction. Voir docs/ecarts/p2_inscription_cursus_root_cause.md.
+    """
+    client = APIClient()
+    response = client.post(
+        reverse("register"),
+        _payload_base(parcours=parcours.id, departement=departement.id, niveau="Terminale"),
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    profile = User.objects.get(username="nouvel_apprenant").profile
+    assert profile.cursus == parcours.nom
+    assert Parcours.objects.get(nom=profile.cursus, type_parcours="cursus") == parcours
 
 
 @pytest.mark.django_db

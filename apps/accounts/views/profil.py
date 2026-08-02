@@ -76,7 +76,7 @@ class ProfilUpdateView(APIView):
         user.save()
 
         # Champs Profile
-        for field in ["phone", "bio", "cursus", "sub_cursus", "niveau", "filiere", "licence"]:
+        for field in ["phone", "date_naissance", "bio", "cursus", "sub_cursus", "niveau", "filiere", "licence"]:
             if field in data:
                 setattr(profile, field, data[field])
 

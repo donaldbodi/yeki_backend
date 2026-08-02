@@ -18,6 +18,7 @@ from apps.formation.services import codes_niveaux_formation_disponibles
 class LeconSerializer(serializers.ModelSerializer):
     fichier_pdf = serializers.SerializerMethodField()
     video = serializers.SerializerMethodField()
+    video_verrouille = serializers.SerializerMethodField()
     created_by = EnseignantSerializer(read_only=True)
 
     class Meta:
@@ -28,6 +29,7 @@ class LeconSerializer(serializers.ModelSerializer):
             "description",
             "fichier_pdf",
             "video",
+            "video_verrouille",
             "module",
             "created_by",
             "cours",
@@ -50,6 +52,16 @@ class LeconSerializer(serializers.ModelSerializer):
         if not obj.video or not AccesService.peut_voir_video_lecon(user):
             return None
         return request.build_absolute_uri(obj.video.url) if request else obj.video.url
+
+    def get_video_verrouille(self, obj):
+        # Distingue « leçon sans vidéo du tout » de « vidéo existante mais
+        # cachée par le palier gratuit » — les deux cas renvoyaient
+        # jusqu'ici `video: null`, indiscernables côté client (bug
+        # corrigé : aucun bouton d'abonnement ne pouvait être affiché sur
+        # une vidéo réellement verrouillée).
+        request = self.context.get("request")
+        user = request.user if request else None
+        return bool(obj.video) and not AccesService.peut_voir_video_lecon(user)
 
 
 class LeconCreateSerializer(serializers.ModelSerializer):
@@ -614,6 +626,7 @@ class ParcoursSerializer(serializers.ModelSerializer):
 class LeconLightSerializer(serializers.ModelSerializer):
     fichier_pdf = serializers.SerializerMethodField()
     video = serializers.SerializerMethodField()
+    video_verrouille = serializers.SerializerMethodField()
 
     class Meta:
         model = Lecon
@@ -623,6 +636,7 @@ class LeconLightSerializer(serializers.ModelSerializer):
             "description",
             "fichier_pdf",
             "video",
+            "video_verrouille",
         ]
 
     def get_fichier_pdf(self, obj):
@@ -638,6 +652,12 @@ class LeconLightSerializer(serializers.ModelSerializer):
         if not obj.video or not AccesService.peut_voir_video_lecon(user):
             return None
         return request.build_absolute_uri(obj.video.url)
+
+    def get_video_verrouille(self, obj):
+        # Voir LeconSerializer.get_video_verrouille — même distinction.
+        request = self.context.get("request")
+        user = request.user if request else None
+        return bool(obj.video) and not AccesService.peut_voir_video_lecon(user)
 
 
 class ModuleAvecLeconsSerializer(serializers.ModelSerializer):
