@@ -48,6 +48,15 @@ _MODELE_IA_DEFAUT = "claude-haiku-4-5-20251001"
 _USD_TO_XAF_DEFAUT = 600
 _COMMISSION_IA_POURCENT_DEFAUT = 20
 _SOLDE_MIN_IA_DEFAUT = 20
+# Bug corrigé (business plan §4.5.2, déjà signalé par le CDC) :
+# `calculate_cost()` réutilisait `solde_min_ia` (20 FCFA, un seuil
+# d'ACCÈS — solde minimum pour avoir le droit d'utiliser l'IA) comme
+# PLANCHER DE PRIX par requête, produisant une marge implicite non
+# annoncée sur les courtes requêtes. Ce sont deux concepts séparés :
+# `solde_min_ia` reste inchangé (vérifié dans verifier_solde_suffisant),
+# `plancher_prix_ia` est le vrai plancher de prix (coût réel + 20%,
+# jamais en dessous de ce montant).
+_PLANCHER_PRIX_IA_DEFAUT = 1
 
 
 def modele_ia() -> str:
@@ -66,6 +75,10 @@ def commission_ia_pourcent() -> float:
 
 def solde_min_ia() -> int:
     return int(ParametreSysteme.get("solde_min_ia", default=_SOLDE_MIN_IA_DEFAUT))
+
+
+def plancher_prix_ia() -> int:
+    return int(ParametreSysteme.get("plancher_prix_ia", default=_PLANCHER_PRIX_IA_DEFAUT))
 
 
 # Tentative d'import de requests
@@ -89,7 +102,7 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> int:
     total_cost_usd = input_cost_usd + output_cost_usd
     cout_base_xaf = total_cost_usd * usd_to_xaf()
     total_cost_xaf = int(cout_base_xaf * (1 + commission_ia_pourcent() / 100))
-    return max(solde_min_ia(), total_cost_xaf)
+    return max(plancher_prix_ia(), total_cost_xaf)
 
 
 def commission_yeki_sur_cout(cout_total_xaf: int) -> int:

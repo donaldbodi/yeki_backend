@@ -54,8 +54,17 @@ def test_commission_yeki_sur_cout_derive_la_bonne_part():
 
 
 @pytest.mark.django_db
-def test_cout_plafonne_au_solde_minimum():
+def test_cout_plafonne_au_plancher_prix_ia_pas_au_solde_minimum():
+    """
+    Bug corrigé (business plan §4.5.2, déjà signalé par le CDC) :
+    `calculate_cost()` plafonnait au SOLDE MINIMUM (`solde_min_ia`, un
+    seuil d'ACCÈS distinct — voir `verifier_solde_suffisant`), produisant
+    une marge implicite non annoncée sur les courtes requêtes. Le
+    plancher de PRIX est désormais `plancher_prix_ia` (1 FCFA par
+    défaut) — `solde_min_ia` à 20 ne doit plus influencer le prix.
+    """
     ParametreSysteme.objects.filter(cle="solde_min_ia").update(valeur="20")
-    # Très peu de tokens -> coût de base quasi nul, doit être plafonné à 20
+    # Très peu de tokens -> coût de base quasi nul, doit être plafonné au
+    # plancher de PRIX (1 FCFA par défaut), PAS au solde minimum (20).
     cout = calculate_cost(1, 1)
-    assert cout == 20
+    assert cout == 1
