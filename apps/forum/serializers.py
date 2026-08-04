@@ -10,6 +10,7 @@ class ReponseSerializer(serializers.ModelSerializer):
     auteur_est_enseignant = serializers.SerializerMethodField()
     nb_likes = serializers.SerializerMethodField()
     mon_like = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ReponseQuestion
@@ -23,7 +24,19 @@ class ReponseSerializer(serializers.ModelSerializer):
             "auteur_est_enseignant",
             "nb_likes",
             "mon_like",
+            "image_url",
         ]
+
+    def get_image_url(self, obj):
+        # `ReponseImage` est une relation séparée (`related_name="images"`),
+        # pas un champ direct comme sur `QuestionForum` — une seule image
+        # par réponse côté client (`ForumRepository.repondre()`), la
+        # première suffit.
+        image = obj.images.first()
+        if not image:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(image.image.url) if request else image.image.url
 
     def get_auteur_est_enseignant(self, obj):
         try:

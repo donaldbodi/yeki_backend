@@ -890,14 +890,17 @@ class AdminGeneralSearchEnseignantsView(PaginatedListMixin, APIView):
     GET /api/admin-general/enseignants/search/
     Paramètres query :
     - q: texte de recherche (nom, email, username)
-    - user_type: enseignant, enseignant_principal, enseignant_cadre, enseignant_admin
+    - user_type: enseignant, enseignant_principal, enseignant_cadre, enseignant_admin,
+      service_client
     - is_active: true/false
     - parcours_id: filtrer par parcours (admin du parcours)
     - departement_id: filtrer par département (cadre)
     - cours_id: filtrer par cours (enseignant principal)
     - date_from, date_to: filtrer par date de création
 
-    Retourne la liste des enseignants filtrés.
+    Retourne la liste des enseignants filtrés (bug corrigé :
+    `service_client` était absent de la liste des rôles retournés,
+    rendant ces comptes introuvables pour l'admin général).
     """
 
     permission_classes = [IsAuthenticated]
@@ -919,6 +922,7 @@ class AdminGeneralSearchEnseignantsView(PaginatedListMixin, APIView):
                     "enseignant_principal",
                     "enseignant_cadre",
                     "enseignant_admin",
+                    "service_client",
                 ]
             )
             .select_related("user")
@@ -942,6 +946,7 @@ class AdminGeneralSearchEnseignantsView(PaginatedListMixin, APIView):
             "enseignant_principal",
             "enseignant_cadre",
             "enseignant_admin",
+            "service_client",
         ]:
             qs = qs.filter(user_type=user_type)
 

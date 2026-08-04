@@ -24,7 +24,7 @@ from apps.core.schema_examples import (
     EXEMPLE_PAGINATION,
     PARAMS_PAGINATION,
 )
-from apps.forum.models import QuestionForum, ReponseQuestion, LikeReponse
+from apps.forum.models import QuestionForum, ReponseQuestion, ReponseImage, LikeReponse
 from apps.forum.serializers import (
     ReponseSerializer,
     QuestionForumDetailSerializer,
@@ -66,7 +66,7 @@ class DetailQuestionView(APIView):
             # Utiliser select_related et prefetch_related pour optimiser
             question = (
                 QuestionForum.objects.select_related("auteur__profile")
-                .prefetch_related("reponses__auteur__profile", "reponses__likes")
+                .prefetch_related("reponses__auteur__profile", "reponses__likes", "reponses__images")
                 .annotate(nb_reponses=Count("reponses"))
                 .get(pk=pk)
             )
@@ -440,6 +440,10 @@ class RepondreQuestionView(APIView):
             contenu=contenu,
             est_solution=False,
         )
+
+        image = request.FILES.get("image")
+        if image:
+            ReponseImage.objects.create(reponse=reponse, image=image)
 
         serializer = ReponseSerializer(reponse, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
