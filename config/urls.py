@@ -6,9 +6,9 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 """
 
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from django.views.static import serve as serve_static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from apps.core.views import landing
 
@@ -27,4 +27,22 @@ urlpatterns = [
     path("api/", include("apps.ia.urls")),
     path("api/", include("apps.notifications.urls")),
     path("api/", include("apps.repetiteurs.urls")),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # Bug corrigé (CORS sur les médias forum/leçons en production) :
+    # `django.conf.urls.static.static()` ne génère AUCUNE route dès que
+    # `DEBUG=False` (comportement documenté de Django, par sécurité/perf —
+    # voir sa source : `if not settings.DEBUG: return []`). En production,
+    # `/media/...` est donc actuellement servi entièrement par le mapping
+    # de fichiers statiques de PythonAnywhere (hors de Django), qui ne
+    # transmet JAMAIS les en-têtes CORS (confirmé en prod : la console
+    # navigateur montre « No 'Access-Control-Allow-Origin' header is
+    # present » précisément sur ces requêtes média, alors que les mêmes
+    # requêtes vers `/api/...` reçoivent bien leurs en-têtes CORS via
+    # `CorsMiddleware`). Route explicite, systématique (pas conditionnée
+    # par `DEBUG`), pour que ces requêtes passent enfin par Django/
+    # `CorsMiddleware` — nécessite EN PLUS de retirer/ajuster le mapping
+    # `/media/` du tableau de bord PythonAnywhere (onglet Web → Static
+    # files), sans quoi PythonAnywhere continue d'intercepter ces requêtes
+    # avant qu'elles n'atteignent Django (hors de portée d'un simple
+    # correctif de code, action pour l'utilisateur — voir docs/MIGRATIONS_APPS.md).
+    re_path(r"^media/(?P<path>.*)$", serve_static, {"document_root": settings.MEDIA_ROOT}),
+]
