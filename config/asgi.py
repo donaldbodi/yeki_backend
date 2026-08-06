@@ -21,12 +21,25 @@ le détail) ; il tourne mais ne doit pas encore être branché côté client.
 """
 
 import os
+import django
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from yeki.routing import websocket_urlpatterns
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.production")
+
+# Bug réel révélé par le tout premier vrai chargement de ce fichier
+# (déploiement Railway, 2026-08-06) — jamais détecté avant puisqu'il n'avait
+# jamais tourné en production. `django.setup()` doit être appelé
+# EXPLICITEMENT et AVANT tout import qui touche des modèles Django
+# (`yeki.routing` → `yeki.consumers` → `from django.contrib.auth.models
+# import User`) : sans lui, l'app registry n'est pas encore prête
+# (`AppRegistryNotReady`) au moment de cet import — `get_asgi_application()`
+# déclenche bien un `django.setup()` interne, mais seulement APRÈS avoir été
+# appelé, trop tard pour un import de niveau module placé plus haut.
+django.setup()
+
+from yeki.routing import websocket_urlpatterns  # noqa: E402 — doit rester après django.setup()
 
 application = ProtocolTypeRouter(
     {
