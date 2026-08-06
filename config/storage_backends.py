@@ -24,3 +24,16 @@ from whitenoise.storage import CompressedManifestStaticFilesStorage
 
 class LenientManifestStaticFilesStorage(CompressedManifestStaticFilesStorage):
     manifest_strict = False
+
+    def hashed_name(self, name, content=None, filename=None):
+        # `manifest_strict = False` seul ne suffit pas : il couvre seulement
+        # « absent du manifeste mais présent sur le disque ». Ici le fichier
+        # est absent du disque LUI-MÊME (jamais livré) — `hashed_name()`
+        # (calculé le hash à partir du contenu réel) lève sa propre
+        # `ValueError` de façon INCONDITIONNELLE dans ce cas, sans jamais
+        # consulter `manifest_strict`. Confirmé en production (Railway,
+        # 1er hébergement où ce chemin de code est réellement exercé).
+        try:
+            return super().hashed_name(name, content, filename)
+        except ValueError:
+            return name
