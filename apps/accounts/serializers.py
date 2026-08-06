@@ -50,14 +50,21 @@ class RegisterSerializer(serializers.Serializer):
     user_type = serializers.CharField(required=True)
 
     # CDC §13.2 (recette backend) : parcours/département/niveau obligatoires
-    # à l'inscription. `parcours` n'est pas stocké (dérivé de
-    # `departement.parcours`) : il sert uniquement à vérifier la cohérence
-    # avec le `departement` envoyé.
-    parcours = serializers.PrimaryKeyRelatedField(queryset=Parcours.objects.all(), required=True)
+    # à l'inscription — mais uniquement pour un APPRENANT (validate() plus
+    # bas). Bug réel corrigé ici : ces 3 champs étaient `required=True` sans
+    # condition de rôle, alors que `validate_user_type` autorise pourtant
+    # explicitement l'auto-inscription "enseignant" — l'écran d'inscription
+    # enseignant (2 étapes, sans ces 3 champs par design,
+    # `register_page.dart._kLabelsEnseignant`) échouait donc TOUJOURS avec
+    # "Ce champ est obligatoire", jamais détecté avant un vrai test en
+    # conditions réelles (migration d'hébergement). `parcours` n'est pas
+    # stocké (dérivé de `departement.parcours`) : il sert uniquement à
+    # vérifier la cohérence avec le `departement` envoyé.
+    parcours = serializers.PrimaryKeyRelatedField(queryset=Parcours.objects.all(), required=False)
     departement = serializers.PrimaryKeyRelatedField(
-        queryset=Departement.objects.all(), required=True
+        queryset=Departement.objects.all(), required=False
     )
-    niveau = serializers.CharField(required=True, allow_blank=False)
+    niveau = serializers.CharField(required=False, allow_blank=False)
 
     # Ajoutés à la demande explicite du produit (aucune règle CDC ne les
     # rend obligatoires, mais aucune ne l'interdit non plus — voir
@@ -71,6 +78,19 @@ class RegisterSerializer(serializers.Serializer):
     licence = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
     def validate(self, data):
+        # Obligatoires pour un apprenant seulement — un enseignant n'a ni
+        # parcours, ni département, ni niveau à l'inscription (assignés
+        # plus tard par un admin, apps/accounts/views/admin_enseignants.py).
+        if data.get("user_type") == "apprenant":
+            manquants = [
+                champ
+                for champ in ("parcours", "departement", "niveau")
+                if not data.get(champ)
+            ]
+            if manquants:
+                raise serializers.ValidationError(
+                    {champ: "Ce champ est obligatoire." for champ in manquants}
+                )
         parcours = data.get("parcours")
         departement = data.get("departement")
         if parcours and departement and departement.parcours_id != parcours.id:

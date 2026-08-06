@@ -172,3 +172,38 @@ def test_inscription_publique_accepte_enseignant(parcours, departement):
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.data["role"] == "enseignant"
+
+
+@pytest.mark.django_db
+def test_inscription_enseignant_sans_parcours_departement_niveau_201():
+    """
+    Bug réel corrigé (migration hébergement, 1er vrai test en conditions
+    réelles) : `parcours`/`departement`/`niveau` étaient `required=True`
+    SANS condition de rôle, alors que le test ci-dessus (`test_inscription_
+    publique_accepte_enseignant`) les fournissait quand même par
+    accident — masquant que le VRAI écran d'inscription enseignant
+    (`register_page.dart`, 2 étapes, ces 3 champs jamais demandés/envoyés
+    pour ce rôle) échouait TOUJOURS avec "Ce champ est obligatoire".
+    Reproduit ici exactement le payload réel envoyé par le frontend pour
+    un enseignant : aucun des 3 champs.
+    """
+    client = APIClient()
+    response = client.post(
+        reverse("register"),
+        _payload_base(
+            email="nouvel.enseignant@yeki.test",
+            username="nouvel_enseignant",
+            user_type="enseignant",
+        ),
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["role"] == "enseignant"
+    profile = User.objects.get(username="nouvel_enseignant").profile
+    assert profile.departement is None
+    assert profile.niveau is None
+    # Non-régression : l'obligation CDC §13.2 reste bien active pour un
+    # apprenant (déjà couvert par test_inscription_sans_parcours_
+    # departement_niveau_400 ci-dessus) — seul le rôle enseignant est
+    # exempté, cf. `RegisterSerializer.validate`.
