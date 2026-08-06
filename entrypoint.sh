@@ -13,4 +13,7 @@ echo "→ Fichiers statiques..."
 python manage.py collectstatic --noinput
 
 echo "→ Démarrage Daphne (HTTP + WebSocket)..."
-exec daphne -b 0.0.0.0 -p 8000 config.asgi:application
+# Railway (et la plupart des PaaS) injectent PORT dynamiquement et exigent
+# que l'app écoute dessus ; repli sur 8000 quand PORT est absent (exécution
+# locale, ou plateforme à port fixe type Coolify).
+exec daphne -b 0.0.0.0 -p "${PORT:-8000}" config.asgi:application
