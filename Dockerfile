@@ -9,7 +9,8 @@ FROM python:3.13-slim
 # Pas de .pyc/.pyo persistés dans l'image (inutiles, alourdissent) ; sortie
 # non bufferisée pour que les logs apparaissent immédiatement dans Coolify.
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    DJANGO_SETTINGS_MODULE=config.settings.production
 
 WORKDIR /app
 
