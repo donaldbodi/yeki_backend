@@ -1,0 +1,16 @@
+# Migration hébergement VPS+Coolify — exclut du build tout ce qui n'a pas sa
+# place dans l'image (secrets, venv local, artefacts déjà gitignorés mais
+# encore présents sur le disque, données montées séparément en volume).
+.git/
+.env
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+db.sqlite3
+db.sqlite3.backup-*
+staticfiles/
+media/
+htmlcov/
+.pytest_cache/
+.ruff_cache/

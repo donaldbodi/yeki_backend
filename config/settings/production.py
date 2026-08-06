@@ -4,7 +4,14 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = False
 
-ALLOWED_HOSTS = ["yeki.pythonanywhere.com", "http://localhost:64940"]
+# Liste extensible par variable d'environnement (`env.list`, django-environ) —
+# permet d'ajouter le domaine du nouvel hébergement VPS+Coolify sans nouveau
+# déploiement de code, juste une variable d'env côté Coolify. Les 2 valeurs
+# historiques restent le défaut (compatibilité PythonAnywhere le temps de la
+# bascule).
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS", default=["yeki.pythonanywhere.com", "http://localhost:64940"]
+)
 
 # PythonAnywhere termine le HTTPS sur SON propre reverse proxy et transmet
 # ensuite la requête à ce process WSGI en HTTP interne (`X-Forwarded-Proto`
@@ -19,6 +26,24 @@ ALLOWED_HOSTS = ["yeki.pythonanywhere.com", "http://localhost:64940"]
 # résolue par ce correctif-là. Fix standard documenté par PythonAnywhere
 # lui-même pour les apps Django derrière leur proxy.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ── Channels (WebSocket) — migration hébergement VPS+Coolify ────────────────
+# `config/asgi.py` construit déjà le `ProtocolTypeRouter` (http+websocket) —
+# ces 2 réglages sont ce qui manquait pour qu'il soit RÉELLEMENT chargé (un
+# serveur ASGI, Daphne, au lieu du WSGI PythonAnywhere) et pour que le
+# `channel_layer` utilisé par `yeki/consumers.py` (`ForumConsumer`,
+# `group_send`/`group_add`) ait un backend partagé entre process — le layer
+# mémoire par défaut de Channels ne fonctionne qu'en single-process, jamais
+# fiable dès qu'il y a plusieurs workers/replicas.
+ASGI_APPLICATION = "config.asgi.application"
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [env("REDIS_URL")],
+        },
+    }
+}
 
 DATABASES = {
     "default": {

@@ -6,11 +6,18 @@ It exposes the ASGI callable as a module-level variable named ``application``.
 For more information on this file, see
 https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
 
-Note : ce fichier n'est aujourd'hui jamais chargé en production
-(PythonAnywhere sert uniquement du WSGI, voir docs/FORUM_TEMPS_REEL.md) et
-son import `channels.routing` échouerait s'il l'était (`channels` n'est pas
-installé). Conservé à l'identique lors de la restructuration config/ —
-réparer ce fichier est hors périmètre de cette tâche (structure uniquement).
+Historique : ce fichier n'était jusqu'ici JAMAIS chargé en production
+(PythonAnywhere ne sert que du WSGI) et son import `channels.routing`
+échouait dès que le module était sollicité (`channels` n'était pas installé,
+voir docs/FORUM_TEMPS_REEL.md, constat du 2026-07-16). Réellement actif
+depuis la migration vers un VPS + Daphne (serveur ASGI) — `channels` est
+maintenant une dépendance installée (requirements.txt) et
+`ASGI_APPLICATION`/`CHANNEL_LAYERS` sont configurés (config/settings/
+production.py). Note : `yeki/consumers.py` (le `ForumConsumer` routé
+ci-dessous) reste, lui, à réviser avant un usage réel en production — sa
+sérialisation interne est en partie périmée par rapport à
+`apps/forum/serializers.py` (voir le ticket de migration d'hébergement pour
+le détail) ; il tourne mais ne doit pas encore être branché côté client.
 """
 
 import os

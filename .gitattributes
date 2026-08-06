@@ -1,0 +1,6 @@
+# Fins de ligne LF forcées pour les scripts shell exécutés dans le conteneur
+# Linux (Dockerfile/entrypoint.sh) — sur Windows, git convertit sinon en
+# CRLF, ce qui casse le shebang `#!/bin/sh` (`entrypoint.sh: not found` au
+# démarrage du conteneur, erreur trompeuse qui masque la vraie cause).
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf

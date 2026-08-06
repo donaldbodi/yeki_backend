@@ -33,7 +33,6 @@ environ.Env.read_env(str(BASE_DIR / ".env"))
 # l'environnement, le démarrage doit échouer plutôt que de tourner avec une
 # clé de test ou (pire) une clé devinable.
 SECRET_KEY = env("SECRET_KEY")
-DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 
 # DEBUG, ALLOWED_HOSTS et DATABASES sont volontairement définis dans
 # development.py / production.py, pas ici : ce sont les seuls réglages qui
@@ -73,8 +72,20 @@ INSTALLED_APPS = [
     "apps.repetiteurs.apps.RepetiteursConfig",
 ]
 
+# `daphne` doit être listé AVANT `django.contrib.staticfiles` (exigence
+# documentée de Channels : `daphne` remplace la commande `runserver` par sa
+# propre version compatible ASGI) — inséré ici plutôt qu'avec les autres apps
+# tierces ci-dessus pour garder cette contrainte d'ordre visible et isolée.
+INSTALLED_APPS = ["daphne", "channels"] + INSTALLED_APPS
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise juste après SecurityMiddleware (position exigée par sa propre
+    # documentation) — sert les fichiers statiques directement depuis Daphne,
+    # sans dépendre d'un Nginx séparé ni du mapping de fichiers statiques du
+    # tableau de bord PythonAnywhere (qui n'existe plus sur ce nouvel
+    # hébergement VPS+Coolify).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     # CorsMiddleware doit être le plus haut possible et impérativement avant
     # CommonMiddleware (exigence django-cors-headers) : sinon les réponses
     # court-circuitées par les middlewares au-dessus (redirections, erreurs)
@@ -216,6 +227,20 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Remplace l'ancien réglage historique `DEFAULT_FILE_STORAGE` (retiré, les
+# deux styles ne peuvent pas coexister) — `staticfiles` bascule sur WhiteNoise
+# (compression + hash de cache-busting dans le nom de fichier), `default`
+# (médias uploadés) reste le stockage disque classique, monté sur un volume
+# persistant Coolify en production (voir Dockerfile/docs de déploiement).
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 
 # Default primary key field type

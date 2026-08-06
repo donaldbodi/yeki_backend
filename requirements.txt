@@ -22,3 +22,16 @@ pytest-django==4.9.0
 pytest-cov==6.0.0
 ruff==0.8.6
 black==24.10.0
+
+# Migration hébergement VPS+Coolify — serveur ASGI (HTTP + WebSocket dans un
+# seul process, remplace le WSGI PythonAnywhere), Channels (déjà scaffoldé
+# dans yeki/consumers.py + config/asgi.py, jamais installable jusqu'ici),
+# channel layer Redis (nécessaire dès qu'il y a plus d'un process — le layer
+# mémoire par défaut de Channels ne fonctionne qu'en single-process), et
+# WhiteNoise pour servir les fichiers statiques directement (remplace le
+# mapping de fichiers statiques du tableau de bord PythonAnywhere, qui
+# n'existe plus sur ce nouvel hébergement).
+daphne==4.1.2
+channels==4.2.0
+channels-redis==4.2.1
+whitenoise==6.8.2

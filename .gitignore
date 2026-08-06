@@ -3,6 +3,11 @@ __pycache__/
 *.sqlite3
 *.log
 db.sqlite3
+# Les fichiers de sauvegarde manuelle (db.sqlite3.backup-*) ne matchaient
+# aucun des 2 motifs ci-dessus (ni `*.sqlite3` ni `db.sqlite3` exact) —
+# trou réel découvert lors du nettoyage de suivi git (migration
+# hébergement) : ils revenaient systématiquement avec `git add -A`.
+db.sqlite3.backup-*
 .env
 .env.*
 !.env.example
