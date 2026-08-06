@@ -724,12 +724,17 @@ class AdminGeneralModifierEnseignantView(APIView):
 
         enseignant = get_object_or_404(Profile, pk=profile_id)
 
-        # Vérifier que c'est bien un enseignant
+        # Vérifier que c'est bien un compte gérable depuis cet écran — même
+        # liste que AdminGeneralSearchEnseignantsView (bug corrigé :
+        # `service_client` manquait ici alors que la recherche le rend
+        # trouvable depuis ce même onglet, rendant ces comptes impossibles
+        # à modifier une fois trouvés).
         if enseignant.user_type not in [
             "enseignant",
             "enseignant_principal",
             "enseignant_cadre",
             "enseignant_admin",
+            "service_client",
         ]:
             return Response({"detail": "Cet utilisateur n'est pas un enseignant."}, status=400)
 
@@ -746,6 +751,7 @@ class AdminGeneralModifierEnseignantView(APIView):
                 "enseignant_principal",
                 "enseignant_cadre",
                 "enseignant_admin",
+                "service_client",
             ]
             if nouveau_type not in types_valides:
                 return Response({"detail": f"Type invalide. Valeurs: {types_valides}"}, status=400)

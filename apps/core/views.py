@@ -90,6 +90,14 @@ class HistoriqueActiviteView(PaginatedListMixin, APIView):
             "teacher_changed",
             "secondary_added",
             "secondary_removed",
+            # Actions Admin Général (apps/accounts/views/admin_enseignants.py)
+            # — bug corrigé : absentes ici, le filtre "Enseignants" renvoyait
+            # toujours une liste vide pour l'admin général alors que
+            # enregistrer_activite() écrit bien ces lignes.
+            "teacher_activated",
+            "teacher_deactivated",
+            "teacher_type_changed",
+            "teacher_modified",
         ],
         "departements": ["department_created", "cadre_assigned"],
         "corrections": ["submission_graded", "homework_graded"],
