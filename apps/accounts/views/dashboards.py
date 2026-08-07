@@ -170,6 +170,12 @@ class AdminGeneralDashboardView(APIView):
                 )
 
         # ✅ Liste complète des enseignants (tous types, triés par date de création)
+        # `service_client` ajouté pour rester cohérent avec
+        # AdminGeneralSearchEnseignantsView, qui l'inclut déjà — sans ça, un
+        # compte service_client tout juste modifié pouvait redisparaître de
+        # cette liste embarquée (course entre chargerDashboard() et
+        # rechercherEnseignants(), lancés en parallèle par
+        # AdminGeneralController.modifierEnseignant()).
         enseignants = (
             Profile.objects.filter(
                 user_type__in=[
@@ -177,6 +183,7 @@ class AdminGeneralDashboardView(APIView):
                     "enseignant_principal",
                     "enseignant_cadre",
                     "enseignant_admin",
+                    "service_client",
                 ]
             )
             .select_related("user")
