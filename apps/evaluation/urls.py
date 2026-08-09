@@ -62,6 +62,9 @@ from apps.evaluation.views import (
     CadreModifierOlympiadeView,
     PayerOlympiadeView,
     PayerParticipationOlympiadeView,
+    AdminOlympiadesAValiderView,
+    AdminValiderOlympiadeView,
+    AdminRefuserOlympiadeView,
 )
 
 urlpatterns = [
@@ -261,6 +264,22 @@ urlpatterns = [
         "olympiades/<int:olympiade_id>/payer-participation/",
         PayerParticipationOlympiadeView.as_view(),
         name="payer-participation-olympiade",
+    ),
+    # ── VALIDATION ADMIN (coordonnateur) — rétablie, voir olympiades.py ──
+    path(
+        "admin/olympiades/a-valider/",
+        AdminOlympiadesAValiderView.as_view(),
+        name="admin-olympiades-a-valider",
+    ),
+    path(
+        "admin/olympiades/<int:pk>/valider/",
+        AdminValiderOlympiadeView.as_view(),
+        name="admin-valider-olympiade",
+    ),
+    path(
+        "admin/olympiades/<int:pk>/refuser/",
+        AdminRefuserOlympiadeView.as_view(),
+        name="admin-refuser-olympiade",
     ),
     # ── CLASSEMENT ────────────────────────────────────────────────
     path(

@@ -18,7 +18,7 @@ from apps.accounts.models import Profile
 from apps.core.schema_examples import ERREURS_COURANTES
 from apps.evaluation.models import Devoir, SoumissionDevoir
 from apps.evaluation.services import ClassementService
-from apps.formation.models import Departement, Cours, Lecon, ProgressionLecon
+from apps.formation.models import Departement, Cours, Lecon, ProgressionLecon, DemandeAccesFormation
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +151,23 @@ class EnseignantCadreDashboardView(APIView):
             ).count()
             stats_globales["nb_apprenants"] += nb_apprenants
 
+            # Demandes d'accès en attente — même calcul que
+            # `DepartementSerializer.get_demandes_acces`.
+            demandes_acces = [
+                {
+                    "id": d.id,
+                    "apprenant_id": d.apprenant.id,
+                    "apprenant_nom": f"{d.apprenant.first_name} {d.apprenant.last_name}".strip()
+                    or d.apprenant.username,
+                    "apprenant_username": d.apprenant.username,
+                    "message": d.message,
+                    "cree_le": d.cree_le.isoformat(),
+                }
+                for d in DemandeAccesFormation.objects.filter(
+                    departement=dept, statut="en_attente"
+                ).select_related("apprenant")
+            ]
+
             # Données du département
             dept_data = {
                 "id": dept.id,
@@ -169,14 +186,34 @@ class EnseignantCadreDashboardView(APIView):
                 "organisme_concours": dept.organisme_concours,
                 "date_limite_inscription": dept.date_limite_inscription,
                 "date_examen": dept.date_examen,
+                "arrete_ministeriel": dept.arrete_ministeriel,
+                "places_disponibles": dept.places_disponibles,
+                "debouches": dept.debouches,
                 "est_formation_metier": dept.est_formation_metier,
                 "est_formation_classique": dept.est_formation_classique,
                 "duree_formation": dept.duree_formation,
                 "mode": dept.mode,
                 "certificat_delivre": dept.certificat_delivre,
+                "prerequis": dept.prerequis,
+                "objectifs": dept.objectifs,
                 "ville": dept.ville,
                 "domaine": dept.domaine,
                 "est_certifiante": dept.est_certifiante,
+                "niveau_formation": dept.niveau_formation,
+                # Bug corrigé (modification par un cadre) : ces champs
+                # étaient absents de ce dict — `departement_form_sheet.dart`
+                # les initialisait alors à des valeurs par défaut et les
+                # renvoyait quand même à chaque sauvegarde, écrasant
+                # silencieusement les vraies valeurs en base.
+                "acces_restreint": dept.acces_restreint,
+                "niveaux_accessibles": dept.get_niveaux_accessibles_list(),
+                "periode": dept.periode,
+                "prix_presentiel": dept.prix_presentiel,
+                "prix_mensuel": dept.prix_mensuel,
+                "prix_annuel": dept.prix_annuel,
+                "prix_presentiel_mensuel": dept.prix_presentiel_mensuel,
+                "prix_presentiel_annuel": dept.prix_presentiel_annuel,
+                "demandes_acces": demandes_acces,
                 # Statistiques
                 "nb_cours": cours_qs.count(),
                 "nb_apprenants": nb_apprenants,

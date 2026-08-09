@@ -64,3 +64,50 @@ def test_apprenant_rejete(client_apprenant, departement):
     )
 
     assert reponse.status_code == 403
+
+
+@pytest.mark.django_db
+def test_cadre_round_trip_ne_corrompt_plus_les_champs_absents_du_dashboard(
+    client_enseignant_cadre, user_enseignant_cadre, departement
+):
+    """
+    Bug corrigé : `EnseignantCadreDashboardView` ne renvoyait pas
+    `acces_restreint`/`niveaux_accessibles` — `departement_form_sheet.dart`
+    les réinitialisait alors à `false`/`[]` et les renvoyait quand même à
+    chaque sauvegarde, écrasant silencieusement les vraies valeurs. Ce test
+    reproduit le round-trip réel : lire le dashboard, PATCH avec les
+    valeurs relues (comme le fait le formulaire), vérifier qu'elles
+    survivent.
+    """
+    departement.cadre = user_enseignant_cadre.profile
+    departement.acces_restreint = True
+    departement.niveaux_accessibles = "terminale,premiere"
+    departement.periode = 6
+    departement.save()
+
+    dashboard = client_enseignant_cadre.get("/api/enseignant/cadre/dashboard/")
+    assert dashboard.status_code == 200, dashboard.data
+    dept_data = dashboard.data["departements"][0]
+    assert dept_data["acces_restreint"] is True
+    assert dept_data["niveaux_accessibles"] == ["terminale", "premiere"]
+    assert dept_data["periode"] == 6
+
+    # Le formulaire renvoie exactement ces valeurs relues, plus un
+    # changement réel (le nom) — même round-trip que la production.
+    reponse = client_enseignant_cadre.patch(
+        f"/api/admin/departements/{departement.id}/update/",
+        {
+            "nom": "Nom changé",
+            "acces_restreint": dept_data["acces_restreint"],
+            "niveaux_accessibles": dept_data["niveaux_accessibles"],
+            "periode": dept_data["periode"],
+        },
+        format="json",
+    )
+    assert reponse.status_code == 200, reponse.data
+
+    departement.refresh_from_db()
+    assert departement.nom == "Nom changé"
+    assert departement.acces_restreint is True
+    assert departement.get_niveaux_accessibles_list() == ["terminale", "premiere"]
+    assert departement.periode == 6

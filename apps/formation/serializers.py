@@ -397,6 +397,7 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             "acces_restreint",
             "niveaux_accessibles",
             "niveau_formation",
+            "periode",
         ]
         extra_kwargs = {
             "nom": {"required": False, "allow_blank": False},
@@ -425,6 +426,10 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             "domaine": {"required": False, "allow_blank": True},
             "ville": {"required": False, "allow_blank": True},
             "est_certifiante": {"required": False},
+            # Bug corrigé : envoyé par `departement_form_sheet.dart` (création
+            # ET modification) mais absent d'ici — DRF l'ignorait
+            # silencieusement, la période ne pouvait jamais être modifiée.
+            "periode": {"required": False, "min_value": 1},
         }
 
     def validate(self, data):

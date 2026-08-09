@@ -2,15 +2,22 @@
 Tests P2.5 : nettoyage des champs abandonnés de Olympiade (matiere, niveau,
 prix_1er, prix_2eme, prix_3eme) — régression directe sur les bugs
 confirmés (AttributeError sur CadreOlympiadesView, perte silencieuse sur
-CadreModifierOlympiadeView, doublon cassé sur le dashboard admin général)
-et confirmation de la suppression des 3 routes admin de validation
-(décision produit confirmée avec l'utilisateur).
+CadreModifierOlympiadeView, doublon cassé sur le dashboard admin général).
+
+Rectification ultérieure : la suppression des 3 routes admin de
+validation (décision produit actée ici à l'origine) a été EXPLICITEMENT
+INVERSÉE par l'utilisateur — la validation est rétablie (voir
+`AdminOlympiadesAValiderView`/`AdminValiderOlympiadeView`/
+`AdminRefuserOlympiadeView`, `apps/evaluation/views/olympiades.py`).
+`test_routes_admin_validation_supprimees` (qui vérifiait leur ABSENCE) a
+donc été remplacé par son inverse ci-dessous — le reste de ce fichier
+(nettoyage des champs abandonnés) reste valide et inchangé.
 """
 
 from datetime import timedelta
 
 import pytest
-from django.urls import NoReverseMatch, reverse
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 
@@ -95,18 +102,15 @@ def test_liste_olympiades_ignore_filtres_matiere_niveau(client_apprenant):
 
 
 @pytest.mark.django_db
-def test_routes_admin_validation_supprimees():
+def test_routes_admin_validation_retablies():
     """
-    Décision produit confirmée avec l'utilisateur : plus de validation
-    d'une olympiade par l'enseignant admin. Les 3 routes correspondantes
-    doivent avoir disparu du urlconf.
+    Rectification : la décision de supprimer la validation admin a été
+    inversée — ces 3 routes doivent exister à nouveau dans le urlconf
+    (comportement fonctionnel testé séparément, `test_validation_olympiades.py`).
     """
-    with pytest.raises(NoReverseMatch):
-        reverse("admin-olympiades-a-valider")
-    with pytest.raises(NoReverseMatch):
-        reverse("admin-valider-olympiade", args=[1])
-    with pytest.raises(NoReverseMatch):
-        reverse("admin-refuser-olympiade", args=[1])
+    assert reverse("admin-olympiades-a-valider")
+    assert reverse("admin-valider-olympiade", args=[1])
+    assert reverse("admin-refuser-olympiade", args=[1])
 
 
 @pytest.mark.django_db

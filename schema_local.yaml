@@ -341,6 +341,108 @@ paths:
               schema:
                 $ref: '#/components/schemas/Departement'
           description: ''
+  /api/admin/olympiades/{id}/refuser/:
+    post:
+      operationId: api_admin_olympiades_refuser_create
+      description: Refuse une olympiade en attente du parcours du coordonnateur connecté.
+      summary: Refuser une olympiade (coordonnateur)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - evaluation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: {}
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/admin/olympiades/{id}/valider/:
+    post:
+      operationId: api_admin_olympiades_valider_create
+      description: Valide (publie) une olympiade en attente du parcours du coordonnateur
+        connecté.
+      summary: Valider une olympiade (coordonnateur)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - evaluation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/admin/olympiades/a-valider/:
+    get:
+      operationId: api_admin_olympiades_a_valider_retrieve
+      description: Liste paginée des olympiades en attente de validation ou refusées,
+        pour le parcours du coordonnateur connecté.
+      summary: Olympiades à valider (coordonnateur)
+      parameters:
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: 'Numéro de page (défaut : 1).'
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: 'Taille de page (défaut : 20, maximum : 100).'
+      tags:
+      - evaluation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+              examples:
+                RéponsePaginée:
+                  value:
+                    count: 57
+                    next: http://api.yeki.cm/api/cours/?page=2
+                    previous: null
+                    results:
+                    - '... voir le schéma de l''élément de la liste ...'
+                  summary: Enveloppe de pagination standard (YekiPageNumberPagination)
+          description: ''
   /api/admin/transactions/:
     get:
       operationId: api_admin_transactions_retrieve
@@ -458,6 +560,55 @@ paths:
                       results:
                       - '... voir le schéma de l''élément de la liste ...'
                   summary: Enveloppe de pagination standard (YekiPageNumberPagination)
+          description: ''
+  /api/app/version/:
+    get:
+      operationId: api_app_version_retrieve
+      description: 'Contrat honoré tel qu''anticipé côté Flutter (`update_service.dart`,
+        `checkMandatoryVersion()`) : indique si le build installé est en-dessous du
+        minimum requis (`obligatoire`), et fournit tout le nécessaire pour télécharger
+        + vérifier + installer la mise à jour côté client (`checksum_sha256` notamment).
+        Accessible sans authentification.'
+      summary: Vérification de version obligatoire + informations pour mise à jour
+        sécurisée (P12.1)
+      parameters:
+      - in: query
+        name: build
+        schema:
+          type: integer
+        description: Numéro de build (version_code) actuellement installé.
+        required: true
+      - in: query
+        name: canal
+        schema:
+          type: string
+        description: 'Canal de diffusion : ''stable'' (défaut), ''beta'' ou ''alpha''.'
+      - in: query
+        name: plateforme
+        schema:
+          type: string
+        description: 'Plateforme cible : ''android'' (défaut), ''ios'', ''web'' ou
+          ''desktop''.'
+      tags:
+      - core
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/apprenant/cursus/:
     get:
@@ -1087,6 +1238,65 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/classement/departement/{departement_id}/historique/:
+    get:
+      operationId: api_classement_departement_historique_retrieve
+      description: Retourne le classement figé (`ClassementHistorique`) d'une période
+        de classement déjà archivée, identifiée par `periode_debut` (format ISO 8601,
+        doit correspondre exactement à une valeur retournée par `GET .../periodes/`).
+      summary: Classement archivé d'une période passée
+      parameters:
+      - in: path
+        name: departement_id
+        schema:
+          type: integer
+        required: true
+      - in: query
+        name: periode_debut
+        schema:
+          type: string
+          format: date-time
+        description: Début de la période archivée à consulter (ISO 8601).
+        required: true
+      tags:
+      - evaluation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/classement/departement/{departement_id}/periodes/:
+    get:
+      operationId: api_classement_departement_periodes_retrieve
+      description: Retourne la liste des périodes de classement déjà archivées (voir
+        `Departement.reinitialiser_periode()`) pour ce département, les plus récentes
+        d'abord. Même règle d'accès que le classement en cours.
+      summary: Périodes de classement archivées d'un département
+      parameters:
+      - in: path
+        name: departement_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - evaluation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/classement/mon-score/:
     get:
       operationId: api_classement_mon_score_retrieve
@@ -1624,6 +1834,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Cours'
+          description: ''
+  /api/cours/{cours_id}/supplements/:
+    get:
+      operationId: api_cours_supplements_list
+      description: Retourne les suppléments rattachés à ce cours. Sans `lecon_id`,
+        renvoie uniquement les suppléments valables pour tout le cours (sans leçon
+        spécifique). Avec `lecon_id`, renvoie ceux de cette leçon PLUS les suppléments
+        de portée cours (visibles partout).
+      summary: Lister les suppléments d'un cours
+      parameters:
+      - in: path
+        name: cours_id
+        schema:
+          type: integer
+        required: true
+      - in: query
+        name: lecon_id
+        schema:
+          type: integer
+        description: Filtre sur les suppléments visibles pour cette leçon précise.
+      tags:
+      - formation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SupplementCours'
+          description: ''
+  /api/cours/{cours_id}/supplements/creer/:
+    post:
+      operationId: api_cours_supplements_creer_create
+      description: Crée un supplément (lien/pdf/powerpoint/autre) rattaché à ce cours,
+        avec une leçon optionnelle. Réservé à l'enseignant principal du cours.
+      summary: Ajouter un supplément à un cours
+      parameters:
+      - in: path
+        name: cours_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - formation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplementCours'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SupplementCours'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SupplementCours'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupplementCours'
           description: ''
   /api/cours/{cours_id}/update/:
     patch:
@@ -4462,6 +4741,26 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/niveaux-formation/:
+    get:
+      operationId: api_niveaux_formation_retrieve
+      description: Retourne les niveaux de formation (formations métier) sous la forme
+        `[{code, label}, ...]`. Liste fermée mais administrable sans redéploiement
+        (`ParametreSysteme`, clé `niveaux_formation_disponibles`) — P11.6.
+      summary: Lister les niveaux de formation professionnelle disponibles
+      tags:
+      - formation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/notifications/:
     get:
       operationId: api_notifications_retrieve
@@ -5046,8 +5345,8 @@ paths:
   /api/olympiades/cadre/creer/:
     post:
       operationId: api_olympiades_cadre_creer_create
-      description: Création gratuite et publication immédiate d'une olympiade par
-        l'enseignant cadre du département. Un Devoir lié est créé automatiquement.
+      description: Création gratuite d'une olympiade par l'enseignant cadre du département
+        — en attente de validation par le coordonnateur. Un Devoir lié est créé automatiquement.
       summary: Créer une olympiade (enseignant cadre)
       tags:
       - evaluation
@@ -5412,7 +5711,10 @@ paths:
       operationId: api_parcours_list
       description: Retourne la liste paginée de tous les parcours (Cursus, Prépa Concours,
         Formations, etc.). Vue publique consultée depuis le formulaire d'inscription,
-        avant connexion.
+        avant connexion. Filtre optionnel `type_parcours` (ex. `cursus`) — l'inscription
+        apprenant ne doit proposer que les parcours de type Cursus, Formations/Prépa
+        Concours étant des contenus « haut de gamme » accessibles séparément après
+        coup via une demande d'accès (DemandeAccesFormation).
       summary: Lister les parcours (public)
       parameters:
       - in: query
@@ -6602,6 +6904,29 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/supplements/{supplement_id}/supprimer/:
+    delete:
+      operationId: api_supplements_supprimer_destroy
+      description: Supprime un supplément. Réservé à l'enseignant principal du cours
+        concerné.
+      summary: Retirer un supplément
+      parameters:
+      - in: path
+        name: supplement_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - formation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          content:
+            application/json:
+              schema: null
+          description: ''
   /api/wallet/payer/:
     post:
       operationId: api_wallet_payer_create
@@ -6727,7 +7052,9 @@ components:
     ActionEnum:
       enum:
       - teacher_activated
+      - teacher_deactivated
       - teacher_type_changed
+      - teacher_modified
       - parcours_modified
       - course_created
       - course_modified
@@ -6763,7 +7090,9 @@ components:
       type: string
       description: |-
         * `teacher_activated` - Enseignant activé
+        * `teacher_deactivated` - Enseignant désactivé
         * `teacher_type_changed` - Type enseignant modifié
+        * `teacher_modified` - Enseignant modifié
         * `parcours_modified` - Parcours modifié
         * `course_created` - Cours créé
         * `course_modified` - Cours modifié
@@ -6813,6 +7142,16 @@ components:
             * `desktop` - Desktop
             * `ios` - iOS
             * `web` - Web
+        canal:
+          allOf:
+          - $ref: '#/components/schemas/CanalEnum'
+          default: stable
+          description: |-
+            Canal de diffusion — un client ne reçoit que les versions de son canal.
+
+            * `stable` - Stable
+            * `beta` - Bêta
+            * `alpha` - Alpha
         version_code:
           type: integer
           maximum: 9223372036854775807
@@ -6828,6 +7167,13 @@ components:
           format: uri
           description: URL de téléchargement (Firebase Storage)
           maxLength: 200
+        checksum_sha256:
+          type: string
+          description: Empreinte SHA-256 (hex) du binaire publié — calculée manuellement
+            avant publication (ex. `sha256sum app.apk`) et collée ici ; vérifiée côté
+            client avant installation. Laissé vide = aucune vérification pour cette
+            version (transition tant que les anciennes versions n'ont pas été rétro-remplies).
+          maxLength: 64
         changelog:
           type: string
           description: Description des nouveautés
@@ -6877,6 +7223,16 @@ components:
             * `desktop` - Desktop
             * `ios` - iOS
             * `web` - Web
+        canal:
+          allOf:
+          - $ref: '#/components/schemas/CanalEnum'
+          default: stable
+          description: |-
+            Canal de diffusion — un client ne reçoit que les versions de son canal.
+
+            * `stable` - Stable
+            * `beta` - Bêta
+            * `alpha` - Alpha
         version_code:
           type: integer
           maximum: 9223372036854775807
@@ -6892,6 +7248,13 @@ components:
           format: uri
           description: URL de téléchargement (Firebase Storage)
           maxLength: 200
+        checksum_sha256:
+          type: string
+          description: Empreinte SHA-256 (hex) du binaire publié — calculée manuellement
+            avant publication (ex. `sha256sum app.apk`) et collée ici ; vérifiée côté
+            client avant installation. Laissé vide = aucune vérification pour cette
+            version (transition tant que les anciennes versions n'ont pas été rétro-remplies).
+          maxLength: 64
         changelog:
           type: string
           description: Description des nouveautés
@@ -6920,6 +7283,16 @@ components:
     BlankEnum:
       enum:
       - ''
+    CanalEnum:
+      enum:
+      - stable
+      - beta
+      - alpha
+      type: string
+      description: |-
+        * `stable` - Stable
+        * `beta` - Bêta
+        * `alpha` - Alpha
     ChoixCreate:
       type: object
       properties:
@@ -7002,32 +7375,32 @@ components:
       - username
     ColorCodeEnum:
       enum:
-      - '#7C3AED'
-      - '#10B981'
-      - '#EA580C'
-      - '#DB2777'
-      - '#2563EB'
-      - '#CA8A04'
-      - '#0D9488'
-      - '#DC2626'
-      - '#9333EA'
-      - '#059669'
-      - '#EC4899'
-      - '#0284C7'
+      - '#2E7CAD'
+      - '#5F6BD4'
+      - '#8A5CD4'
+      - '#BB39CB'
+      - '#CB3B92'
+      - '#CD4453'
+      - '#AE612E'
+      - '#817622'
+      - '#5C8022'
+      - '#2E8624'
+      - '#23854A'
+      - '#238278'
       type: string
       description: |-
-        * `#7C3AED` - Violet Électrique
-        * `#10B981` - Émeraude
-        * `#EA580C` - Orange Brûlé
-        * `#DB2777` - Rose Fuchsia
-        * `#2563EB` - Bleu Roi
-        * `#CA8A04` - Or Ambré
-        * `#0D9488` - Sarcelle
-        * `#DC2626` - Rouge Corail
-        * `#9333EA` - Pourpre
-        * `#059669` - Vert Jade
-        * `#EC4899` - Magenta
-        * `#0284C7` - Cyan Profond
+        * `#2E7CAD` - Azur
+        * `#5F6BD4` - Bleu
+        * `#8A5CD4` - Indigo
+        * `#BB39CB` - Violet
+        * `#CB3B92` - Magenta
+        * `#CD4453` - Rose
+        * `#AE612E` - Orange
+        * `#817622` - Ambre
+        * `#5C8022` - Lime
+        * `#2E8624` - Vert
+        * `#23854A` - Émeraude
+        * `#238278` - Turquoise
     Cours:
       type: object
       properties:
@@ -7051,18 +7424,18 @@ components:
           description: |-
             Couleur d'accentuation du cours, choisie parmi la palette YÉKI officielle (voir COURSE_COLOR_PALETTE).
 
-            * `#7C3AED` - Violet Électrique
-            * `#10B981` - Émeraude
-            * `#EA580C` - Orange Brûlé
-            * `#DB2777` - Rose Fuchsia
-            * `#2563EB` - Bleu Roi
-            * `#CA8A04` - Or Ambré
-            * `#0D9488` - Sarcelle
-            * `#DC2626` - Rouge Corail
-            * `#9333EA` - Pourpre
-            * `#059669` - Vert Jade
-            * `#EC4899` - Magenta
-            * `#0284C7` - Cyan Profond
+            * `#2E7CAD` - Azur
+            * `#5F6BD4` - Bleu
+            * `#8A5CD4` - Indigo
+            * `#BB39CB` - Violet
+            * `#CB3B92` - Magenta
+            * `#CD4453` - Rose
+            * `#AE612E` - Orange
+            * `#817622` - Ambre
+            * `#5C8022` - Lime
+            * `#2E8624` - Vert
+            * `#23854A` - Émeraude
+            * `#238278` - Turquoise
         icon_name:
           type: string
           description: Nom de l’icône Flutter (MaterialIcons)
@@ -7132,18 +7505,18 @@ components:
           description: |-
             Couleur d'accentuation du cours, choisie parmi la palette YÉKI officielle (voir COURSE_COLOR_PALETTE).
 
-            * `#7C3AED` - Violet Électrique
-            * `#10B981` - Émeraude
-            * `#EA580C` - Orange Brûlé
-            * `#DB2777` - Rose Fuchsia
-            * `#2563EB` - Bleu Roi
-            * `#CA8A04` - Or Ambré
-            * `#0D9488` - Sarcelle
-            * `#DC2626` - Rouge Corail
-            * `#9333EA` - Pourpre
-            * `#059669` - Vert Jade
-            * `#EC4899` - Magenta
-            * `#0284C7` - Cyan Profond
+            * `#2E7CAD` - Azur
+            * `#5F6BD4` - Bleu
+            * `#8A5CD4` - Indigo
+            * `#BB39CB` - Violet
+            * `#CB3B92` - Magenta
+            * `#CD4453` - Rose
+            * `#AE612E` - Orange
+            * `#817622` - Ambre
+            * `#5C8022` - Lime
+            * `#2E8624` - Vert
+            * `#23854A` - Émeraude
+            * `#238278` - Turquoise
         icon_name:
           type: string
           description: Nom de l’icône Flutter (MaterialIcons)
@@ -7331,15 +7704,24 @@ components:
           type: string
           readOnly: true
         niveau_formation:
-          description: |-
-            Niveau de la formation (pour les formations métier)
-
-            * `debutant` - Débutant
-            * `intermediaire` - Intermédiaire
-            * `avance` - Avancé
-          oneOf:
-          - $ref: '#/components/schemas/NiveauFormationEnum'
-          - $ref: '#/components/schemas/BlankEnum'
+          type: string
+          description: Niveau de la formation (pour les formations métier) — liste
+            fermée mais administrable sans redéploiement, voir `ParametreSysteme`
+            clé `niveaux_formation_disponibles` (services.niveaux_formation_disponibles)
+            plutôt qu'un `choices=` figé ici (P11.6).
+          maxLength: 20
+        nb_cours:
+          type: string
+          readOnly: true
+        nb_apprenants:
+          type: string
+          readOnly: true
+        taux_moyen:
+          type: string
+          readOnly: true
+        type_departement:
+          type: string
+          readOnly: true
       required:
       - cadre
       - cours
@@ -7347,9 +7729,13 @@ components:
       - demandes_acces
       - id
       - label_catalogue
+      - nb_apprenants
+      - nb_cours
       - niveaux_accessibles
       - nom
       - parcours
+      - taux_moyen
+      - type_departement
     DevoirCreate:
       type: object
       description: |-
@@ -7972,6 +8358,9 @@ components:
         video:
           type: string
           readOnly: true
+        video_verrouille:
+          type: string
+          readOnly: true
         module:
           type: integer
           nullable: true
@@ -7994,6 +8383,7 @@ components:
       - id
       - titre
       - video
+      - video_verrouille
     LeconCreate:
       type: object
       properties:
@@ -8034,12 +8424,16 @@ components:
         video:
           type: string
           readOnly: true
+        video_verrouille:
+          type: string
+          readOnly: true
       required:
       - description
       - fichier_pdf
       - id
       - titre
       - video
+      - video_verrouille
     Login:
       type: object
       properties:
@@ -8107,16 +8501,6 @@ components:
       required:
       - ordre
       - titre
-    NiveauFormationEnum:
-      enum:
-      - debutant
-      - intermediaire
-      - avance
-      type: string
-      description: |-
-        * `debutant` - Débutant
-        * `intermediaire` - Intermédiaire
-        * `avance` - Avancé
     Notification:
       type: object
       properties:
@@ -8807,15 +9191,18 @@ components:
             type: string
           description: Liste des niveaux accessibles
         niveau_formation:
-          description: |-
-            Niveau de la formation (pour les formations métier)
-
-            * `debutant` - Débutant
-            * `intermediaire` - Intermédiaire
-            * `avance` - Avancé
-          oneOf:
-          - $ref: '#/components/schemas/NiveauFormationEnum'
-          - $ref: '#/components/schemas/BlankEnum'
+          type: string
+          description: Niveau de la formation (pour les formations métier) — liste
+            fermée mais administrable sans redéploiement, voir `ParametreSysteme`
+            clé `niveaux_formation_disponibles` (services.niveaux_formation_disponibles)
+            plutôt qu'un `choices=` figé ici (P11.6).
+          maxLength: 20
+        periode:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 1
+          format: int64
+          description: Durée d'une période de classement en mois (1, 3, 6, 12)
     PatchedDevoirUpdate:
       type: object
       description: |-
@@ -9121,6 +9508,10 @@ components:
         phone:
           type: string
           maxLength: 20
+        date_naissance:
+          type: string
+          format: date
+          nullable: true
         bio:
           type: string
         ville:
@@ -9588,6 +9979,12 @@ components:
           type: integer
         niveau:
           type: string
+        phone:
+          type: string
+          maxLength: 20
+        date_naissance:
+          type: string
+          format: date
         cursus:
           type: string
           nullable: true
@@ -9601,12 +9998,11 @@ components:
           type: string
           nullable: true
       required:
-      - departement
+      - date_naissance
       - email
       - name
-      - niveau
-      - parcours
       - password
+      - phone
       - user_type
       - username
     Repetiteur:
@@ -9695,6 +10091,9 @@ components:
         mon_like:
           type: string
           readOnly: true
+        image_url:
+          type: string
+          readOnly: true
       required:
       - auteur_est_enseignant
       - auteur_nom
@@ -9702,6 +10101,7 @@ components:
       - contenu
       - cree_le
       - id
+      - image_url
       - mon_like
       - nb_likes
     ReponseSubmit:
@@ -9835,6 +10235,68 @@ components:
         * `soumis` - Soumis
         * `en_retard` - En retard
         * `corrige` - Corrigé
+    SupplementCours:
+      type: object
+      description: |-
+        P11.9 — `cours` est passé par la vue (URL), jamais par le corps de
+        la requête : un enseignant principal ne doit pouvoir créer un
+        supplément que sur SON cours, pas sur un cours arbitraire choisi côté
+        client.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        cours:
+          type: integer
+          readOnly: true
+        lecon:
+          type: integer
+          nullable: true
+          description: Facultatif — si renseigné, le supplément n'apparaît que sur
+            cette leçon.
+        titre:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        type_contenu:
+          $ref: '#/components/schemas/TypeContenuEnum'
+        fichier:
+          type: string
+          format: uri
+          nullable: true
+        url:
+          type: string
+          format: uri
+          nullable: true
+          maxLength: 200
+        ordre:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - cours
+      - created_at
+      - id
+      - titre
+      - type_contenu
+    TypeContenuEnum:
+      enum:
+      - lien
+      - pdf
+      - ppt
+      - autre
+      type: string
+      description: |-
+        * `lien` - Lien
+        * `pdf` - PDF
+        * `ppt` - PowerPoint
+        * `autre` - Autre
     TypeCorrectionEnum:
       enum:
       - auto

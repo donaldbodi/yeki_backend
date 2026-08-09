@@ -59,6 +59,9 @@ from apps.evaluation.views.olympiades import (  # noqa: F401
     CadreOlympiadesView,
     LierDevoirOlympiadeView,
     OlympiadesPourMoiView,
+    AdminOlympiadesAValiderView,
+    AdminValiderOlympiadeView,
+    AdminRefuserOlympiadeView,
 )
 from apps.evaluation.views.classement import (  # noqa: F401
     ClassementDepartementView,

@@ -396,26 +396,34 @@ class DemandeAccesFormation(models.Model):
 # --- NIVEAU 3 ---
 # ═══════════════════════════════════════════════════════════════
 # PALETTE OFFICIELLE DES COULEURS DE COURS
-# La couleur d'un cours n'est jamais calculée côté Flutter : elle est
-# choisie ici, côté backend, et proposée à l'enseignant qui crée le cours
-# via GET /api/cours/palette-couleurs/ (voir ListeNiveauxView à proximité
-# dans views.py pour le même pattern).
-# ⚠️ Cette liste DOIT rester strictement synchronisée, dans le même ordre,
-# avec `YekiCoursePalette.official` dans yeki_design_system.dart (Flutter).
+# ⚠️ Cette liste DOIT rester strictement synchronisée, dans le même ordre
+# et avec les mêmes codes hex, avec `YkCourseColors.palette`
+# (`lib/core/design/tokens/colors.dart`, Flutter) — la seule source
+# consultée par le sélecteur de couleur (`YkColorPicker`, utilisé par
+# `creer_cours_sheet.dart`/`modifier_cours_sheet.dart`).
 # ═══════════════════════════════════════════════════════════════
+# Bug corrigé : cette liste divergeait de `YkCourseColors.palette`
+# (frontend, `lib/core/design/tokens/colors.dart`) — le sélecteur de
+# couleur (`YkColorPicker`) est câblé PAR CONCEPTION exclusivement sur
+# cette dernière (pas de paramètre `palette` dans son API, volontairement
+# absent), sans que ce backend n'ait jamais été synchronisé en retour.
+# Conséquence : `color_code` échouait TOUJOURS la validation `choices=`,
+# quelle que soit la couleur choisie — la liste ci-dessous reprend
+# maintenant exactement les 12 couleurs de `YkCourseColors.palette`
+# (même ordre, mêmes codes hex).
 COURSE_COLOR_PALETTE = [
-    {"code": "#7C3AED", "nom": "Violet Électrique"},
-    {"code": "#10B981", "nom": "Émeraude"},
-    {"code": "#EA580C", "nom": "Orange Brûlé"},
-    {"code": "#DB2777", "nom": "Rose Fuchsia"},
-    {"code": "#2563EB", "nom": "Bleu Roi"},
-    {"code": "#CA8A04", "nom": "Or Ambré"},
-    {"code": "#0D9488", "nom": "Sarcelle"},
-    {"code": "#DC2626", "nom": "Rouge Corail"},
-    {"code": "#9333EA", "nom": "Pourpre"},
-    {"code": "#059669", "nom": "Vert Jade"},
-    {"code": "#EC4899", "nom": "Magenta"},
-    {"code": "#0284C7", "nom": "Cyan Profond"},
+    {"code": "#2E7CAD", "nom": "Azur"},
+    {"code": "#5F6BD4", "nom": "Bleu"},
+    {"code": "#8A5CD4", "nom": "Indigo"},
+    {"code": "#BB39CB", "nom": "Violet"},
+    {"code": "#CB3B92", "nom": "Magenta"},
+    {"code": "#CD4453", "nom": "Rose"},
+    {"code": "#AE612E", "nom": "Orange"},
+    {"code": "#817622", "nom": "Ambre"},
+    {"code": "#5C8022", "nom": "Lime"},
+    {"code": "#2E8624", "nom": "Vert"},
+    {"code": "#23854A", "nom": "Émeraude"},
+    {"code": "#238278", "nom": "Turquoise"},
 ]
 COURSE_COLOR_CHOICES = [(c["code"], c["nom"]) for c in COURSE_COLOR_PALETTE]
 
@@ -458,7 +466,7 @@ class Cours(models.Model):
     color_code = models.CharField(
         max_length=7,
         choices=COURSE_COLOR_CHOICES,
-        default="#2563EB",
+        default="#2E7CAD",
         help_text="Couleur d'accentuation du cours, choisie parmi la palette YÉKI officielle (voir COURSE_COLOR_PALETTE).",
     )
 
