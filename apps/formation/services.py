@@ -1,4 +1,3 @@
-from django.conf import settings
 
 from apps.core.models import ParametreSysteme
 from apps.formation.models import Lecon, Cours, ProgressionLecon
@@ -101,9 +100,11 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
             "email": dept.cadre.user.email,
         }
 
-    image_url = None
-    if dept.image:
-        image_url = settings.MEDIA_URL + str(dept.image)
+    # `dept.image.url` délègue au storage backend réellement configuré
+    # (FileSystemStorage en dev/test, Firebase Storage en production) —
+    # une concaténation manuelle avec `MEDIA_URL` produirait une URL
+    # cassée dès que le backend n'est plus le disque local (ex. GCS).
+    image_url = dept.image.url if dept.image else None
 
     base = {
         "id": dept.id,

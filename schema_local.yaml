@@ -341,108 +341,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Departement'
           description: ''
-  /api/admin/olympiades/{id}/refuser/:
-    post:
-      operationId: api_admin_olympiades_refuser_create
-      description: Refuse une olympiade en attente du parcours du coordonnateur connecté.
-      summary: Refuser une olympiade (coordonnateur)
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - evaluation
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: {}
-          application/x-www-form-urlencoded:
-            schema:
-              type: object
-              additionalProperties: {}
-          multipart/form-data:
-            schema:
-              type: object
-              additionalProperties: {}
-      security:
-      - tokenAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-          description: ''
-  /api/admin/olympiades/{id}/valider/:
-    post:
-      operationId: api_admin_olympiades_valider_create
-      description: Valide (publie) une olympiade en attente du parcours du coordonnateur
-        connecté.
-      summary: Valider une olympiade (coordonnateur)
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - evaluation
-      security:
-      - tokenAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-          description: ''
-  /api/admin/olympiades/a-valider/:
-    get:
-      operationId: api_admin_olympiades_a_valider_retrieve
-      description: Liste paginée des olympiades en attente de validation ou refusées,
-        pour le parcours du coordonnateur connecté.
-      summary: Olympiades à valider (coordonnateur)
-      parameters:
-      - in: query
-        name: page
-        schema:
-          type: integer
-        description: 'Numéro de page (défaut : 1).'
-      - in: query
-        name: page_size
-        schema:
-          type: integer
-        description: 'Taille de page (défaut : 20, maximum : 100).'
-      tags:
-      - evaluation
-      security:
-      - tokenAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-              examples:
-                RéponsePaginée:
-                  value:
-                    count: 57
-                    next: http://api.yeki.cm/api/cours/?page=2
-                    previous: null
-                    results:
-                    - '... voir le schéma de l''élément de la liste ...'
-                  summary: Enveloppe de pagination standard (YekiPageNumberPagination)
-          description: ''
   /api/admin/transactions/:
     get:
       operationId: api_admin_transactions_retrieve
@@ -5178,8 +5076,7 @@ paths:
   /api/olympiades/{olympiade_id}/modifier/:
     patch:
       operationId: api_olympiades_modifier_partial_update
-      description: Modifie une olympiade créée par le cadre connecté, tant qu'elle
-        n'a pas de devoir lié ni n'est validée.
+      description: Modifie une olympiade créée par le cadre connecté.
       summary: Modifier une olympiade (enseignant cadre)
       parameters:
       - in: path

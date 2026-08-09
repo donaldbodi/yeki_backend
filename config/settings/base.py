@@ -230,9 +230,11 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Remplace l'ancien réglage historique `DEFAULT_FILE_STORAGE` (retiré, les
 # deux styles ne peuvent pas coexister) — `staticfiles` bascule sur WhiteNoise
-# (compression + hash de cache-busting dans le nom de fichier), `default`
-# (médias uploadés) reste le stockage disque classique, monté sur un volume
-# persistant Coolify en production (voir Dockerfile/docs de déploiement).
+# (compression + hash de cache-busting dans le nom de fichier). `default`
+# (médias uploadés) reste le stockage disque classique ICI (dev/tests) —
+# `config/settings/production.py` le surcharge vers Firebase Storage
+# (Railway ne fournit aucun volume persistant : ce `FileSystemStorage`
+# écrirait sur un disque de conteneur effacé au prochain déploiement).
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",

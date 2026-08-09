@@ -35,3 +35,12 @@ daphne==4.1.2
 channels==4.2.0
 channels-redis==4.2.1
 whitenoise==6.8.2
+
+# Persistance des médias uploadés — Railway ne fournit aucun volume
+# persistant (conteneur recréé à neuf à chaque déploiement, tout média
+# écrit sur `FileSystemStorage` est perdu au déploiement suivant).
+# Firebase Storage est un bucket Google Cloud Storage standard ;
+# `django-storages[google]` sait déjà s'y connecter avec les MÊMES
+# credentials de service déjà utilisés pour FCM (`FIREBASE_CREDENTIALS_JSON`,
+# voir apps/notifications/fcm.py) — aucun nouveau compte/projet requis.
+django-storages[google]==1.14.4

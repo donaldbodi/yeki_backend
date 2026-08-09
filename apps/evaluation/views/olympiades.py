@@ -1,7 +1,6 @@
 import json
 
 from django.db import transaction
-from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
@@ -15,7 +14,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiPara
 from drf_spectacular.types import OpenApiTypes
 
 from apps.accounts.models import Profile
-from apps.accounts.services import _get_profile, _nom_profil
+from apps.accounts.services import _get_profile
 from apps.core.exceptions import ConflictError, PaymentRequiredError, InsufficientBalanceError
 from apps.core.models import ParametreSysteme, enregistrer_activite
 from apps.core.pagination import PaginatedListMixin
@@ -30,7 +29,7 @@ from apps.core.schema_examples import (
     EXEMPLE_THROTTLED,
 )
 from apps.core.services import _get_client_ip
-from apps.formation.models import Departement, Parcours
+from apps.formation.models import Departement
 from apps.notifications.models import creer_notification
 from apps.paiement.models import PaiementOlympiade, YekiWallet, Paiement
 from apps.evaluation.models import (
@@ -85,16 +84,10 @@ class ListeOlympiadesView(PaginatedListMixin, APIView):
             profile = None
 
         if profile is not None and profile.user_type == "apprenant":
-            # Bug corrigé : ce filtre ne tenait pas compte de la validation
-            # admin — une olympiade encore en attente (ou refusée) était
-            # visible par tous les apprenants, rendant la validation
-            # cosmétique.
             qs = [
                 o
                 for o in qs
-                if o.est_validee
-                and not o.est_refusee
-                and o.est_accessible_par_niveau(profile.niveau)
+                if o.est_accessible_par_niveau(profile.niveau)
                 and o.est_accessible_par_cursus(profile.cursus)
             ]
 
@@ -317,20 +310,10 @@ class PayerParticipationOlympiadeView(APIView):
         ).exists():
             raise ConflictError("Vous avez déjà payé pour cette olympiade.")
 
-        montant = request.data.get("montant", olympiade.prix_participation)
-        try:
-            montant = int(montant)
-        except (TypeError, ValueError):
-            return Response({"detail": "Montant invalide."}, status=400)
-
-        if montant < olympiade.prix_participation:
-            return Response(
-                {
-                    "detail": f"Le montant minimum est de {olympiade.prix_participation} FCFA.",
-                    "prix_participation": olympiade.prix_participation,
-                },
-                status=400,
-            )
+        # Le montant n'est jamais un choix du client — toujours le prix
+        # fixe du modèle (100 FCFA), quoi que le body de la requête
+        # contienne.
+        montant = olympiade.prix_participation
 
         # ── Débit réel du portefeuille de l'apprenant ─────────────
         wallet, _ = YekiWallet.objects.get_or_create(utilisateur=request.user)
@@ -743,17 +726,14 @@ class CreerOlympiadeParCadreView(APIView):
     POST /api/olympiades/cadre/creer/
     Création d'une olympiade par un enseignant_cadre (Partie 3.2) :
     - Gratuite pour le cadre (aucun paiement de création).
-    - Rétablie (demande explicite de l'utilisateur, qui revient sur une
-      décision produit antérieure) : l'olympiade est créée EN ATTENTE de
-      validation par le coordonnateur (`enseignant_admin`) — pas publiée
-      immédiatement. Voir `AdminOlympiadesAValiderView`/
-      `AdminValiderOlympiadeView`/`AdminRefuserOlympiadeView`. Tant qu'elle
-      n'est pas validée, un apprenant ne la voit pas (`ListeOlympiadesView`)
-      mais le cadre peut encore la corriger (`CadreModifierOlympiadeView`
-      bloque la modification uniquement une fois validée).
-    - Participation apprenant : prix_participation FCFA (100 par défaut),
-      split 80% compte Yéki / 20% compte du cadre à chaque paiement
-      (voir PayerParticipationOlympiadeView).
+    - Toute logique de validation admin a été abandonnée (décision
+      explicite, définitive) : l'olympiade est créée et PUBLIÉE
+      IMMÉDIATEMENT, visible aussitôt des apprenants concernés
+      (`ListeOlympiadesView`).
+    - Participation apprenant : prix fixe de 100 FCFA, non modifiable
+      (aucun choix client, ni à la création ni à la modification), split
+      80% compte Yéki / 20% compte du cadre à chaque paiement (voir
+      PayerParticipationOlympiadeView).
     """
 
     permission_classes = [IsAuthenticated]
@@ -880,19 +860,12 @@ class CreerOlympiadeParCadreView(APIView):
         elif not isinstance(niveaux_accessibles, list):
             niveaux_accessibles = []
 
-        # ── Prix de participation (100 FCFA par défaut, Partie 3.2) ─
-        try:
-            prix_participation = int(data.get("prix_participation", 100))
-            if prix_participation < 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            return Response(
-                {"detail": "prix_participation doit être un entier positif ou nul."}, status=400
-            )
+        # ── Prix de participation — FIXE à 100 FCFA, jamais un choix du
+        # cadre ni de l'apprenant (décision explicite, non négociable).
+        prix_participation = 100
 
-        # ── Création de l'olympiade — GRATUITE, en attente de validation ──
-        # (`est_validee`/`validee_le` reprennent leur défaut modèle :
-        # False/None — voir AdminValiderOlympiadeView pour la validation.)
+        # ── Création de l'olympiade — GRATUITE, publiée immédiatement ──
+        # (plus de validation admin : `est_validee=True` dès la création).
         olympiade = Olympiade.objects.create(
             titre=titre,
             description=(data.get("description") or "").strip(),
@@ -909,7 +882,9 @@ class CreerOlympiadeParCadreView(APIView):
             melanger_choix=melanger_choix,
             une_seule_session=une_seule_session,
             prix_participation=prix_participation,
-            demande_paiement_participants=prix_participation > 0,
+            demande_paiement_participants=True,
+            est_validee=True,
+            validee_le=timezone.now(),
             note_sur=20,
             organisateur=profile,
             cree_par=request.user,
@@ -932,10 +907,25 @@ class CreerOlympiadeParCadreView(APIView):
         olympiade.devoir = devoir_lie
         olympiade.save(update_fields=["devoir"])
 
-        # Notification aux apprenants déplacée à la VALIDATION
-        # (`AdminValiderOlympiadeView`) — tant qu'elle est en attente,
-        # l'olympiade n'est ni visible (`ListeOlympiadesView`) ni
-        # accessible à l'inscription ; notifier ici serait trompeur.
+        # Notification aux apprenants éligibles — l'olympiade est publiée
+        # immédiatement (plus de validation admin), donc notifiée dès sa
+        # création.
+        departement = profile.departements_cadre.first()
+        if departement is not None:
+            apprenants_eligibles = Profile.objects.filter(
+                user_type="apprenant", cursus=departement.parcours.nom, is_active=True
+            ).select_related("user")
+            for apprenant in apprenants_eligibles:
+                if olympiade.est_accessible_par_niveau(apprenant.niveau):
+                    creer_notification(
+                        utilisateur=apprenant.user,
+                        type_notif="olympiade",
+                        titre=f"Nouvelle olympiade : {olympiade.titre}",
+                        contenu=f"Une nouvelle olympiade '{olympiade.titre}' est disponible. Inscrivez-vous maintenant !",
+                        objet_id=olympiade.id,
+                        objet_type="Olympiade",
+                        action_route=f"/olympiades/{olympiade.id}/inscription",
+                    )
 
         enregistrer_activite(
             user=request.user,
@@ -966,7 +956,7 @@ class CreerOlympiadeParCadreView(APIView):
                 "recompense": olympiade.recompense,
                 "prix_participation": olympiade.prix_participation,
                 "demande_paiement_participants": olympiade.demande_paiement_participants,
-                "detail": "Olympiade créée, en attente de validation par le coordonnateur. Ajoutez maintenant ses questions.",
+                "detail": "Olympiade créée et publiée ! Ajoutez maintenant ses questions.",
             },
             status=status.HTTP_201_CREATED,
         )
@@ -990,7 +980,7 @@ class CadreModifierOlympiadeView(APIView):
 
     @extend_schema(
         summary="Modifier une olympiade (enseignant cadre)",
-        description="Modifie une olympiade créée par le cadre connecté, tant qu'elle n'a pas de devoir lié ni n'est validée.",
+        description="Modifie une olympiade créée par le cadre connecté.",
         tags=["evaluation"],
         request=OpenApiTypes.OBJECT,
         responses={200: OpenApiTypes.OBJECT},
@@ -1013,23 +1003,12 @@ class CadreModifierOlympiadeView(APIView):
                 {"detail": "Vous n'êtes pas l'organisateur de cette olympiade."}, status=403
             )
 
-        # Bug corrigé (découvert en restaurant la validation admin) : ce
-        # blocage vérifiait "l'olympiade n'a pas encore de devoir lié" —
-        # une condition héritée d'un ancien flux où le devoir était lié
-        # séparément après coup (`LierDevoirOlympiadeView`). Depuis que
-        # `CreerOlympiadeParCadreView` crée et lie le devoir immédiatement
-        # à la création (toujours vrai dès la 1ère seconde), ce blocage
-        # rendait la modification impossible EN PERMANENCE, y compris pour
-        # une olympiade en attente de validation — retiré, seul
-        # `est_validee` fait désormais foi (cohérent avec le workflow
-        # restauré : modifiable tant que non validée).
-
-        # Vérifier que l'olympiade n'est pas validée
-        if olympiade.est_validee:
-            return Response(
-                {"detail": "Cette olympiade est déjà validée. Elle ne peut plus être modifiée."},
-                status=400,
-            )
+        # Toute logique de validation admin a été abandonnée : une
+        # olympiade est toujours publiée (`est_validee=True`) dès sa
+        # création — un blocage basé sur `est_validee` bloquerait donc
+        # TOUTE modification en permanence (même bug que l'ancien blocage
+        # "devoir déjà lié", retiré pour la même raison). Aucun blocage de
+        # ce type ici : le cadre peut modifier son olympiade à tout moment.
 
         data = request.data
         updates = {}
@@ -1088,10 +1067,8 @@ class CadreModifierOlympiadeView(APIView):
                 updates["niveaux_accessibles"] = ",".join(niveaux)
             else:
                 updates["niveaux_accessibles"] = niveaux
-        if "demande_paiement_participants" in data:
-            updates["demande_paiement_participants"] = data["demande_paiement_participants"]
-        if "prix_participation" in data:
-            updates["prix_participation"] = int(data["prix_participation"])
+        # Prix de participation : FIXE à 100 FCFA, jamais modifiable, ni
+        # par le cadre ni par personne — ignoré même si le client l'envoie.
 
         if not updates:
             return Response({"detail": "Aucune modification spécifiée."}, status=400)
@@ -1334,19 +1311,10 @@ class OlympiadesPourMoiView(PaginatedListMixin, APIView):
 
         niveau_apprenant = (profile.niveau or "").strip().lower()
 
-        # Base queryset — olympiades publiées ET validées. Bug corrigé :
-        # `est_validee`/`est_refusee` n'étaient pas vérifiés ici — seul
-        # `devoir.est_publie` (mis à True dès qu'une question est ajoutée,
-        # sans rapport avec la validation admin) gatait cette liste,
-        # rendant la validation cosmétique pour ce point d'entrée
-        # réellement utilisé par le frontend (`olympiade_repository.dart.
-        # pourMoi()`).
+        # Base queryset — olympiades publiées (aucune validation admin :
+        # abandonnée, une olympiade est publiée dès sa création).
         qs = (
-            Olympiade.objects.filter(
-                devoir__est_publie=True,
-                est_validee=True,
-                est_refusee=False,
-            )
+            Olympiade.objects.filter(devoir__est_publie=True)
             .select_related("organisateur__user", "devoir")
             .order_by("-date_debut_olympiade")
         )
@@ -1362,187 +1330,3 @@ class OlympiadesPourMoiView(PaginatedListMixin, APIView):
         serializer = OlympiadeListSerializer(page, many=True, context={"request": request})
         return self.get_paginated_response(serializer.data)
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# VALIDATION ADMIN DES OLYMPIADES — rétablie (demande explicite de
-# l'utilisateur, qui revient sur la décision produit prise dans
-# `apps/evaluation/tests/test_nettoyage_olympiades.py`, laquelle avait
-# supprimé ce mécanisme). Adaptée à l'architecture actuelle — PAS une
-# copie de l'ancien code archivé (docs/AUDIT_BACKEND.md §12.3), qui
-# référençait des champs retirés depuis (`matiere`/`niveau`/`prix_global`)
-# et une indirection par `Devoir.est_publie` qui n'existe plus dans le
-# flux de création actuel (celui-ci gère déjà `est_validee` directement).
-# Réservé au coordonnateur (`enseignant_admin`) du parcours du cadre
-# organisateur — même relation que l'ancien code
-# (`organisateur__departements_cadre__parcours`), toujours valide.
-# ═══════════════════════════════════════════════════════════════════════
-
-
-@extend_schema_view(
-    get=extend_schema(
-        summary="Olympiades à valider (coordonnateur)",
-        description="Liste paginée des olympiades en attente de validation ou refusées, pour le parcours du coordonnateur connecté.",
-        tags=["evaluation"],
-        parameters=[*PARAMS_PAGINATION],
-        responses={200: OpenApiTypes.OBJECT},
-        examples=[EXEMPLE_PAGINATION, *ERREURS_COURANTES],
-    ),
-)
-class AdminOlympiadesAValiderView(PaginatedListMixin, APIView):
-    """GET /api/admin/olympiades/a-valider/"""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != "enseignant_admin":
-            return Response({"detail": "Accès réservé aux coordonnateurs."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        # `Olympiade` n'a pas de champ `created_at` — `-id` reste un proxy
-        # fiable de l'ordre de création (clé auto-incrémentée).
-        olympiades = (
-            Olympiade.objects.filter(
-                organisateur__departements_cadre__parcours=parcours,
-            )
-            .filter(Q(est_validee=False, est_refusee=False) | Q(est_refusee=True))
-            .distinct()
-            .select_related("organisateur__user")
-            .order_by("-id")
-        )
-
-        result = [
-            {
-                "id": o.id,
-                "titre": o.titre,
-                "edition": o.edition,
-                "statut_validation": "refuse" if o.est_refusee else "attente",
-                "motif_refus": o.motif_refus if o.est_refusee else "",
-                "cadre": {"id": o.organisateur.id, "nom": _nom_profil(o.organisateur)},
-                "prix_participation": o.prix_participation,
-                "niveaux_accessibles": o.get_niveaux_accessibles_list(),
-                "date_debut_olympiade": o.date_debut_olympiade,
-                "date_fin_olympiade": o.date_fin_olympiade,
-            }
-            for o in olympiades
-        ]
-
-        page = self.paginate_queryset(result)
-        return self.get_paginated_response(page)
-
-
-@extend_schema_view(
-    post=extend_schema(
-        summary="Valider une olympiade (coordonnateur)",
-        description="Valide (publie) une olympiade en attente du parcours du coordonnateur connecté.",
-        tags=["evaluation"],
-        request=None,
-        responses={200: OpenApiTypes.OBJECT},
-        examples=[*ERREURS_ECRITURE],
-    ),
-)
-class AdminValiderOlympiadeView(APIView):
-    """POST /api/admin/olympiades/<pk>/valider/"""
-
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, pk):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != "enseignant_admin":
-            return Response({"detail": "Accès réservé aux coordonnateurs."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        olympiade = get_object_or_404(
-            Olympiade, pk=pk, organisateur__departements_cadre__parcours=parcours
-        )
-
-        olympiade.est_validee = True
-        olympiade.est_refusee = False
-        olympiade.motif_refus = ""
-        olympiade.validee_le = timezone.now()
-        olympiade.save()
-
-        # Notification aux apprenants éligibles — déplacée ici depuis la
-        # création (l'olympiade n'était pas visible tant qu'en attente).
-        departement = olympiade.organisateur.departements_cadre.first()
-        if departement is not None:
-            apprenants = Profile.objects.filter(
-                user_type="apprenant", cursus=departement.parcours.nom, is_active=True
-            ).select_related("user")
-            for apprenant in apprenants:
-                if olympiade.est_accessible_par_niveau(apprenant.niveau):
-                    creer_notification(
-                        utilisateur=apprenant.user,
-                        type_notif="olympiade",
-                        titre=f"Nouvelle olympiade : {olympiade.titre}",
-                        contenu=f"Une nouvelle olympiade '{olympiade.titre}' est disponible. Inscrivez-vous maintenant !",
-                        objet_id=olympiade.id,
-                        objet_type="Olympiade",
-                        action_route=f"/olympiades/{olympiade.id}/inscription",
-                    )
-
-        enregistrer_activite(
-            user=request.user,
-            action="olympiad_validated",
-            description=f"Olympiade « {olympiade.titre} » validée",
-            objet_id=olympiade.id,
-            objet_type="Olympiade",
-        )
-
-        return Response({"detail": "Olympiade validée et publiée.", "id": olympiade.id, "statut": "valide"})
-
-
-@extend_schema_view(
-    post=extend_schema(
-        summary="Refuser une olympiade (coordonnateur)",
-        description="Refuse une olympiade en attente du parcours du coordonnateur connecté.",
-        tags=["evaluation"],
-        request=OpenApiTypes.OBJECT,
-        responses={200: OpenApiTypes.OBJECT},
-        examples=[*ERREURS_ECRITURE],
-    ),
-)
-class AdminRefuserOlympiadeView(APIView):
-    """POST /api/admin/olympiades/<pk>/refuser/, body optionnel : {"motif": "..."}"""
-
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, pk):
-        profile = _get_profile(request.user)
-        if not profile or profile.user_type != "enseignant_admin":
-            return Response({"detail": "Accès réservé aux coordonnateurs."}, status=403)
-
-        try:
-            parcours = Parcours.objects.get(admin=profile)
-        except Parcours.DoesNotExist:
-            return Response({"detail": "Aucun parcours assigné."}, status=404)
-
-        olympiade = get_object_or_404(
-            Olympiade, pk=pk, organisateur__departements_cadre__parcours=parcours
-        )
-
-        motif = (request.data.get("motif") or "Refusée par le coordonnateur.").strip()
-        olympiade.est_refusee = True
-        olympiade.est_validee = False
-        olympiade.motif_refus = motif
-        olympiade.save()
-
-        enregistrer_activite(
-            user=request.user,
-            action="olympiad_rejected",
-            description=f"Olympiade « {olympiade.titre} » refusée. Motif : {motif}",
-            objet_id=olympiade.id,
-            objet_type="Olympiade",
-        )
-
-        return Response({"detail": f"Olympiade refusée. Motif : {motif}", "id": olympiade.id, "statut": "refuse"})

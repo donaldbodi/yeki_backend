@@ -4,20 +4,20 @@ prix_1er, prix_2eme, prix_3eme) — régression directe sur les bugs
 confirmés (AttributeError sur CadreOlympiadesView, perte silencieuse sur
 CadreModifierOlympiadeView, doublon cassé sur le dashboard admin général).
 
-Rectification ultérieure : la suppression des 3 routes admin de
-validation (décision produit actée ici à l'origine) a été EXPLICITEMENT
-INVERSÉE par l'utilisateur — la validation est rétablie (voir
-`AdminOlympiadesAValiderView`/`AdminValiderOlympiadeView`/
-`AdminRefuserOlympiadeView`, `apps/evaluation/views/olympiades.py`).
-`test_routes_admin_validation_supprimees` (qui vérifiait leur ABSENCE) a
-donc été remplacé par son inverse ci-dessous — le reste de ce fichier
-(nettoyage des champs abandonnés) reste valide et inchangé.
+Rectification finale : la validation admin (rétablie brièvement sur une
+demande antérieure) a été DÉFINITIVEMENT ABANDONNÉE — décision explicite
+et non négociable de l'utilisateur. `AdminOlympiadesAValiderView`/
+`AdminValiderOlympiadeView`/`AdminRefuserOlympiadeView` sont à nouveau
+supprimées de `apps/evaluation/views/olympiades.py` ;
+`test_routes_admin_validation_supprimees` (qui vérifie leur ABSENCE) est
+donc restauré ci-dessous. Le reste de ce fichier (nettoyage des champs
+abandonnés) reste valide et inchangé.
 """
 
 from datetime import timedelta
 
 import pytest
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from rest_framework import status
 
@@ -102,15 +102,17 @@ def test_liste_olympiades_ignore_filtres_matiere_niveau(client_apprenant):
 
 
 @pytest.mark.django_db
-def test_routes_admin_validation_retablies():
+def test_routes_admin_validation_supprimees():
     """
-    Rectification : la décision de supprimer la validation admin a été
-    inversée — ces 3 routes doivent exister à nouveau dans le urlconf
-    (comportement fonctionnel testé séparément, `test_validation_olympiades.py`).
+    Rectification finale : la validation admin est abandonnée pour de bon
+    — ces 3 routes ne doivent plus exister dans le urlconf.
     """
-    assert reverse("admin-olympiades-a-valider")
-    assert reverse("admin-valider-olympiade", args=[1])
-    assert reverse("admin-refuser-olympiade", args=[1])
+    with pytest.raises(NoReverseMatch):
+        reverse("admin-olympiades-a-valider")
+    with pytest.raises(NoReverseMatch):
+        reverse("admin-valider-olympiade", args=[1])
+    with pytest.raises(NoReverseMatch):
+        reverse("admin-refuser-olympiade", args=[1])
 
 
 @pytest.mark.django_db

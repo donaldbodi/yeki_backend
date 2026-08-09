@@ -267,10 +267,9 @@ class CreerDepartementView(APIView):
 class AdminUpdateDepartementView(APIView):
     """
     PATCH /api/admin/departements/<pk>/update/
-    Permet à l'enseignant admin OU au cadre gérant ce département de le
-    modifier (demande explicite : le cadre n'avait jusqu'ici aucun moyen
-    de modifier son propre département, capacité réservée au seul
-    coordonnateur).
+    Réservé à l'enseignant admin du parcours auquel appartient le
+    département (décision explicite : un cadre ne doit pas pouvoir
+    modifier un département).
     """
 
     permission_classes = [IsAuthenticated]
@@ -284,22 +283,13 @@ class AdminUpdateDepartementView(APIView):
 
         departement = get_object_or_404(Departement, pk=pk)
 
-        # Même garde-fou d'appartenance que pour la création de cours
-        # (`CoursCreateSerializer.validate_departement`) : chaque rôle ne
-        # peut modifier que le département qu'il gère réellement.
-        if profile.user_type == "enseignant_admin":
-            if departement.parcours.admin != profile:
-                return Response(
-                    {"detail": "Ce département n'appartient pas à votre parcours."}, status=403
-                )
-        elif profile.user_type == "enseignant_cadre":
-            if departement.cadre != profile:
-                return Response(
-                    {"detail": "Vous ne gérez pas ce département."}, status=403
-                )
-        else:
+        if profile.user_type != "enseignant_admin":
             return Response(
-                {"detail": "Accès réservé aux enseignants administrateurs et cadres."}, status=403
+                {"detail": "Accès réservé aux enseignants administrateurs."}, status=403
+            )
+        if departement.parcours.admin != profile:
+            return Response(
+                {"detail": "Ce département n'appartient pas à votre parcours."}, status=403
             )
 
         data = request.data.copy()

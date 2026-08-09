@@ -67,3 +67,41 @@ CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 60 * 60 * 24 * 7
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
+
+# ── Stockage des médias — Firebase Storage ───────────────────────────────
+# Railway ne fournit aucun volume persistant (confirmé : aucun
+# `railway.json`/volume configuré) — chaque redéploiement recrée un
+# conteneur avec un système de fichiers vierge, ce qui efface tout média
+# uploadé (`FileSystemStorage`, le défaut hérité de `base.py`). Firebase
+# Storage est un bucket Google Cloud Storage standard : `django-storages`
+# sait déjà s'y connecter nativement (backend `gcloud`), et le même compte
+# de service déjà utilisé pour FCM (`FIREBASE_CREDENTIALS_JSON`, voir
+# apps/notifications/fcm.py) fonctionne tel quel — aucun nouveau
+# compte/projet Firebase à créer.
+#
+# Uniquement défini ICI (pas dans `base.py`) : `config/settings/test.py`
+# importe seulement `base.py` et reste donc, volontairement, toujours sur
+# `FileSystemStorage` — aucun risque qu'un test touche le vrai stockage
+# cloud, aucun credential requis pour faire tourner la suite de tests.
+_firebase_credentials_json = env("FIREBASE_CREDENTIALS_JSON", default="")
+if _firebase_credentials_json:
+    import json as _json
+
+    from google.oauth2 import service_account as _service_account
+
+    _firebase_credentials_dict = _json.loads(_firebase_credentials_json)
+    GS_CREDENTIALS = _service_account.Credentials.from_service_account_info(
+        _firebase_credentials_dict
+    )
+    GS_PROJECT_ID = _firebase_credentials_dict.get("project_id")
+    # Convention historique des buckets Firebase Storage — surchargeable
+    # via `FIREBASE_STORAGE_BUCKET` si le bucket réel diverge (ex. projets
+    # créés après la bascule de convention de Google vers
+    # `<project_id>.firebasestorage.app`).
+    GS_BUCKET_NAME = env(
+        "FIREBASE_STORAGE_BUCKET", default=f"{GS_PROJECT_ID}.appspot.com"
+    )
+    GS_DEFAULT_ACL = None  # géré par l'IAM du bucket, pas par des ACL objet par objet
+    GS_QUERYSTRING_AUTH = False  # URLs publiques stables, pas de jeton signé expirant
+
+    STORAGES["default"]["BACKEND"] = "storages.backends.gcloud.GoogleCloudStorage"
