@@ -10,6 +10,7 @@ from apps.formation.models import (
     Cours,
     Module,
     Lecon,
+    ProgressionLecon,
     SupplementCours,
 )
 from apps.formation.services import codes_niveaux_formation_disponibles
@@ -230,6 +231,16 @@ class DepartementSerializer(serializers.ModelSerializer):
     niveaux_accessibles = serializers.SerializerMethodField()
     demandes_acces = serializers.SerializerMethodField()
     label_catalogue = serializers.SerializerMethodField()
+    # Ajoutés (bug corrigé, cascade Admin Général « Parcours » →
+    # départements) : ces 4 champs étaient déjà lus par
+    # `parcours_detail_page.dart` (chaque carte département) mais jamais
+    # exposés par ce serializer — chaque carte affichait 0/0/0%/cursus par
+    # défaut, même une fois la pagination de l'endpoint corrigée côté
+    # frontend.
+    nb_cours = serializers.SerializerMethodField()
+    nb_apprenants = serializers.SerializerMethodField()
+    taux_moyen = serializers.SerializerMethodField()
+    type_departement = serializers.CharField(read_only=True)
 
     class Meta:
         model = Departement
@@ -275,10 +286,36 @@ class DepartementSerializer(serializers.ModelSerializer):
             "apprenants_autorises",
             "demandes_acces",
             "niveau_formation",
+            "nb_cours",
+            "nb_apprenants",
+            "taux_moyen",
+            "type_departement",
         ]
 
     def get_niveaux_accessibles(self, obj):
         return obj.get_niveaux_accessibles_list()
+
+    def get_nb_cours(self, obj):
+        return obj.cours.count()
+
+    def get_nb_apprenants(self, obj):
+        # Somme du compteur déjà maintenu par cours (`Cours.nb_apprenants`)
+        # — même source que `EnseignantCadreDashboardView`/le détail cours.
+        return sum(c.nb_apprenants for c in obj.cours.all())
+
+    def get_taux_moyen(self, obj):
+        # Taux de complétion moyen RÉEL (tous apprenants confondus), pas
+        # scopé à un utilisateur particulier — contrairement à
+        # `EnseignantCadreDashboardView._calculer_taux_moyen_departement`
+        # (calcule la progression du SEUL utilisateur courant, adapté à son
+        # propre usage mais pas réutilisable ici pour un admin/coordonnateur
+        # qui consulte le département de quelqu'un d'autre).
+        cours_qs = obj.cours.all()
+        total_possible = sum(c.nb_lecons * c.nb_apprenants for c in cours_qs)
+        if total_possible == 0:
+            return 0.0
+        total_realise = ProgressionLecon.objects.filter(cours__departement=obj, terminee=True).count()
+        return round((total_realise / total_possible) * 100, 1)
 
     def get_label_catalogue(self, obj):
         return obj.label_catalogue()
