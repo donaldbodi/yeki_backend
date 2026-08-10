@@ -1,4 +1,5 @@
 from django.core.exceptions import PermissionDenied
+from django.utils import timezone
 
 
 class AccesService:
@@ -12,6 +13,16 @@ class AccesService:
     En mode gratuit, l'apprenant VOIT les exercices 1★ et 2★ mais ne peut
     SOUMETTRE que les 1★ : ce n'est pas une incohérence, c'est une
     vitrine — il voit ce qu'il rate. D'où les deux méthodes distinctes.
+
+    Rectification (demande explicite) : le Premium est désormais PAR
+    DÉPARTEMENT, plus un abonnement global unique — `AbonnementPremium`
+    porte maintenant un `departement`. Chaque méthode accepte un
+    paramètre `departement` optionnel : fourni, elle vérifie l'abonnement
+    de CE département précisément ; absent (contenu structurellement
+    sans département résolvable — question de forum "libre", devoir lié
+    à une olympiade), elle retombe sur la règle « premium dans N'IMPORTE
+    QUEL département » — filet de sécurité, pas une réintroduction du
+    global.
     """
 
     # Seuils fixés par le CDC lui-même (pas un paramètre produit ajustable
@@ -28,18 +39,37 @@ class AccesService:
         return bool(profile) and profile.user_type == "apprenant"
 
     @staticmethod
-    def est_premium(user) -> bool:
-        """Vrai si l'utilisateur a un AbonnementPremium actif. Remplace
-        l'ancien `apps.accounts.services._is_premium` (mort, jamais
-        appelé — supprimé)."""
+    def est_premium(user, departement=None) -> bool:
+        """Vrai si l'utilisateur a un AbonnementPremium actif — dans
+        `departement` précisément si fourni, dans N'IMPORTE LEQUEL sinon
+        (filet de sécurité pour le contenu sans département résolvable)."""
         if not getattr(user, "is_authenticated", False):
             return False
         from apps.paiement.models import AbonnementPremium
 
-        try:
-            return user.abonnement.est_actif
-        except AbonnementPremium.DoesNotExist:
-            return False
+        qs = AbonnementPremium.objects.filter(
+            utilisateur=user, actif=True, fin__gt=timezone.now()
+        )
+        if departement is not None:
+            qs = qs.filter(departement=departement)
+        return qs.exists()
+
+    @staticmethod
+    def _resoudre_departement(objet):
+        """Département de `objet` si résolvable depuis son propre graphe
+        de relations, sinon `None` (ex. `objet` est une CLASSE, pas une
+        instance — vue liste ; ou un Devoir lié à une olympiade,
+        `cours_lie` alors `None`)."""
+        from apps.evaluation.models import Exercice, Devoir
+        from apps.formation.models import Lecon
+
+        if isinstance(objet, Lecon):
+            return objet.cours.departement
+        if isinstance(objet, Exercice):
+            return objet.cours.departement
+        if isinstance(objet, Devoir):
+            return objet.cours_lie.departement if objet.cours_lie else None
+        return None
 
     @staticmethod
     def _est_ou_est_classe(objet, modele) -> bool:
@@ -61,7 +91,7 @@ class AccesService:
         ).exists()
 
     @classmethod
-    def peut_voir(cls, user, objet) -> bool:
+    def peut_voir(cls, user, objet, departement=None) -> bool:
         from apps.evaluation.models import Exercice, Devoir, Olympiade
         from apps.forum.models import QuestionForum
         from apps.repetiteurs.models import Repetiteur
@@ -69,7 +99,7 @@ class AccesService:
 
         if not cls._est_apprenant(user):
             return True
-        if cls.est_premium(user):
+        if cls.est_premium(user, departement or cls._resoudre_departement(objet)):
             return True
 
         if isinstance(objet, Exercice):
@@ -96,7 +126,7 @@ class AccesService:
         raise TypeError(f"AccesService.peut_voir : type non géré ({type(objet)!r}).")
 
     @classmethod
-    def peut_soumettre(cls, user, objet) -> bool:
+    def peut_soumettre(cls, user, objet, departement=None) -> bool:
         from apps.evaluation.models import Exercice, Devoir, Olympiade
         from apps.forum.models import QuestionForum
         from apps.repetiteurs.models import Repetiteur
@@ -115,7 +145,7 @@ class AccesService:
         if objet is Olympiade:
             return True
 
-        if cls.est_premium(user):
+        if cls.est_premium(user, departement or cls._resoudre_departement(objet)):
             return True
 
         if isinstance(objet, Exercice):
@@ -132,24 +162,28 @@ class AccesService:
         raise TypeError(f"AccesService.peut_soumettre : type non géré ({type(objet)!r}).")
 
     @classmethod
-    def etoiles_max_visibles(cls, user) -> int | None:
-        """None = illimité (premium ou non-apprenant). Sinon le seuil ★
-        maximum visible — sert à FILTRER un queryset de liste
-        (ListeExercicesCoursView) sans appeler peut_voir en boucle sur
-        chaque ligne. Reste cohérent avec peut_voir (testé)."""
-        if not cls._est_apprenant(user) or cls.est_premium(user):
+    def etoiles_max_visibles(cls, user, departement=None) -> int | None:
+        """None = illimité (premium — dans `departement` si fourni — ou
+        non-apprenant). Sinon le seuil ★ maximum visible — sert à
+        FILTRER un queryset de liste (ListeExercicesCoursView) sans
+        appeler peut_voir en boucle sur chaque ligne. Reste cohérent avec
+        peut_voir (testé)."""
+        if not cls._est_apprenant(user) or cls.est_premium(user, departement):
             return None
         return cls.ETOILES_VITRINE_GRATUIT
 
     @classmethod
-    def peut_voir_video_lecon(cls, user) -> bool:
+    def peut_voir_video_lecon(cls, user, lecon=None) -> bool:
         """Pas une 3e méthode de la matrice au sens strict du ticket : ne
         décide pas si un OBJET de la matrice est visible, mais démasque
         un CHAMP (video) d'une Lecon déjà visible (peut_voir(Lecon) est
-        toujours True). GRATUIT = PDF seulement, PREMIUM = vidéo incluse."""
+        toujours True). GRATUIT = PDF seulement, PREMIUM = vidéo incluse
+        — Premium DU DÉPARTEMENT de `lecon` si fourni (résolu via
+        `lecon.cours.departement`), sinon repli sur la règle globale."""
         if not cls._est_apprenant(user):
             return True
-        return cls.est_premium(user)
+        departement = lecon.cours.departement if lecon is not None else None
+        return cls.est_premium(user, departement)
 
 
 def check_role(user, allowed_roles):

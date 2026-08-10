@@ -90,9 +90,20 @@ def finaliser_paiement(
         type_paiement_trace = "recharge_wallet"
 
     elif categorie == "abonnement":
-        type_abonnement = type_abonnement or (
-            "annuel" if montant >= AbonnementPremium.TARIFS["annuel"] else "mensuel"
-        )
+        # Rectification : plus un abonnement global à 2 tarifs fixes —
+        # PAR DÉPARTEMENT, le palier mensuel/annuel se détermine contre
+        # les prix RÉELS fixés par l'administrateur de CE département
+        # (`Departement.prix_mensuel`/`prix_annuel`), jamais la constante
+        # `AbonnementPremium.TARIFS` (conservée seulement pour
+        # compatibilité/affichage historique). Aucune commission cadre
+        # sur ce revenu récurrent (décision explicite) — `commission_yeki`
+        # reste à 0, `repartir_et_crediter` n'est jamais appelé ici,
+        # contrairement à la catégorie "formation" ci-dessous.
+        departement = departement or get_object_or_404(Departement, pk=objet_id)
+        if type_abonnement is None:
+            type_abonnement = (
+                "annuel" if departement.prix_annuel and montant >= departement.prix_annuel else "mensuel"
+            )
         type_paiement_trace = f"abonnement_{type_abonnement}"
 
     elif categorie == "olympiade":
@@ -147,22 +158,25 @@ def finaliser_paiement(
         reference=reference,
         commission_yeki=commission_yeki,
         demande_manuelle=demande_manuelle,
-        departement=departement if categorie == "formation" else None,
+        departement=departement if categorie in ("formation", "abonnement") else None,
         olympiade_liee=olympiade if categorie == "olympiade" else None,
     )
 
     if categorie == "abonnement":
         # Réplique exacte du pattern déjà utilisé par
-        # WalletRechargerView._google_play (apps/paiement/views.py).
+        # WalletRechargerView._google_play (apps/paiement/views.py),
+        # désormais scopé par département (unique_together utilisateur+
+        # departement).
         jours = 30 if type_abonnement == "mensuel" else 365
         try:
-            abo = user_apprenant.abonnement
+            abo = AbonnementPremium.objects.get(utilisateur=user_apprenant, departement=departement)
             abo.renouveler(type_abonnement)
             abo.paiement = paiement
             abo.save()
         except AbonnementPremium.DoesNotExist:
             AbonnementPremium.objects.create(
                 utilisateur=user_apprenant,
+                departement=departement,
                 type_abonnement=type_abonnement,
                 actif=True,
                 fin=timezone.now() + timedelta(days=jours),

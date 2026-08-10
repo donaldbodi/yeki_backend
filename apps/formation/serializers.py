@@ -50,7 +50,7 @@ class LeconSerializer(serializers.ModelSerializer):
         # réservée aux abonnés Premium (AccesService.peut_voir_video_lecon).
         request = self.context.get("request")
         user = request.user if request else None
-        if not obj.video or not AccesService.peut_voir_video_lecon(user):
+        if not obj.video or not AccesService.peut_voir_video_lecon(user, obj):
             return None
         return request.build_absolute_uri(obj.video.url) if request else obj.video.url
 
@@ -62,7 +62,7 @@ class LeconSerializer(serializers.ModelSerializer):
         # une vidéo réellement verrouillée).
         request = self.context.get("request")
         user = request.user if request else None
-        return bool(obj.video) and not AccesService.peut_voir_video_lecon(user)
+        return bool(obj.video) and not AccesService.peut_voir_video_lecon(user, obj)
 
 
 class LeconCreateSerializer(serializers.ModelSerializer):
@@ -691,7 +691,7 @@ class LeconLightSerializer(serializers.ModelSerializer):
         # P9.1 : matrice d'accès — GRATUIT = PDF seulement.
         request = self.context.get("request")
         user = request.user if request else None
-        if not obj.video or not AccesService.peut_voir_video_lecon(user):
+        if not obj.video or not AccesService.peut_voir_video_lecon(user, obj):
             return None
         return request.build_absolute_uri(obj.video.url)
 
@@ -699,7 +699,7 @@ class LeconLightSerializer(serializers.ModelSerializer):
         # Voir LeconSerializer.get_video_verrouille — même distinction.
         request = self.context.get("request")
         user = request.user if request else None
-        return bool(obj.video) and not AccesService.peut_voir_video_lecon(user)
+        return bool(obj.video) and not AccesService.peut_voir_video_lecon(user, obj)
 
 
 class ModuleAvecLeconsSerializer(serializers.ModelSerializer):

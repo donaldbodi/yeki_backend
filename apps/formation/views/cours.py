@@ -290,9 +290,12 @@ class ApprenantCursusAPIView(PaginatedListMixin, APIView):
         result = []
         for c in page:
             ep_nom = "—"
+            ep_avatar_url = None
             if c.enseignant_principal:
                 ep = c.enseignant_principal
                 ep_nom = f"{ep.user.first_name} {ep.user.last_name}".strip() or ep.user.username
+                if ep.avatar:
+                    ep_avatar_url = request.build_absolute_uri(ep.avatar.url)
 
             result.append(
                 {
@@ -300,6 +303,7 @@ class ApprenantCursusAPIView(PaginatedListMixin, APIView):
                     "title": c.titre,
                     "description": c.description_brief or "",
                     "enseignant_principal": ep_nom,
+                    "enseignant_principal_avatar_url": ep_avatar_url,
                     "lessons": c.nb_lecons,
                     "assignments": c.nb_devoirs,
                     "icon": c.icon_name or "school",

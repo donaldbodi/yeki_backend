@@ -115,21 +115,27 @@ class Command(BaseCommand):
         return total
 
     def _rappels_abonnement(self, maintenant) -> int:
-        titre = "Abonnement expire dans 3 jours"
+        # Rectification : l'abonnement est désormais PAR DÉPARTEMENT — un
+        # même apprenant peut avoir plusieurs abonnements distincts en
+        # cours d'expiration, d'où le nom du département dans le titre
+        # (déjà unique par abonnement, `_deja_notifie` continue de
+        # dédupliquer sur l'id de l'abonnement, pas sur un titre partagé).
         abonnements = AbonnementPremium.objects.filter(
             actif=True,
             fin__gt=maintenant,
             fin__lte=maintenant + timedelta(days=3),
-        ).select_related("utilisateur")
+        ).select_related("utilisateur", "departement")
         total = 0
         for abonnement in abonnements:
+            nom_dept = abonnement.departement.nom if abonnement.departement else "votre abonnement"
+            titre = f"Abonnement « {nom_dept} » expire dans 3 jours"
             if _deja_notifie(abonnement.utilisateur, titre, abonnement.id, "AbonnementPremium"):
                 continue
             creer_notification(
                 utilisateur=abonnement.utilisateur,
                 type_notif="rappel",
                 titre=titre,
-                contenu="Votre abonnement Premium expire dans 3 jours. Pensez à le renouveler.",
+                contenu=f"Votre abonnement Premium « {nom_dept} » expire dans 3 jours. Pensez à le renouveler.",
                 objet_id=abonnement.id,
                 objet_type="AbonnementPremium",
                 action_route="/paiement",

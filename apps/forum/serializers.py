@@ -4,10 +4,25 @@ from apps.accounts.models import Profile
 from apps.forum.models import QuestionForum, ReponseQuestion
 
 
+def _avatar_url(user, request):
+    """Photo de profil de l'auteur — même motif que `ProfilDetailSerializer.
+    get_avatar` (apps/accounts/serializers.py), réutilisé ici plutôt que
+    dupliqué (règle 1). `None` si le profil n'existe pas ou n'a pas
+    d'avatar — jamais une URL cassée."""
+    try:
+        avatar = user.profile.avatar
+    except Profile.DoesNotExist:
+        return None
+    if not avatar:
+        return None
+    return request.build_absolute_uri(avatar.url) if request else avatar.url
+
+
 class ReponseSerializer(serializers.ModelSerializer):
     auteur_nom = serializers.CharField(source="auteur.get_full_name", read_only=True)
     auteur_username = serializers.CharField(source="auteur.username", read_only=True)
     auteur_est_enseignant = serializers.SerializerMethodField()
+    auteur_avatar_url = serializers.SerializerMethodField()
     nb_likes = serializers.SerializerMethodField()
     mon_like = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
@@ -22,10 +37,14 @@ class ReponseSerializer(serializers.ModelSerializer):
             "auteur_nom",
             "auteur_username",
             "auteur_est_enseignant",
+            "auteur_avatar_url",
             "nb_likes",
             "mon_like",
             "image_url",
         ]
+
+    def get_auteur_avatar_url(self, obj):
+        return _avatar_url(obj.auteur, self.context.get("request"))
 
     def get_image_url(self, obj):
         # `ReponseImage` est une relation séparée (`related_name="images"`),
@@ -64,6 +83,7 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
     auteur_nom = serializers.SerializerMethodField()
     auteur_username = serializers.CharField(source="auteur.username", read_only=True)
     auteur_est_enseignant = serializers.SerializerMethodField()
+    auteur_avatar_url = serializers.SerializerMethodField()
     nb_reponses = serializers.IntegerField(read_only=True)
     reponses = ReponseSerializer(many=True, read_only=True)
     image_url = serializers.SerializerMethodField()
@@ -91,6 +111,7 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
             "auteur_nom",
             "auteur_username",
             "auteur_est_enseignant",
+            "auteur_avatar_url",
             "image_url",
             "audio_url",
         ]
@@ -111,6 +132,9 @@ class QuestionForumDetailSerializer(serializers.ModelSerializer):
             ]
         except Profile.DoesNotExist:
             return False
+
+    def get_auteur_avatar_url(self, obj):
+        return _avatar_url(obj.auteur, self.context.get("request"))
 
     def get_image_url(self, obj):
         if obj.image:
@@ -133,6 +157,7 @@ class QuestionForumListSerializer(serializers.ModelSerializer):
     auteur_nom = serializers.SerializerMethodField()
     auteur_username = serializers.CharField(source="auteur.username", read_only=True)
     auteur_est_enseignant = serializers.SerializerMethodField()
+    auteur_avatar_url = serializers.SerializerMethodField()
     nb_reponses = serializers.IntegerField(read_only=True)
     image_url = serializers.SerializerMethodField()
     audio_url = serializers.SerializerMethodField()
@@ -158,6 +183,7 @@ class QuestionForumListSerializer(serializers.ModelSerializer):
             "auteur_nom",
             "auteur_username",
             "auteur_est_enseignant",
+            "auteur_avatar_url",
             "image_url",
             "audio_url",
         ]
@@ -178,6 +204,9 @@ class QuestionForumListSerializer(serializers.ModelSerializer):
             ]
         except Profile.DoesNotExist:
             return False
+
+    def get_auteur_avatar_url(self, obj):
+        return _avatar_url(obj.auteur, self.context.get("request"))
 
     def get_image_url(self, obj):
         if obj.image:

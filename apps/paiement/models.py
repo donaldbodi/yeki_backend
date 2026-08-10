@@ -158,18 +158,38 @@ class PaiementOlympiade(models.Model):
 
 class AbonnementPremium(models.Model):
     """
-    Abonnement premium d'un apprenant au cursus.
-    1 500 FCFA/mois ou 13 000 FCFA/an.
-    Donne accès aux vidéos, exercices, devoirs, forum et Yeki IA.
+    Abonnement premium d'un apprenant — PAR DÉPARTEMENT (décision
+    explicite, rectifie le modèle global à 2 prix fixes d'origine) : un
+    apprenant peut être abonné à plusieurs départements indépendamment,
+    chacun à son propre prix (`Departement.prix_mensuel`/`prix_annuel`,
+    fixé par l'enseignant administrateur du département, pas une
+    constante globale). Donne accès, DANS CE DÉPARTEMENT, aux vidéos,
+    devoirs et forum (voir `apps.core.services.AccesService`).
+
+    `TARIFS` conservée pour compatibilité/affichage historique — plus la
+    source de vérité d'aucune nouvelle souscription (remplacée par les
+    prix réels du département concerné).
     """
 
     TYPE_CHOICES = [
-        ("mensuel", "Mensuel – 1 500 FCFA"),
-        ("annuel", "Annuel – 13 000 FCFA"),
+        ("mensuel", "Mensuel"),
+        ("annuel", "Annuel"),
     ]
     TARIFS = {"mensuel": 1500, "annuel": 13000}
 
-    utilisateur = models.OneToOneField(User, on_delete=models.CASCADE, related_name="abonnement")
+    utilisateur = models.ForeignKey(User, on_delete=models.CASCADE, related_name="abonnements_premium")
+    # Nullable au niveau DB uniquement pour ne jamais perdre une ligne
+    # héritée d'avant cette migration (règle 5) — une ligne sans
+    # département devient simplement inerte (ne matche plus aucune
+    # vérification par département). Toute NOUVELLE souscription exige
+    # un département (validé côté vue/service, pas ici).
+    departement = models.ForeignKey(
+        "formation.Departement",
+        on_delete=models.CASCADE,
+        related_name="abonnements_premium",
+        null=True,
+        blank=True,
+    )
     type_abonnement = models.CharField(max_length=10, choices=TYPE_CHOICES)
     actif = models.BooleanField(default=True)
     debut = models.DateTimeField(auto_now_add=True)
@@ -180,10 +200,13 @@ class AbonnementPremium(models.Model):
         db_table = "yeki_abonnementpremium"
         ordering = ["-debut"]
         verbose_name = "Abonnement Premium"
+        unique_together = [("utilisateur", "departement")]
 
     def __str__(self):
+        dept = self.departement.nom if self.departement else "—"
         return (
-            f"{self.utilisateur.username} – " f"{self.type_abonnement} (expire {self.fin:%d/%m/%Y})"
+            f"{self.utilisateur.username} – {dept} – "
+            f"{self.type_abonnement} (expire {self.fin:%d/%m/%Y})"
         )
 
     @property

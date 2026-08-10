@@ -133,7 +133,7 @@ class ListeExercicesCoursView(PaginatedListMixin, APIView):
         # exercices 1★/2★ (vitrine), pas au-delà. Filtrage de queryset
         # (pas la permission_class, qui est tout-ou-rien) : voir
         # AccesService.etoiles_max_visibles.
-        seuil = AccesService.etoiles_max_visibles(request.user)
+        seuil = AccesService.etoiles_max_visibles(request.user, cours.departement)
         if seuil is not None:
             exercices = exercices.filter(etoiles__lte=seuil)
 

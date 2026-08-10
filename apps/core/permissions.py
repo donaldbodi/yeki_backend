@@ -31,11 +31,34 @@ class AccesMatricePermission(BasePermission):
         action = getattr(view, "acces_action", "voir")
         return AccesService.peut_soumettre if action == "soumettre" else AccesService.peut_voir
 
+    def _departement_liste(self, request, view):
+        """Résout un département pour les vues LISTE (sans objet) à
+        partir d'un `cours_id` déjà disponible — soit en paramètre
+        d'URL (`cours/<cours_id>/exercices/`, `.../devoirs/`), soit en
+        paramètre de requête optionnel (`/devoirs/?cours_id=`,
+        `/forum/questions/?cours_id=`). Le Premium devient ainsi
+        réellement PAR DÉPARTEMENT dès que le contexte le permet ; sans
+        `cours_id` (ex. liste globale non filtrée), `None` fait retomber
+        `AccesService` sur son filet de sécurité (« premium dans
+        n'importe quel département »), comportement déjà correct."""
+        cours_id = getattr(view, "kwargs", {}).get("cours_id") or getattr(
+            request, "query_params", {}
+        ).get("cours_id")
+        if not cours_id:
+            return None
+        from apps.formation.models import Cours
+
+        try:
+            return Cours.objects.select_related("departement").get(pk=cours_id).departement
+        except (Cours.DoesNotExist, ValueError, TypeError):
+            return None
+
     def has_permission(self, request, view):
         modele = getattr(view, "acces_modele", None)
         if modele is None:
             return True
-        return self._methode(view)(request.user, modele)
+        departement = self._departement_liste(request, view)
+        return self._methode(view)(request.user, modele, departement=departement)
 
     def has_object_permission(self, request, view, obj):
         return self._methode(view)(request.user, obj)

@@ -122,9 +122,13 @@ def test_olympiade_dans_1h_notifie_les_inscrits(user_apprenant):
 
 
 @pytest.mark.django_db
-def test_abonnement_expire_dans_3_jours_notifie_quotidien(user_apprenant):
+def test_abonnement_expire_dans_3_jours_notifie_quotidien(user_apprenant, departement):
+    # Rectification : l'abonnement est désormais PAR DÉPARTEMENT — le
+    # titre de la notification inclut maintenant son nom (un même
+    # apprenant peut avoir plusieurs abonnements distincts à rappeler).
     abonnement = AbonnementPremium.objects.create(
         utilisateur=user_apprenant,
+        departement=departement,
         type_abonnement="mensuel",
         actif=True,
         fin=timezone.now() + timedelta(days=2),
@@ -134,7 +138,7 @@ def test_abonnement_expire_dans_3_jours_notifie_quotidien(user_apprenant):
 
     assert Notification.objects.filter(
         utilisateur=user_apprenant,
-        titre="Abonnement expire dans 3 jours",
+        titre=f"Abonnement « {departement.nom} » expire dans 3 jours",
         objet_id=abonnement.id,
     ).exists()
 

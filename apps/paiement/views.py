@@ -21,7 +21,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from apps.core.exceptions import ConflictError, PaymentRequiredError, InsufficientBalanceError
 from apps.core.models import ParametreSysteme, enregistrer_activite
 from apps.core.pagination import PaginatedListMixin
-from apps.formation.models import Departement
+from apps.formation.models import Cours, Departement
 from apps.paiement.models import (
     Paiement,
     AbonnementPremium,
@@ -36,7 +36,7 @@ from apps.paiement.models import (
 from apps.paiement.providers import CinetPayProvider, ManuelProvider, mode_paiement_actif
 from yeki.permissions import IsAdminGeneral, IsServiceClient
 
-from drf_spectacular.utils import extend_schema, extend_schema_view
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from drf_spectacular.types import OpenApiTypes
 from apps.core.schema_examples import (
     ERREURS_COURANTES,
@@ -209,6 +209,13 @@ class InitierPaiementCinetPayView(APIView):
                 return Response({"detail": "Montant minimum: 500 FCFA"}, status=400)
         except (TypeError, ValueError):
             return Response({"detail": "Montant invalide"}, status=400)
+
+        if type_paiement in ("abonnement_mensuel", "abonnement_annuel") and not departement_id:
+            # Rectification : l'abonnement est désormais PAR DÉPARTEMENT —
+            # aucun département à défaut à deviner.
+            return Response(
+                {"detail": "departement_id est obligatoire pour un abonnement premium."}, status=400
+            )
 
         # ── Créer la transaction ────────────────────────────────
         reference = f"YEKI-{uuid.uuid4().hex[:8].upper()}"
@@ -508,50 +515,64 @@ class HistoriquePaiementsView(PaginatedListMixin, APIView):
 
 @extend_schema_view(
     get=extend_schema(
-        summary="Statut de l'abonnement premium",
+        summary="Statut de l'abonnement premium (par département)",
         description=(
-            "Retourne le statut de l'abonnement premium de l'utilisateur connecté : "
-            "`actif, type_abonnement, debut, fin, jours_restants`. Si aucun "
-            "abonnement n'existe, retourne un statut inactif par défaut "
-            "(`actif=False`, autres champs à `None`/`0`) plutôt qu'une erreur 404."
+            "Retourne le statut de l'abonnement premium de l'utilisateur connecté "
+            "POUR LE DÉPARTEMENT du cours `cours_id` fourni (rectification : "
+            "l'abonnement n'est plus global, il est propre à chaque département) : "
+            "`actif, type_abonnement, debut, fin, jours_restants, departement_id, "
+            "prix_mensuel, prix_annuel, disponible`. `disponible=False` si "
+            "l'administrateur du département n'a fixé aucun prix réel "
+            "(`prix_mensuel`/`prix_annuel` tous deux à 0) — aucun montant inventé, "
+            "pas d'abonnement possible tant que ce n'est pas le cas."
         ),
         tags=["paiement"],
+        parameters=[
+            OpenApiParameter("cours_id", OpenApiTypes.INT, OpenApiParameter.QUERY, required=True)
+        ],
         responses={200: OpenApiTypes.OBJECT},
         examples=[*ERREURS_COURANTES],
     ),
 )
 class StatutAbonnementView(APIView):
     """
-    GET /api/abonnement/statut/
-    Retourne le statut de l'abonnement premium de l'apprenant.
+    GET /api/abonnement/statut/?cours_id=<id>
+    Retourne le statut de l'abonnement premium de l'apprenant DANS le
+    département du cours donné.
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        cours_id = request.query_params.get("cours_id")
+        if not cours_id:
+            return Response({"detail": "cours_id est obligatoire."}, status=400)
+        cours = get_object_or_404(Cours, pk=cours_id)
+        departement = cours.departement
+
+        reponse = {
+            "departement_id": departement.id,
+            "prix_mensuel": departement.prix_mensuel,
+            "prix_annuel": departement.prix_annuel,
+            "disponible": bool(departement.prix_mensuel or departement.prix_annuel),
+        }
+
         try:
-            abo = request.user.abonnement
-            return Response(
+            abo = AbonnementPremium.objects.get(utilisateur=request.user, departement=departement)
+            reponse.update(
                 {
                     "actif": abo.est_actif,
                     "type_abonnement": abo.type_abonnement,
                     "debut": abo.debut,
                     "fin": abo.fin,
                     "jours_restants": max(0, (abo.fin - timezone.now()).days),
-                    "tarifs": AbonnementPremium.TARIFS,
                 }
             )
         except AbonnementPremium.DoesNotExist:
-            return Response(
-                {
-                    "actif": False,
-                    "type_abonnement": None,
-                    "debut": None,
-                    "fin": None,
-                    "jours_restants": 0,
-                    "tarifs": AbonnementPremium.TARIFS,
-                }
+            reponse.update(
+                {"actif": False, "type_abonnement": None, "debut": None, "fin": None, "jours_restants": 0}
             )
+        return Response(reponse)
 
 
 @extend_schema_view(
@@ -688,6 +709,18 @@ class WalletRechargerView(APIView):
 
         # SKU abonnement Premium → activer l'abonnement
         if "premium" in sku:
+            # Rectification : l'abonnement est désormais PAR DÉPARTEMENT —
+            # ce SKU Google Play (catalogue à prix fixe, distinct du flux
+            # principal manuel/CinetPay qui lit déjà les prix réels du
+            # département) exige donc un département cible explicite.
+            departement_id = request.data.get("departement_id")
+            if not departement_id:
+                return Response(
+                    {"detail": "departement_id est obligatoire pour un abonnement premium."},
+                    status=400,
+                )
+            departement = get_object_or_404(Departement, pk=departement_id)
+
             type_abo = "mensuel" if "1500" in sku else "annuel"
             paiement = Paiement.objects.create(
                 utilisateur=request.user,
@@ -699,13 +732,14 @@ class WalletRechargerView(APIView):
             )
             jours = 30 if type_abo == "mensuel" else 365
             try:
-                abo = request.user.abonnement
+                abo = AbonnementPremium.objects.get(utilisateur=request.user, departement=departement)
                 abo.renouveler(type_abo)
                 abo.paiement = paiement
                 abo.save()
             except AbonnementPremium.DoesNotExist:
                 AbonnementPremium.objects.create(
                     utilisateur=request.user,
+                    departement=departement,
                     type_abonnement=type_abo,
                     actif=True,
                     fin=timezone.now() + timedelta(days=jours),
@@ -714,7 +748,7 @@ class WalletRechargerView(APIView):
             return Response(
                 {
                     "statut": "succes",
-                    "detail": f"Abonnement {type_abo} activé.",
+                    "detail": f"Abonnement {type_abo} activé pour {departement.nom}.",
                     "montant": montant,
                 }
             )
@@ -1038,6 +1072,13 @@ class SoumettrePaiementManuelView(APIView):
         departement_id = request.data.get("departement_id")
         if departement_id:
             departement = get_object_or_404(Departement, pk=departement_id)
+        elif categorie == "abonnement":
+            # Rectification : l'abonnement est désormais PAR DÉPARTEMENT —
+            # ce champ, optionnel pour les autres catégories, devient
+            # obligatoire ici (aucun département à défaut à deviner).
+            return Response(
+                {"detail": "departement_id est obligatoire pour un abonnement premium."}, status=400
+            )
 
         # P9.2 : optionnel, uniquement pertinent pour categorie="abonnement"
         # (évite de devoir déduire mensuel/annuel du montant à la

@@ -113,8 +113,17 @@ def user_apprenant_premium(db, departement):
     from apps.paiement.models import AbonnementPremium
 
     user = _creer_utilisateur("apprenant_premium_test", "apprenant", departement=departement)
+    # Rectification : l'abonnement est désormais PAR DÉPARTEMENT — attaché
+    # au MÊME `departement` fixture que `cours`/`exercice`/`devoir`, sans
+    # quoi ce fixture ne débloquerait plus rien (comportement correct du
+    # nouveau modèle, mais casserait tout test utilisant ce fixture pour
+    # éviter un 403 sans rapport avec la matrice d'accès elle-même).
     AbonnementPremium.objects.create(
-        utilisateur=user, type_abonnement="mensuel", actif=True, fin=timezone.now() + timedelta(days=30)
+        utilisateur=user,
+        departement=departement,
+        type_abonnement="mensuel",
+        actif=True,
+        fin=timezone.now() + timedelta(days=30),
     )
     return user
 

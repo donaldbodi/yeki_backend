@@ -210,10 +210,21 @@ class LoginSerializer(serializers.Serializer):
 
 class EnseignantSerializer(serializers.ModelSerializer):
     user = UserSerializer()
+    avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
-        fields = ["id", "user", "user_type"]
+        fields = ["id", "user", "user_type", "avatar"]
+
+    def get_avatar(self, obj):
+        # Même motif que `ProfilDetailSerializer.get_avatar` (règle 1) —
+        # utilisé notamment par `CoursSerializer.enseignant_principal`
+        # (carte enseignant d'un cours, jamais de photo réelle avant ce
+        # ticket, initiales seules).
+        if obj.avatar:
+            request = self.context.get("request")
+            return request.build_absolute_uri(obj.avatar.url) if request else obj.avatar.url
+        return None
 
 
 class EnseignantCadreLightSerializer(serializers.ModelSerializer):

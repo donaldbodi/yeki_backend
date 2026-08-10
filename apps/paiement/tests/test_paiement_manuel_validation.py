@@ -139,36 +139,36 @@ def test_valider_categorie_recharge_credite_le_wallet_sans_commission(
 
 @pytest.mark.django_db
 def test_valider_categorie_abonnement_nouveau_cree_labonnement(
-    client_service_client, user_apprenant
+    client_service_client, user_apprenant, departement
 ):
     demande = _creer_demande(
         user_apprenant.profile, categorie="abonnement", montant=1500,
-        type_abonnement="mensuel", id_transaction="TXN-ABO-NEW",
+        type_abonnement="mensuel", id_transaction="TXN-ABO-NEW", departement=departement,
     )
     response = client_service_client.post(_url_valider(demande.id))
     assert response.status_code == 200
 
-    abo = AbonnementPremium.objects.get(utilisateur=user_apprenant)
+    abo = AbonnementPremium.objects.get(utilisateur=user_apprenant, departement=departement)
     assert abo.est_actif is True
     assert abo.type_abonnement == "mensuel"
 
 
 @pytest.mark.django_db
 def test_valider_categorie_abonnement_existant_renouvelle(
-    client_service_client, user_apprenant
+    client_service_client, user_apprenant, departement
 ):
     AbonnementPremium.objects.create(
-        utilisateur=user_apprenant, type_abonnement="mensuel", actif=True,
+        utilisateur=user_apprenant, departement=departement, type_abonnement="mensuel", actif=True,
         fin=timezone.now() + timedelta(days=2),
     )
     demande = _creer_demande(
         user_apprenant.profile, categorie="abonnement", montant=13000,
-        type_abonnement="annuel", id_transaction="TXN-ABO-RENEW",
+        type_abonnement="annuel", id_transaction="TXN-ABO-RENEW", departement=departement,
     )
     response = client_service_client.post(_url_valider(demande.id))
     assert response.status_code == 200
 
-    abo = AbonnementPremium.objects.get(utilisateur=user_apprenant)
+    abo = AbonnementPremium.objects.get(utilisateur=user_apprenant, departement=departement)
     assert abo.type_abonnement == "annuel"
     assert (abo.fin - timezone.now()).days >= 300
 
