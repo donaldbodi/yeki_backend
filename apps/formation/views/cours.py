@@ -280,12 +280,29 @@ class ApprenantCursusAPIView(PaginatedListMixin, APIView):
         # Récupérer les cours du niveau EXACT de l'apprenant (pas inférieur, pas supérieur)
         cours_qs = Cours.objects.filter(
             departement__in=depts, niveau=niveau_apprenant  # ← Filtre exact sur le niveau
-        ).select_related("enseignant_principal__user")
+        ).select_related("enseignant_principal__user", "departement")
 
         page = self.paginate_queryset(cours_qs)
 
         # Calculer les progressions (uniquement pour la page retournée)
         prog_map = _progression_cours(request.user, page)
+
+        # Accès réel par département — même critère que
+        # `ApprenantDepartementDetailSerializer.get_est_accessible`
+        # (jamais réellement exposé par aucune vue routée jusqu'ici,
+        # confirmé par exploration — corrigé ici pour le Cursus). Un
+        # département cursus non restreint (`acces_restreint=False`,
+        # le cas de tous les départements observés jusqu'ici, rien
+        # n'empêche un admin d'activer ce champ un jour) reste toujours
+        # accessible. Un seul appel groupé, pas une requête par cours.
+        depts_restreints_autorises = set(
+            depts.filter(acces_restreint=True, apprenants_autorises=request.user).values_list(
+                "id", flat=True
+            )
+        )
+
+        def _est_accessible(departement):
+            return (not departement.acces_restreint) or (departement.id in depts_restreints_autorises)
 
         result = []
         for c in page:
@@ -310,6 +327,8 @@ class ApprenantCursusAPIView(PaginatedListMixin, APIView):
                     "color": c.color_code or "#2884A0",
                     "progression": prog_map.get(c.id, 0.0),
                     "niveau": c.niveau,
+                    "departement_id": c.departement_id,
+                    "est_accessible": _est_accessible(c.departement),
                 }
             )
 
