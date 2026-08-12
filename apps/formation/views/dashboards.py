@@ -1,6 +1,6 @@
 import logging
 
-from django.db.models import Avg, F
+from django.db.models import Avg, Count, F, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
@@ -339,9 +339,15 @@ class PrincipalDashboardAPIView(APIView):
         if profile.user_type != "enseignant_principal":
             return Response({"detail": "Accès réservé aux enseignants principaux."}, status=403)
 
-        # Récupérer les cours du principal
-        cours = Cours.objects.filter(enseignant_principal=profile)
-        cours_ids = cours.values_list("id", flat=True)
+        # Récupérer les cours du principal — matérialisé en liste Python UNE
+        # fois (évite que `cours_ids` (un queryset lazy) ne relance une
+        # requête à chaque réutilisation plus bas, contrairement à
+        # l'ancienne version).
+        cours_qs = Cours.objects.filter(enseignant_principal=profile).select_related(
+            "departement__parcours"
+        )
+        cours_list = list(cours_qs)
+        cours_ids = [c.id for c in cours_list]
 
         # Si pas de cours, retourner des données vides
         if not cours_ids:
@@ -365,68 +371,73 @@ class PrincipalDashboardAPIView(APIView):
             )
 
         # Statistiques de base
-        nb_cours = cours.count()
-        nb_lecons = Lecon.objects.filter(cours__in=cours_ids).count()
-        nb_devoirs = Devoir.objects.filter(cours_lie__in=cours_ids).count()
+        nb_cours = len(cours_ids)
+        nb_lecons = Lecon.objects.filter(cours_id__in=cours_ids).count()
+        nb_devoirs = Devoir.objects.filter(cours_lie_id__in=cours_ids).count()
 
         # Compter les apprenants
-        parcours_noms = (
+        parcours_noms = list(
             Departement.objects.filter(cours__in=cours_ids)
             .values_list("parcours__nom", flat=True)
             .distinct()
         )
 
-        apprenants = (
-            Profile.objects.filter(user_type="apprenant", cursus__in=parcours_noms, is_active=True)
+        apprenants_list = list(
+            Profile.objects.filter(
+                user_type="apprenant", cursus__in=parcours_noms, is_active=True
+            )
+            .select_related("user")
             .distinct()
-            .count()
         )
+        apprenants = len(apprenants_list)
 
-        # Taux de rendu global
-        total_rendus = SoumissionDevoir.objects.filter(
-            devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
-            statut__in=["soumis", "corrige", "en_retard"],
-        ).count()
+        # Taux de rendu global / moyenne / retards — une seule requête
+        # agrégée (3 `Count`/`Avg` conditionnels) au lieu de 3 requêtes
+        # séparées.
+        agg = SoumissionDevoir.objects.filter(devoir__cours_lie_id__in=cours_ids).aggregate(
+            total_rendus=Count("id", filter=Q(statut__in=["soumis", "corrige", "en_retard"])),
+            moyenne_globale=Avg("note", filter=Q(note__isnull=False)),
+            retards=Count("id", filter=Q(soumis_le__gt=F("devoir__date_limite"))),
+        )
+        total_rendus = agg["total_rendus"] or 0
+        moyenne_globale = agg["moyenne_globale"] or 0
+        retards = agg["retards"] or 0
         total_attendu = nb_devoirs * apprenants if apprenants > 0 else 1
         taux_rendu = (total_rendus / total_attendu * 100) if total_attendu > 0 else 0
 
-        # Moyenne globale
-        moyenne_globale = (
-            SoumissionDevoir.objects.filter(
-                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
-                note__isnull=False,
-            ).aggregate(Avg("note"))["note__avg"]
-            or 0
-        )
-
-        # Retards
-        retards = SoumissionDevoir.objects.filter(
-            devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
-            soumis_le__gt=F("devoir__date_limite"),
-        ).count()
-
-        # Apprenants à risque
+        # ── Apprenants à risque ──────────────────────────────────────
+        # Root cause du dashboard qui ne charge plus : `Devoir` n'a PAS de
+        # champ `cours` (seulement `cours_lie`, voir modèle) — l'ancienne
+        # ligne `Devoir.objects.filter(cours__in=cours_ids)` levait un
+        # `FieldError` dès qu'AU MOINS UN apprenant réel existait pour ce
+        # principal (la boucle qui l'appelait ne s'exécutait jamais sur un
+        # compte de démo sans apprenant inscrit — d'où "ça marchait avant,
+        # ça casse maintenant que de vrais apprenants existent"). En plus
+        # d'être fausse, cette requête était recalculée IDENTIQUE à chaque
+        # itération (elle ne dépend d'aucune variable de la boucle) —
+        # remplacée ici par `nb_devoirs`, déjà calculé une seule fois
+        # ci-dessus (même valeur, un seul champ correctement nommé).
+        #
+        # Récupère TOUTES les soumissions pertinentes en UNE requête et les
+        # agrège en Python par apprenant, plutôt qu'une requête par
+        # apprenant (l'ancien `O(n)` en boucle).
         apprenants_risque = []
-        for p in Profile.objects.filter(
-            user_type="apprenant", cursus__in=parcours_noms, is_active=True
-        ).select_related("user"):
-            soumissions = SoumissionDevoir.objects.filter(
-                devoir__cours_lie__in=cours_ids,  # NOTE: Vérifiez le nom du champ
-                utilisateur=p.user,
-            )
-            nb_rendus = soumissions.filter(statut__in=["soumis", "corrige", "en_retard"]).count()
-            nb_devoirs_total = Devoir.objects.filter(cours__in=cours_ids).count()
+        if nb_devoirs > 0 and apprenants_list:
+            soumissions_par_user: dict[int, list] = {}
+            for s in SoumissionDevoir.objects.filter(
+                devoir__cours_lie_id__in=cours_ids,
+                utilisateur_id__in=[p.user_id for p in apprenants_list],
+            ).values("utilisateur_id", "statut", "note"):
+                soumissions_par_user.setdefault(s["utilisateur_id"], []).append(s)
 
-            if nb_devoirs_total > 0:
-                taux = nb_rendus / nb_devoirs_total * 100
+            for p in apprenants_list:
+                soums = soumissions_par_user.get(p.user_id, [])
+                nb_rendus_p = sum(1 for s in soums if s["statut"] in ("soumis", "corrige", "en_retard"))
+                taux = nb_rendus_p / nb_devoirs * 100
                 if taux < 50:
-                    moyenne = (
-                        soumissions.filter(note__isnull=False).aggregate(Avg("note"))["note__avg"]
-                        or 0
-                    )
-
+                    notes = [s["note"] for s in soums if s["note"] is not None]
+                    moyenne = (sum(notes) / len(notes)) if notes else 0
                     raison = "Taux de rendu faible" if taux < 30 else "Taux de rendu moyen"
-
                     apprenants_risque.append(
                         {
                             "id": p.id,
@@ -439,27 +450,53 @@ class PrincipalDashboardAPIView(APIView):
                         }
                     )
 
-        # Devoirs par cours
+        # ── Devoirs par cours ────────────────────────────────────────
+        # Même principe : tous les devoirs et toutes les soumissions du
+        # périmètre sont chargés en 2 requêtes puis regroupés en Python,
+        # au lieu d'une requête par cours puis par devoir (l'ancien
+        # `O(cours × devoirs)`). `apprenants_cours` (nb d'apprenants par
+        # parcours) est lui aussi précalculé une seule fois par requête
+        # groupée, plutôt que recompté à chaque itération de cours.
+        devoirs_tous = list(
+            Devoir.objects.filter(cours_lie_id__in=cours_ids).order_by("id")
+        )
+        devoirs_par_cours_id: dict[int, list] = {}
+        for d in devoirs_tous:
+            devoirs_par_cours_id.setdefault(d.cours_lie_id, []).append(d)
+
+        soumissions_par_devoir_id: dict[int, list] = {}
+        for s in SoumissionDevoir.objects.filter(
+            devoir_id__in=[d.id for d in devoirs_tous]
+        ).values("devoir_id", "statut", "soumis_le", "note"):
+            soumissions_par_devoir_id.setdefault(s["devoir_id"], []).append(s)
+
+        apprenants_par_parcours: dict[str, int] = {
+            row["cursus"]: row["n"]
+            for row in Profile.objects.filter(
+                user_type="apprenant", cursus__in=parcours_noms, is_active=True
+            )
+            .values("cursus")
+            .annotate(n=Count("id"))
+        }
+
         devoirs_par_cours = []
-        for c in cours:
+        for c in cours_list:
             try:
-                devoirs = Devoir.objects.filter(cours_lie=c)  # NOTE: Vérifiez le nom du champ
-                nb_devoirs_cours = devoirs.count()
+                devoirs = devoirs_par_cours_id.get(c.id, [])
+                nb_devoirs_cours = len(devoirs)
 
-                apprenants_cours = Profile.objects.filter(
-                    user_type="apprenant",
-                    cursus=(
-                        c.departement.parcours.nom
-                        if c.departement and c.departement.parcours
-                        else ""
-                    ),
-                    is_active=True,
-                ).count()
-
-                rendus_cours = SoumissionDevoir.objects.filter(
-                    devoir__in=devoirs, statut__in=["soumis", "corrige", "en_retard"]
+                parcours_nom_cours = (
+                    c.departement.parcours.nom if c.departement and c.departement.parcours else ""
                 )
-                total_rendus_cours = rendus_cours.count()
+                apprenants_cours = apprenants_par_parcours.get(parcours_nom_cours, 0)
+
+                total_rendus_cours = 0
+                for d in devoirs:
+                    total_rendus_cours += sum(
+                        1
+                        for s in soumissions_par_devoir_id.get(d.id, [])
+                        if s["statut"] in ("soumis", "corrige", "en_retard")
+                    )
                 total_attendu_cours = (
                     nb_devoirs_cours * apprenants_cours if apprenants_cours > 0 else 1
                 )
@@ -472,46 +509,39 @@ class PrincipalDashboardAPIView(APIView):
                 details_devoirs = []
                 for devoir in devoirs:
                     try:
-                        # Date limite avec gestion None
-                        date_limite = None
-                        if devoir.date_limite:
-                            date_limite = devoir.date_limite.isoformat()
+                        soums_devoir = soumissions_par_devoir_id.get(devoir.id, [])
+                        rendus_devoir = [
+                            s for s in soums_devoir if s["statut"] in ("soumis", "corrige", "en_retard")
+                        ]
 
-                        # Retards avec gestion None
+                        date_limite = devoir.date_limite.isoformat() if devoir.date_limite else None
+
                         nb_retards = 0
                         if devoir.date_limite:
-                            nb_retards = rendus_cours.filter(
-                                soumis_le__gt=devoir.date_limite
-                            ).count()
+                            nb_retards = sum(
+                                1
+                                for s in rendus_devoir
+                                if s["soumis_le"] and s["soumis_le"] > devoir.date_limite
+                            )
 
-                        # Note moyenne
-                        note_moyenne = (
-                            rendus_cours.filter(note__isnull=False).aggregate(Avg("note"))[
-                                "note__avg"
-                            ]
-                            or 0
-                        )
+                        notes_devoir = [s["note"] for s in rendus_devoir if s["note"] is not None]
+                        note_moyenne = (sum(notes_devoir) / len(notes_devoir)) if notes_devoir else 0
 
+                        nb_rendus_devoir = len(rendus_devoir)
                         details_devoirs.append(
                             {
                                 "id": devoir.id,
                                 "titre": devoir.titre,
                                 "date_limite": date_limite,
-                                "nb_rendus": rendus_cours.filter(devoir=devoir).count(),
+                                "nb_rendus": nb_rendus_devoir,
                                 "nb_retards": nb_retards,
                                 "taux_rendu": (
-                                    (
-                                        rendus_cours.filter(devoir=devoir).count()
-                                        / apprenants_cours
-                                        * 100
-                                    )
+                                    (nb_rendus_devoir / apprenants_cours * 100)
                                     if apprenants_cours > 0
                                     else 0
                                 ),
                                 "note_moyenne": round(note_moyenne, 1) if note_moyenne else 0,
-                                "type_correction": getattr(
-                                    devoir, "type_correction", "auto"
-                                ),  # NOTE: Vérifiez le nom du champ
+                                "type_correction": devoir.type_correction,
                             }
                         )
                     except Exception:
@@ -618,33 +648,56 @@ class PrincipalApprenantsCoursAPIView(APIView):
             return Response({"detail": "cours_id requis."}, status=400)
 
         try:
-            cours = Cours.objects.get(id=cours_id, enseignant_principal=profile)
+            cours = Cours.objects.select_related("departement__parcours").get(
+                id=cours_id, enseignant_principal=profile
+            )
         except Cours.DoesNotExist:
             return Response({"detail": "Cours non trouvé ou non assigné."}, status=404)
 
+        # Garde défensive (même que `PrincipalDashboardAPIView`) : en
+        # pratique `Cours.departement`/`Departement.parcours` sont tous deux
+        # des FK obligatoires (non nullables) — ce cas n'est donc pas
+        # atteignable via le schéma actuel, confirmé en essayant de le
+        # reproduire en test. Conservée par cohérence avec la vue sœur et
+        # comme filet si le schéma venait à changer, sans coût réel.
+        if not (cours.departement and cours.departement.parcours):
+            return Response([])
+        parcours_nom = cours.departement.parcours.nom
+
         # Récupérer les apprenants du cours via le parcours
-        apprenants = Profile.objects.filter(
-            user_type="apprenant", cursus=cours.departement.parcours.nom, is_active=True
-        ).select_related("user")
+        apprenants = list(
+            Profile.objects.filter(
+                user_type="apprenant", cursus=parcours_nom, is_active=True
+            ).select_related("user")
+        )
+
+        nb_devoirs_total = Devoir.objects.filter(cours_lie=cours).count()
+
+        # Une seule requête pour toutes les soumissions du cours, agrégée en
+        # Python par apprenant — au lieu d'une requête par apprenant.
+        soumissions_par_user: dict[int, list] = {}
+        for s in SoumissionDevoir.objects.filter(
+            devoir__cours_lie=cours, utilisateur_id__in=[a.user_id for a in apprenants]
+        ).values("utilisateur_id", "statut", "soumis_le", "note", "devoir__date_limite"):
+            soumissions_par_user.setdefault(s["utilisateur_id"], []).append(s)
 
         result = []
         for apprenant in apprenants:
-            # Récupérer les soumissions de l'apprenant pour ce cours
-            soumissions = SoumissionDevoir.objects.filter(
-                devoir__cours_lie=cours, utilisateur=apprenant.user
-            )
-
-            nb_rendus = soumissions.filter(statut__in=["soumis", "corrige", "en_retard"]).count()
-            nb_devoirs_total = Devoir.objects.filter(cours_lie=cours).count()
+            soums = soumissions_par_user.get(apprenant.user_id, [])
+            nb_rendus = sum(1 for s in soums if s["statut"] in ("soumis", "corrige", "en_retard"))
             taux_rendu = (nb_rendus / nb_devoirs_total * 100) if nb_devoirs_total > 0 else 0
 
-            moyenne = (
-                soumissions.filter(note__isnull=False).aggregate(Avg("note"))["note__avg"] or 0
+            notes = [s["note"] for s in soums if s["note"] is not None]
+            moyenne = (sum(notes) / len(notes)) if notes else 0
+
+            rendus_dates = [s["soumis_le"] for s in soums if s["soumis_le"]]
+            dernier_rendu = max(rendus_dates) if rendus_dates else None
+
+            nb_retards = sum(
+                1
+                for s in soums
+                if s["soumis_le"] and s["devoir__date_limite"] and s["soumis_le"] > s["devoir__date_limite"]
             )
-
-            dernier_rendu = soumissions.order_by("-soumis_le").first()
-
-            nb_retards = soumissions.filter(soumis_le__gt=F("devoir__date_limite")).count()
 
             result.append(
                 {
@@ -654,7 +707,7 @@ class PrincipalApprenantsCoursAPIView(APIView):
                     "email": apprenant.user.email,
                     "taux_rendu": round(taux_rendu, 1),
                     "moyenne": round(moyenne, 1),
-                    "dernier_rendu": dernier_rendu.soumis_le.isoformat() if dernier_rendu else None,
+                    "dernier_rendu": dernier_rendu.isoformat() if dernier_rendu else None,
                     "nb_retards": nb_retards,
                 }
             )
