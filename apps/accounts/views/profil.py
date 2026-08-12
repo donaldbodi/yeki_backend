@@ -42,10 +42,12 @@ class ProfilMeView(APIView):
         description=(
             "Met à jour les champs modifiables du profil de l'utilisateur "
             "connecté : `first_name`, `last_name`, `email` (sur le compte "
-            "utilisateur), ainsi que `phone`, `bio`, `cursus`, `sub_cursus`, "
-            "`niveau`, `filiere`, `licence` et `avatar` (fichier image, sur le "
-            "profil). Accepte multipart/form-data ou JSON. Tous les champs "
-            "sont optionnels."
+            "utilisateur), ainsi que `phone`, `bio`, `sub_cursus`, `filiere`, "
+            "`licence` et `avatar` (fichier image, sur le profil). Accepte "
+            "multipart/form-data ou JSON. Tous les champs sont optionnels. "
+            "`cursus`/`niveau` sont volontairement EXCLUS (lecture seule, "
+            "demande explicite — aucun utilisateur ne doit pouvoir modifier "
+            "ses informations de scolarité depuis son profil)."
         ),
         tags=["accounts"],
         request=OpenApiTypes.OBJECT,
@@ -75,8 +77,11 @@ class ProfilUpdateView(APIView):
             user.email = data["email"]
         user.save()
 
-        # Champs Profile
-        for field in ["phone", "date_naissance", "bio", "cursus", "sub_cursus", "niveau", "filiere", "licence"]:
+        # Champs Profile — `cursus`/`niveau` volontairement EXCLUS
+        # (lecture seule, demande explicite) : même en contournant le
+        # formulaire Flutter (appel API direct), un utilisateur ne peut
+        # plus modifier ses informations de scolarité.
+        for field in ["phone", "date_naissance", "bio", "sub_cursus", "filiere", "licence"]:
             if field in data:
                 setattr(profile, field, data[field])
 

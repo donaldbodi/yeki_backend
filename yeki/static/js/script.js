@@ -109,10 +109,15 @@ function detectPlatform() {
   }
 }
 
+// Backend réel (Railway) — l'ancienne URL PythonAnywhere pointait vers un
+// hébergeur décommissionné cette session, l'appel échouait silencieusement
+// (catch ci-dessous) et le badge de version restait figé sur son repli.
+const API_BASE_URL = 'https://yekibackend-production.up.railway.app/api';
+
 // Get latest version from API
 async function getLatestVersion() {
   try {
-    const response = await fetch('https://yeki.pythonanywhere.com/api/latest-version/');
+    const response = await fetch(`${API_BASE_URL}/latest-version/`);
     const data = await response.json();
     const version = data.version_name || 'v1.0.3';
     document.querySelectorAll('#appVersion, #footerVersion').forEach(el => {
@@ -131,9 +136,35 @@ function setDownloadLinks() {
   });
 }
 
+// Bouton Desktop : aucun binaire Windows/macOS/Linux n'existe encore
+// (bug corrigé — ce bouton était affiché aux visiteurs desktop SANS
+// jamais recevoir de lien réel). Interroge le backend
+// (`AppVersion`, platform=desktop) : si un vrai binaire y est un jour
+// publié (`download_url` non vide), le bouton devient un vrai lien ;
+// sinon il reste honnêtement marqué "(bientôt)", même traitement déjà
+// appliqué au bouton iOS — jamais un lien mort silencieux.
+async function setupDesktopButton() {
+  const desktopBtn = document.getElementById('downloadDesktopBtn');
+  if (!desktopBtn) return;
+  try {
+    const response = await fetch(`${API_BASE_URL}/latest-version/?platform=desktop`);
+    const data = await response.json();
+    if (data.download_url) {
+      desktopBtn.href = data.download_url;
+    } else {
+      desktopBtn.innerHTML = '<i class="fab fa-windows"></i> Windows (bientôt)';
+      desktopBtn.addEventListener('click', (e) => e.preventDefault());
+    }
+  } catch (e) {
+    desktopBtn.innerHTML = '<i class="fab fa-windows"></i> Windows (bientôt)';
+    desktopBtn.addEventListener('click', (e) => e.preventDefault());
+  }
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
   detectPlatform();
   getLatestVersion();
   setDownloadLinks();
+  setupDesktopButton();
 });
