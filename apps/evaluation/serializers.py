@@ -17,7 +17,30 @@ from apps.evaluation.models import (
     Olympiade,
     InscriptionOlympiade,
     ClassementOlympiade,
+    ParametreClassement,
 )
+
+
+def plancher_coefficient_devoir():
+    """P17.14 : plancher réel du coefficient d'un devoir — poids
+    `ParametreClassement` de la source `etoile_3` (la valeur d'un exercice
+    3 étoiles), jamais une constante en dur (règle 3). Repli sur un
+    plancher minimal si aucune ligne `etoile_3` n'est configurée (ne
+    bloque jamais une valeur absente). Réutilisée par le validateur
+    ci-dessous ET par `CreerDevoirCoursView` (défaut appliqué quand le
+    frontend n'envoie aucun coefficient)."""
+    parametre = ParametreClassement.objects.filter(source="etoile_3").first()
+    return parametre.poids if parametre else 0.1
+
+
+def _valider_coefficient_minimum(value):
+    plancher = plancher_coefficient_devoir()
+    if value < plancher:
+        raise serializers.ValidationError(
+            f"Le coefficient d'un devoir ne peut pas être inférieur à {plancher} "
+            "(valeur d'un exercice 3 étoiles)."
+        )
+    return value
 
 
 class ChoixSerializer(serializers.ModelSerializer):
@@ -185,7 +208,14 @@ class ExerciceSerializer(serializers.ModelSerializer):
 
 
 class ExerciceCreateSerializer(serializers.ModelSerializer):
-    enonce_image = serializers.ImageField(required=False, allow_null=True)
+    # Rectification (demande explicite) : `enonce_image` retiré de
+    # l'écriture — `enonce` est désormais un champ riche (HTML), même
+    # mécanisme que `EnonceDevoir.contenu`, les images éventuelles y sont
+    # insérées inline plutôt que via un champ fichier séparé. Le champ
+    # modèle `Exercice.enonce_image` reste en base (déprécié, données
+    # historiques migrées dans `enonce`, voir migration dédiée) —
+    # `ExerciceSerializer.enonce_image_url` continue de le lire en lecture
+    # seule pour compatibilité descendante.
     exercices_composes = serializers.PrimaryKeyRelatedField(
         queryset=Exercice.objects.all(), many=True, required=False
     )
@@ -203,7 +233,6 @@ class ExerciceCreateSerializer(serializers.ModelSerializer):
             "type_exercice",
             "est_epreuve",
             "exercices_composes",
-            "enonce_image",
         ]
         extra_kwargs = {
             "type_exercice": {"required": False, "default": "general"},
@@ -238,11 +267,7 @@ class ExerciceCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         exercices_composes = validated_data.pop("exercices_composes", [])
-        enonce_image = validated_data.pop("enonce_image", None)
         exercice = Exercice.objects.create(**validated_data)
-        if enonce_image:
-            exercice.enonce_image = enonce_image
-            exercice.save()
         if exercices_composes:
             exercice.exercices_composes.set(exercices_composes)
         return exercice
@@ -602,6 +627,9 @@ class DevoirCreateSerializer(serializers.ModelSerializer):
             "enonces_supplementaires": {"required": False},
         }
 
+    def validate_coefficient(self, value):
+        return _valider_coefficient_minimum(value)
+
     def validate(self, data):
         enonce = data.get("enonce", "").strip()
         if not enonce:
@@ -678,6 +706,9 @@ class DevoirUpdateSerializer(serializers.ModelSerializer):
             "enonce": {"required": False},
             "type_correction": {"required": False},
         }
+
+    def validate_coefficient(self, value):
+        return _valider_coefficient_minimum(value)
 
     def validate(self, data):
         # P7.2, point 1 : `enonce` obligatoire — déjà vrai à la création

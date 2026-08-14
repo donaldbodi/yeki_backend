@@ -58,12 +58,17 @@ class Exercice(models.Model):
         help_text="Exercices composant cette épreuve",
     )
 
-    # Image pour l'énoncé
+    # @deprecated (rectification, demande explicite) : `enonce` est
+    # désormais un champ riche (HTML) où les images s'insèrent inline —
+    # ce champ séparé n'est plus alimenté en écriture par les
+    # serializers de création/modification, conservé en base pour
+    # compatibilité descendante uniquement (données historiques migrées
+    # dans `enonce`, voir migration 0013).
     enonce_image = models.ImageField(
         upload_to="exercices/enonces/",
         null=True,
         blank=True,
-        help_text="Image pour l'énoncé (optionnel)",
+        help_text="@deprecated — image insérée inline dans `enonce` désormais.",
     )
 
     class Meta:
@@ -140,7 +145,12 @@ class Question(models.Model):
 
 class Choix(models.Model):
     question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="choix")
-    texte = models.CharField(max_length=255)
+    # Rectification (demande explicite) : `texte` devient rich-editable
+    # (HTML, comme `Exercice.enonce`/`EnonceDevoir.contenu`) — `CharField`
+    # trop court pour du HTML, passé à `TextField` (aucune perte : les
+    # valeurs existantes, plus courtes que 255 caractères, restent
+    # valides telles quelles).
+    texte = models.TextField()
     # P2.2 : source de vérité pour la bonne réponse d'un QCM (remplace la
     # comparaison texte-à-texte contre Question.bonne_reponse — fragile,
     # cause confirmée du bug de création QCM échouant sur un simple écart
@@ -484,7 +494,9 @@ class QuestionDevoir(models.Model):
 
 class ChoixReponse(models.Model):
     question = models.ForeignKey(QuestionDevoir, on_delete=models.CASCADE, related_name="choix")
-    texte = models.CharField(max_length=500)
+    # Rectification (demande explicite) : rich-editable comme `Choix.texte`
+    # (côté exercice) — voir son commentaire pour le détail.
+    texte = models.TextField()
     est_correct = models.BooleanField(default=False)
     # P2.2 : sans ordre, les choix revenaient dans un ordre non
     # déterministe (cause probable du bug « ajout consécutif de questions

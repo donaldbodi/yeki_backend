@@ -1194,7 +1194,13 @@ class CreerDevoirCoursView(APIView):
         if "tentatives_max" not in data:
             data["tentatives_max"] = 1
         if "coefficient" not in data:
-            data["coefficient"] = 1.0
+            # P17.14 : 1.0 (ancien défaut en dur) peut désormais être
+            # inférieur au plancher réel (poids `etoile_3`) — repli sur ce
+            # même plancher, jamais une valeur fixe qui pourrait à nouveau
+            # devenir invalide si les poids de classement changent.
+            from apps.evaluation.serializers import plancher_coefficient_devoir
+
+            data["coefficient"] = plancher_coefficient_devoir()
         if "type_correction" not in data:
             data["type_correction"] = "auto"
 

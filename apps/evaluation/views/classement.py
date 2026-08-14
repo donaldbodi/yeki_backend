@@ -370,3 +370,27 @@ class RecalculerClassementView(APIView):
                 "apprenants_traites": count,
             }
         )
+
+
+@extend_schema(
+    summary="Coefficient minimum d'un devoir",
+    description=(
+        "P17.14 : renvoie le plancher réel appliqué au coefficient d'un "
+        "devoir à la création/modification (poids `ParametreClassement` "
+        "de la source `etoile_3` — la valeur d'un exercice 3 étoiles) — "
+        "pour que le frontend n'ait jamais à deviner/coder en dur cette "
+        "valeur métier (règle 3)."
+    ),
+    tags=["evaluation"],
+    responses={200: OpenApiTypes.OBJECT},
+)
+class CoefficientDevoirMinimumView(APIView):
+    """GET /api/classement/coefficient-devoir-minimum/"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.evaluation.models import ParametreClassement
+
+        parametre = ParametreClassement.objects.filter(source="etoile_3").first()
+        return Response({"coefficient_min": parametre.poids if parametre else 0.1})

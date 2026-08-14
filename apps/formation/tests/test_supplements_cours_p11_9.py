@@ -103,6 +103,30 @@ def test_lister_supplements_avec_lecon_id_montre_cours_wide_et_lecon(client_ense
 
 
 @pytest.mark.django_db
+def test_lister_supplements_apprenant_gratuit_refuse(client_apprenant, cours_avec_principal):
+    """
+    Rectification (demande explicite) : les suppléments de cours sont
+    désormais réservés Premium — un apprenant sans abonnement actif dans
+    ce département reçoit un 403, plus un accès libre.
+    """
+    SupplementCours.objects.create(cours=cours_avec_principal, titre="Cours-wide", type_contenu="lien", url="https://a.com")
+
+    reponse = client_apprenant.get(f"/api/cours/{cours_avec_principal.id}/supplements/")
+
+    assert reponse.status_code == 403
+
+
+@pytest.mark.django_db
+def test_lister_supplements_apprenant_premium_reussit(client_apprenant_premium, cours_avec_principal):
+    SupplementCours.objects.create(cours=cours_avec_principal, titre="Cours-wide", type_contenu="lien", url="https://a.com")
+
+    reponse = client_apprenant_premium.get(f"/api/cours/{cours_avec_principal.id}/supplements/")
+
+    assert reponse.status_code == 200
+    assert len(reponse.data) == 1
+
+
+@pytest.mark.django_db
 def test_supprimer_supplement_par_principal_reussit(client_enseignant_principal, cours_avec_principal):
     supplement = SupplementCours.objects.create(
         cours=cours_avec_principal, titre="À retirer", type_contenu="lien", url="https://a.com"

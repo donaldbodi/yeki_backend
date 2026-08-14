@@ -56,6 +56,7 @@ from apps.evaluation.views import (
     ClassementPeriodesView,
     MonScoreGlobalView,
     RecalculerClassementView,
+    CoefficientDevoirMinimumView,
     CadreOlympiadesView,
     CadreDevoirsView,
     LierDevoirOlympiadeView,
@@ -281,5 +282,10 @@ urlpatterns = [
     path("classement/mon-score/", MonScoreGlobalView.as_view(), name="mon-score"),
     path(
         "classement/recalculer/", RecalculerClassementView.as_view(), name="recalculer-classement"
+    ),
+    path(
+        "classement/coefficient-devoir-minimum/",
+        CoefficientDevoirMinimumView.as_view(),
+        name="coefficient-devoir-minimum",
     ),
 ]

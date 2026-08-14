@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from drf_spectacular.utils import extend_schema, extend_schema_view
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
 from apps.accounts.models import Profile
@@ -519,19 +519,30 @@ class DepartementNiveauxAPIView(APIView):
         return Response(niveaux_distincts(departement_id))
 
 
-# TODO(audit): vue orpheline, non routée (docs/AUDIT_BACKEND.md §4).
 @extend_schema(
     summary="Lister les cours visibles selon le rôle de l'utilisateur",
     description=(
         "Retourne, paginés, les cours visibles par l'utilisateur connecté selon "
-        "son rôle : tous les cours pour admin/enseignant_admin, les cours du "
-        "département pour un enseignant_cadre, les cours dont il est enseignant "
-        "principal pour un enseignant_principal, ses cours secondaires pour un "
-        "enseignant. Câblée en P9.6 (`GET /cours/`) — alimente l'onglet "
-        "« Tous les cours » de l'administration générale."
+        "son rôle : tous les cours pour admin/enseignant_admin/service_client, "
+        "les cours du département pour un enseignant_cadre, les cours dont il "
+        "est enseignant principal pour un enseignant_principal, ses cours "
+        "secondaires pour un enseignant. Câblée en P9.6 (`GET /cours/`) — "
+        "alimente l'onglet « Tous les cours » de l'administration générale, "
+        "et (filtres `departement_id`/`niveau`) la cascade de sélection de "
+        "cours du Service Client pour affecter un répétiteur."
     ),
     tags=["formation"],
-    parameters=[*PARAMS_PAGINATION],
+    parameters=[
+        *PARAMS_PAGINATION,
+        OpenApiParameter(
+            "departement_id", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False,
+            description="Filtre optionnel par département.",
+        ),
+        OpenApiParameter(
+            "niveau", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False,
+            description="Filtre optionnel par niveau.",
+        ),
+    ],
     responses={200: CoursSerializer(many=True)},
     examples=[EXEMPLE_PAGINATION, *ERREURS_COURANTES],
 )
@@ -544,7 +555,11 @@ def liste_cours(request):
     # puisque la route n'existait pas encore).
     profile = request.user.profile
 
-    if profile.user_type in ["admin", "enseignant_admin"]:
+    # `service_client` reçoit tout, comme admin/enseignant_admin — il n'est
+    # rattaché à aucun département/cours particulier (contrairement aux
+    # autres rôles), et a besoin de parcourir l'ensemble du catalogue pour
+    # affecter un répétiteur au bon cours.
+    if profile.user_type in ["admin", "enseignant_admin", "service_client"]:
         qs = Cours.objects.all()
     elif profile.user_type == "enseignant_cadre":
         qs = Cours.objects.filter(departement__cadre=profile)
@@ -554,6 +569,13 @@ def liste_cours(request):
         qs = profile.cours_secondaires.all()
     else:
         return Response({"error": "Rôle non géré"}, status=status.HTTP_403_FORBIDDEN)
+
+    departement_id = request.query_params.get("departement_id")
+    if departement_id:
+        qs = qs.filter(departement_id=departement_id)
+    niveau = request.query_params.get("niveau")
+    if niveau:
+        qs = qs.filter(niveau=niveau)
 
     paginator = YekiPageNumberPagination()
     page = paginator.paginate_queryset(qs, request)

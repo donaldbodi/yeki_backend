@@ -93,6 +93,7 @@ class CoursSerializer(serializers.ModelSerializer):
             "id",
             "titre",
             "niveau",
+            "matiere",
             # UI / Présentation
             "description_brief",
             "color_code",

@@ -916,6 +916,14 @@ class HistoriqueTentativesExerciceView(PaginatedListMixin, APIView):
         exercice = get_object_or_404(Exercice, id=exercice_id)
         user = request.user
 
+        # P17.15 : « Voir les corrections : Gratuit → 1★ uniquement » —
+        # seuil DISTINCT et plus strict que la vitrine générale (2★).
+        if not AccesService.peut_voir_correction(user, exercice):
+            return Response(
+                {"detail": "Cette fonctionnalité est réservée aux abonnés Premium."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         tentatives = ExerciceTentative.objects.filter(apprenant=user, exercice=exercice).order_by(
             "-tentative_numero"
         )
@@ -975,6 +983,14 @@ class ResultatExerciceView(APIView):
     def get(self, request, exercice_id):
         exercice = get_object_or_404(Exercice, id=exercice_id)
         user = request.user
+
+        # P17.15 : « Voir les corrections : Gratuit → 1★ uniquement » —
+        # seuil DISTINCT et plus strict que la vitrine générale (2★).
+        if not AccesService.peut_voir_correction(user, exercice):
+            return Response(
+                {"detail": "Cette fonctionnalité est réservée aux abonnés Premium."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # Note "officielle" = toujours celle de la dernière tentative
         evaluation = (

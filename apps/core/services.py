@@ -30,6 +30,11 @@ class AccesService:
     # ParametreSysteme.
     ETOILES_VITRINE_GRATUIT = 2
     ETOILES_SOUMISSION_GRATUIT = 1
+    # P17.15 : « Voir les corrections : Gratuit → 1★ uniquement » (CDC
+    # §5.2) — seuil DISTINCT et plus strict que la vitrine générale
+    # (2★, peut_voir) : un exercice 2★ reste visible mais sa correction
+    # ne l'est pas en gratuit.
+    ETOILES_CORRECTION_GRATUIT = 1
 
     @staticmethod
     def _est_apprenant(user) -> bool:
@@ -61,7 +66,7 @@ class AccesService:
         instance — vue liste ; ou un Devoir lié à une olympiade,
         `cours_lie` alors `None`)."""
         from apps.evaluation.models import Exercice, Devoir
-        from apps.formation.models import Lecon
+        from apps.formation.models import Lecon, SupplementCours
 
         if isinstance(objet, Lecon):
             return objet.cours.departement
@@ -69,6 +74,8 @@ class AccesService:
             return objet.cours.departement
         if isinstance(objet, Devoir):
             return objet.cours_lie.departement if objet.cours_lie else None
+        if isinstance(objet, SupplementCours):
+            return objet.cours.departement
         return None
 
     @staticmethod
@@ -95,7 +102,7 @@ class AccesService:
         from apps.evaluation.models import Exercice, Devoir, Olympiade
         from apps.forum.models import QuestionForum
         from apps.repetiteurs.models import Repetiteur
-        from apps.formation.models import Lecon
+        from apps.formation.models import Lecon, SupplementCours
 
         if not cls._est_apprenant(user):
             return True
@@ -122,6 +129,13 @@ class AccesService:
             # Le PDF reste toujours visible en gratuit — seule la vidéo
             # est démasquée séparément, voir peut_voir_video_lecon().
             return True
+        if cls._est_ou_est_classe(objet, SupplementCours):
+            # Rectification (demande explicite) : les suppléments de
+            # cours (PDF/lien/PowerPoint additionnels) sont désormais
+            # réservés Premium — jusqu'ici absents de cette matrice,
+            # accessibles à tout apprenant gratuit (même état que
+            # Devoir/QuestionForum avant leur propre correction).
+            return False
 
         raise TypeError(f"AccesService.peut_voir : type non géré ({type(objet)!r}).")
 
@@ -184,6 +198,19 @@ class AccesService:
             return True
         departement = lecon.cours.departement if lecon is not None else None
         return cls.est_premium(user, departement)
+
+    @classmethod
+    def peut_voir_correction(cls, user, exercice, departement=None) -> bool:
+        """P17.15 : un apprenant gratuit ne peut consulter la CORRECTION
+        (historique de tentatives / résultat détaillé) que d'un exercice
+        1★ — seuil plus strict que `peut_voir` (2★, simple vitrine).
+        Premium (du département de l'exercice si résolvable) : toujours
+        autorisé, comme le reste de la matrice."""
+        if not cls._est_apprenant(user):
+            return True
+        if cls.est_premium(user, departement or cls._resoudre_departement(exercice)):
+            return True
+        return exercice.etoiles <= cls.ETOILES_CORRECTION_GRATUIT
 
 
 def check_role(user, allowed_roles):

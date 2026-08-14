@@ -9,10 +9,19 @@ paths:
     get:
       operationId: api_abonnement_statut_retrieve
       description: 'Retourne le statut de l''abonnement premium de l''utilisateur
-        connecté : `actif, type_abonnement, debut, fin, jours_restants`. Si aucun
-        abonnement n''existe, retourne un statut inactif par défaut (`actif=False`,
-        autres champs à `None`/`0`) plutôt qu''une erreur 404.'
-      summary: Statut de l'abonnement premium
+        connecté POUR LE DÉPARTEMENT du cours `cours_id` fourni (rectification : l''abonnement
+        n''est plus global, il est propre à chaque département) : `actif, type_abonnement,
+        debut, fin, jours_restants, departement_id, prix_mensuel, prix_annuel, disponible`.
+        `disponible=False` si l''administrateur du département n''a fixé aucun prix
+        réel (`prix_mensuel`/`prix_annuel` tous deux à 0) — aucun montant inventé,
+        pas d''abonnement possible tant que ce n''est pas le cas.'
+      summary: Statut de l'abonnement premium (par département)
+      parameters:
+      - in: query
+        name: cours_id
+        schema:
+          type: integer
+        required: true
       tags:
       - paiement
       security:
@@ -1103,6 +1112,27 @@ paths:
                     detail: current_version est requis
                   summary: Réponse 400 — current_version absent ou invalide
           description: ''
+  /api/classement/coefficient-devoir-minimum/:
+    get:
+      operationId: api_classement_coefficient_devoir_minimum_retrieve
+      description: 'P17.14 : renvoie le plancher réel appliqué au coefficient d''un
+        devoir à la création/modification (poids `ParametreClassement` de la source
+        `etoile_3` — la valeur d''un exercice 3 étoiles) — pour que le frontend n''ait
+        jamais à deviner/coder en dur cette valeur métier (règle 3).'
+      summary: Coefficient minimum d'un devoir
+      tags:
+      - evaluation
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/classement/departement/{departement_id}/:
     get:
       operationId: api_classement_departement_retrieve
@@ -1274,13 +1304,24 @@ paths:
     get:
       operationId: api_cours_list
       description: 'Retourne, paginés, les cours visibles par l''utilisateur connecté
-        selon son rôle : tous les cours pour admin/enseignant_admin, les cours du
-        département pour un enseignant_cadre, les cours dont il est enseignant principal
-        pour un enseignant_principal, ses cours secondaires pour un enseignant. Câblée
-        en P9.6 (`GET /cours/`) — alimente l''onglet « Tous les cours » de l''administration
-        générale.'
+        selon son rôle : tous les cours pour admin/enseignant_admin/service_client,
+        les cours du département pour un enseignant_cadre, les cours dont il est enseignant
+        principal pour un enseignant_principal, ses cours secondaires pour un enseignant.
+        Câblée en P9.6 (`GET /cours/`) — alimente l''onglet « Tous les cours » de
+        l''administration générale, et (filtres `departement_id`/`niveau`) la cascade
+        de sélection de cours du Service Client pour affecter un répétiteur.'
       summary: Lister les cours visibles selon le rôle de l'utilisateur
       parameters:
+      - in: query
+        name: departement_id
+        schema:
+          type: integer
+        description: Filtre optionnel par département.
+      - in: query
+        name: niveau
+        schema:
+          type: string
+        description: Filtre optionnel par niveau.
       - in: query
         name: page
         schema:
@@ -6079,9 +6120,11 @@ paths:
       operationId: api_profil_update_partial_update
       description: 'Met à jour les champs modifiables du profil de l''utilisateur
         connecté : `first_name`, `last_name`, `email` (sur le compte utilisateur),
-        ainsi que `phone`, `bio`, `cursus`, `sub_cursus`, `niveau`, `filiere`, `licence`
-        et `avatar` (fichier image, sur le profil). Accepte multipart/form-data ou
-        JSON. Tous les champs sont optionnels.'
+        ainsi que `phone`, `bio`, `sub_cursus`, `filiere`, `licence` et `avatar` (fichier
+        image, sur le profil). Accepte multipart/form-data ou JSON. Tous les champs
+        sont optionnels. `cursus`/`niveau` sont volontairement EXCLUS (lecture seule,
+        demande explicite — aucun utilisateur ne doit pouvoir modifier ses informations
+        de scolarité depuis son profil).'
       summary: Mettre à jour son propre profil
       tags:
       - accounts
@@ -7195,7 +7238,6 @@ components:
       properties:
         texte:
           type: string
-          maxLength: 255
         est_correct:
           type: boolean
       required:
@@ -7208,7 +7250,6 @@ components:
           readOnly: true
         texte:
           type: string
-          maxLength: 500
       required:
       - id
       - texte
@@ -7220,7 +7261,6 @@ components:
           readOnly: true
         texte:
           type: string
-          maxLength: 500
         est_correct:
           type: boolean
       required:
@@ -7236,7 +7276,6 @@ components:
       properties:
         texte:
           type: string
-          maxLength: 500
         est_correct:
           type: boolean
       required:
@@ -7310,6 +7349,9 @@ components:
         niveau:
           type: string
           maxLength: 200
+        matiere:
+          type: string
+          maxLength: 255
         description_brief:
           type: string
           nullable: true
@@ -7943,7 +7985,11 @@ components:
           - $ref: '#/components/schemas/UserTypeEnum'
           - $ref: '#/components/schemas/BlankEnum'
           - $ref: '#/components/schemas/NullEnum'
+        avatar:
+          type: string
+          readOnly: true
       required:
+      - avatar
       - id
       - user
     EnseignantCadreLight:
@@ -8126,10 +8172,6 @@ components:
           type: array
           items:
             type: integer
-        enonce_image:
-          type: string
-          format: uri
-          nullable: true
       required:
       - enonce
       - etoiles
@@ -9241,10 +9283,6 @@ components:
           type: array
           items:
             type: integer
-        enonce_image:
-          type: string
-          format: uri
-          nullable: true
     PatchedLeconUpdate:
       type: object
       properties:
@@ -9754,6 +9792,9 @@ components:
         auteur_est_enseignant:
           type: string
           readOnly: true
+        auteur_avatar_url:
+          type: string
+          readOnly: true
         image_url:
           type: string
           readOnly: true
@@ -9762,6 +9803,7 @@ components:
           readOnly: true
       required:
       - audio_url
+      - auteur_avatar_url
       - auteur_est_enseignant
       - auteur_nom
       - auteur_username
@@ -9840,6 +9882,9 @@ components:
         auteur_est_enseignant:
           type: string
           readOnly: true
+        auteur_avatar_url:
+          type: string
+          readOnly: true
         image_url:
           type: string
           readOnly: true
@@ -9848,6 +9893,7 @@ components:
           readOnly: true
       required:
       - audio_url
+      - auteur_avatar_url
       - auteur_est_enseignant
       - auteur_nom
       - auteur_username
@@ -9982,6 +10028,9 @@ components:
         auteur_est_enseignant:
           type: string
           readOnly: true
+        auteur_avatar_url:
+          type: string
+          readOnly: true
         nb_likes:
           type: string
           readOnly: true
@@ -9992,6 +10041,7 @@ components:
           type: string
           readOnly: true
       required:
+      - auteur_avatar_url
       - auteur_est_enseignant
       - auteur_nom
       - auteur_username

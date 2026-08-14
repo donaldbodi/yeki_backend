@@ -19,6 +19,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiPara
 from drf_spectacular.types import OpenApiTypes
 
 from apps.accounts.models import Profile
+from apps.core.permissions import AccesMatricePermission
 from apps.core.schema_examples import ERREURS_COURANTES, ERREURS_ECRITURE
 from apps.formation.models import Cours, Lecon, SupplementCours
 from apps.formation.serializers import SupplementCoursSerializer
@@ -51,7 +52,12 @@ from yeki.permissions import IsPrincipalDuCours
 class ListerSupplementsCoursView(APIView):
     """GET /api/cours/<cours_id>/supplements/"""
 
-    permission_classes = [IsAuthenticated]
+    # Rectification (demande explicite) : réservé aux abonnés Premium (du
+    # département de ce cours) — `cours_id` déjà dans les kwargs d'URL,
+    # `AccesMatricePermission._departement_liste` le résout automatiquement.
+    permission_classes = [IsAuthenticated, AccesMatricePermission]
+    acces_modele = SupplementCours
+    acces_action = "voir"
 
     def get(self, request, cours_id):
         cours = get_object_or_404(Cours, id=cours_id)

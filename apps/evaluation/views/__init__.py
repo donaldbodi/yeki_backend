@@ -66,4 +66,5 @@ from apps.evaluation.views.classement import (  # noqa: F401
     ClassementPeriodesView,
     MonScoreGlobalView,
     RecalculerClassementView,
+    CoefficientDevoirMinimumView,
 )

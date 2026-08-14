@@ -112,8 +112,17 @@ from yeki.permissions import IsServiceClient
 )
 class RepetiteursSearchView(APIView):
     """
-    GET /api/repetiteurs/search/?matiere=maths&ville=Yaounde&niveau=Terminale
+    GET /api/repetiteurs/search/?cours_id=42&ville=Yaounde
     Recherche des enseignants (principaux et secondaires) par matière.
+
+    Rectification (demande explicite) : "matière" et "niveau" ne sont plus
+    des champs saisis par l'apprenant — la matière est celle du COURS
+    d'où la recherche est ouverte (`cours_id`, dérive `matiere` côté
+    serveur), le niveau est celui du PROFIL de l'apprenant connecté
+    (jamais un texte libre). `matiere`/`niveau` restent acceptés en
+    paramètre direct pour compatibilité (ex. appel sans contexte de
+    cours), mais `cours_id` prime dès qu'il est fourni. Seule "ville"
+    reste un vrai filtre choisi par l'apprenant.
 
     Retourne :
     - nom, matière, tarif (FCFA/mois, ParametreSysteme ou fiche Repetiteur), numéro WhatsApp, ville
@@ -122,18 +131,29 @@ class RepetiteursSearchView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        cours_id = request.query_params.get("cours_id")
         matiere = request.query_params.get("matiere", "").strip().lower()
         ville = request.query_params.get("ville", "").strip().lower()
-        # TODO(bug pré-existant, non corrigé — "déplacer, ne pas réécrire") :
-        # `niveau` est documenté comme paramètre de filtre (voir docstring et
-        # @extend_schema ci-dessus) mais n'est jamais utilisé pour filtrer
-        # les résultats plus bas (repéré en P1.6 via ruff F841) — seul
-        # `matiere`/`ville` filtrent réellement. Le paramètre `niveau` est
-        # donc actuellement sans effet.
-        niveau = request.query_params.get("niveau", "").strip().lower()  # noqa: F841
+
+        if cours_id:
+            cours_contexte = Cours.objects.filter(pk=cours_id).first()
+            if cours_contexte is not None and cours_contexte.matiere:
+                matiere = cours_contexte.matiere.strip().lower()
 
         if not matiere:
-            return Response({"detail": "Le paramètre 'matiere' est requis."}, status=400)
+            return Response({"detail": "Le paramètre 'matiere' ou 'cours_id' est requis."}, status=400)
+
+        # Bug pré-existant corrigé (P1.6, `niveau` lu mais jamais utilisé
+        # pour filtrer — `# noqa: F841`) : dérivé du profil connecté (jamais
+        # un texte libre transmis par le client), réellement appliqué
+        # ci-dessous. Repli sur le paramètre de requête si le profil n'a pas
+        # de niveau renseigné (ex. appel non-apprenant).
+        profile_appelant = getattr(request.user, "profile", None)
+        niveau = (
+            (profile_appelant.niveau or "").strip().lower()
+            if profile_appelant is not None and profile_appelant.niveau
+            else request.query_params.get("niveau", "").strip().lower()
+        )
 
         tarif_defaut = int(ParametreSysteme.get("tarif_repetiteur_mensuel", default=7500))
 
@@ -157,9 +177,13 @@ class RepetiteursSearchView(APIView):
             cours_principaux = Cours.objects.filter(
                 enseignant_principal=profil, matiere__iexact=matiere
             )
+            if niveau:
+                cours_principaux = cours_principaux.filter(niveau__iexact=niveau)
 
             # Cours en tant que secondaire
             cours_secondaires = profil.cours_secondaires.filter(matiere__iexact=matiere)
+            if niveau:
+                cours_secondaires = cours_secondaires.filter(niveau__iexact=niveau)
 
             if cours_principaux.exists() or cours_secondaires.exists():
                 enseigne_matiere = True
