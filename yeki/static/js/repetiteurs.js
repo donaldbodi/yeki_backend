@@ -25,7 +25,7 @@ document.querySelectorAll('#mobileMenu a').forEach(link => {
 });
 
 // API Configuration
-const API_BASE_URL = 'https://yeki.pythonanywhere.com/api';
+const API_BASE_URL = '/api';
 
 // Éléments DOM
 const searchInput = document.getElementById('searchInput');

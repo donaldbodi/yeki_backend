@@ -23,22 +23,15 @@ pytest-cov==6.0.0
 ruff==0.8.6
 black==24.10.0
 
-# Migration hébergement VPS+Coolify — serveur ASGI (HTTP + WebSocket dans un
-# seul process, remplace le WSGI PythonAnywhere), Channels (déjà scaffoldé
-# dans yeki/consumers.py + config/asgi.py, jamais installable jusqu'ici),
-# channel layer Redis (nécessaire dès qu'il y a plus d'un process — le layer
-# mémoire par défaut de Channels ne fonctionne qu'en single-process), et
-# WhiteNoise pour servir les fichiers statiques directement (remplace le
-# mapping de fichiers statiques du tableau de bord PythonAnywhere, qui
-# n'existe plus sur ce nouvel hébergement).
+# Serveur ASGI (HTTP + WebSocket dans un seul process), Channels, channel layer
+# Redis (partage des groupes du forum entre process) et WhiteNoise pour servir
+# les fichiers statiques directement.
 daphne==4.1.2
 channels==4.2.0
 channels-redis==4.2.1
 whitenoise==6.8.2
 
-# Persistance des médias uploadés — Railway ne fournit aucun volume
-# persistant (conteneur recréé à neuf à chaque déploiement, tout média
-# écrit sur `FileSystemStorage` est perdu au déploiement suivant).
+# Médias uploadés : le disque d'un conteneur est effacé à chaque déploiement.
 # Firebase Storage est un bucket Google Cloud Storage standard ;
 # `django-storages[google]` sait déjà s'y connecter avec les MÊMES
 # credentials de service déjà utilisés pour FCM (`FIREBASE_CREDENTIALS_JSON`,

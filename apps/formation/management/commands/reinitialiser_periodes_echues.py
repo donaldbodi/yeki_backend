@@ -12,11 +12,7 @@ avancerait silencieusement une deuxième fois les dates de période) —
 c'est donc cette commande, pas la méthode, qui décide quels départements
 sont réellement échus (`date_fin_periode <= maintenant`).
 
-À planifier côté hébergeur (PythonAnywhere : onglet "Tasks"), quotidien
-— même mécanisme que `apps/core/management/commands/envoyer_rappels.py`,
-cette commande ne s'auto-planifie pas elle-même, aucun scheduler
-n'existe dans le code (action manuelle, documentée, hors de portée du
-code applicatif).
+Planifiée sur le VPS par `deploy/taches.cron`.
 """
 
 from django.core.management.base import BaseCommand

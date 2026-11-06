@@ -4,38 +4,29 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = False
 
-# Liste extensible par variable d'environnement (`env.list`, django-environ) —
-# permet d'ajouter le domaine du nouvel hébergement VPS+Coolify sans nouveau
-# déploiement de code, juste une variable d'env côté Coolify. Les 2 valeurs
-# historiques restent le défaut (compatibilité PythonAnywhere le temps de la
-# bascule).
-ALLOWED_HOSTS = env.list(
-    "ALLOWED_HOSTS", default=["yeki.pythonanywhere.com", "http://localhost:64940"]
-)
+# Liste extensible par variable d'environnement (`env.list`, django-environ).
+# Sur le VPS, docker-compose.prod.yml la renseigne à partir de `DOMAIN`.
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
-# PythonAnywhere termine le HTTPS sur SON propre reverse proxy et transmet
-# ensuite la requête à ce process WSGI en HTTP interne (`X-Forwarded-Proto`
-# porte le protocole d'origine) — sans cette ligne, Django ne sait pas s'y
-# fier et `request.is_secure()`/`request.scheme` retombent sur l'interne
-# (`http`). Conséquence concrète, root cause probable des médias forum/PDF
-# de leçon qui ne s'affichent jamais côté client (Firebase Hosting, servi en
-# HTTPS) : `request.build_absolute_uri()` (utilisé par tous les champs
-# `*_url` des serializers forum/leçon) génère des URLs `http://...` — le
-# navigateur les bloque comme contenu mixte (HTTPS→HTTP), un blocage
-# similaire au CORS déjà corrigé mais avec une cause différente et non
-# résolue par ce correctif-là. Fix standard documenté par PythonAnywhere
-# lui-même pour les apps Django derrière leur proxy.
+# Admin Django en HTTPS derrière le proxy Caddy : l'origine doit être déclarée
+# explicitement pour que le formulaire de connexion passe la vérification
+# CSRF (Django ≥ 4). Dérivé d'ALLOWED_HOSTS pour n'avoir qu'une variable à
+# maintenir.
+CSRF_TRUSTED_ORIGINS = [
+    f"https://*{host}" if host.startswith(".") else f"https://{host}"
+    for host in ALLOWED_HOSTS
+    if host != "*"
+]
+
+# Caddy termine le HTTPS et transmet la requête à Daphne en HTTP interne, le
+# protocole d'origine étant porté par `X-Forwarded-Proto`. Sans cette ligne,
+# `request.build_absolute_uri()` (champs `*_url` des serializers, URLs CinetPay)
+# génère des URLs `http://...`, bloquées comme contenu mixte par le navigateur.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-# ── Channels (WebSocket) — migration hébergement VPS+Coolify ────────────────
-# `config/asgi.py` construit déjà le `ProtocolTypeRouter` (http+websocket) —
-# ces 2 réglages sont ce qui manquait pour qu'il soit RÉELLEMENT chargé (un
-# serveur ASGI, Daphne, au lieu du WSGI PythonAnywhere) et pour que le
-# `channel_layer` utilisé par `yeki/consumers.py` (`ForumConsumer`,
-# `group_send`/`group_add`) ait un backend partagé entre process — le layer
-# mémoire par défaut de Channels ne fonctionne qu'en single-process, jamais
-# fiable dès qu'il y a plusieurs workers/replicas.
-ASGI_APPLICATION = "config.asgi.application"
+# ── Channels (WebSocket) ────────────────────────────────────────────────────
+# Redis partage les groupes du forum entre process : la couche mémoire de
+# `base.py` ne fonctionne qu'en single-process.
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -45,16 +36,10 @@ CHANNEL_LAYERS = {
     }
 }
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": env("DB_NAME"),
-        "USER": env("DB_USER"),
-        "PASSWORD": env("DB_PASSWORD"),
-        "HOST": env("DB_HOST"),
-        "PORT": env("DB_PORT", default="5432"),
-    }
-}
+# `DATABASE_URL` vient de docker-compose.prod.yml. Pas de `CONN_MAX_AGE` : Django
+# exige des connexions non persistantes sous ASGI, où chaque requête tourne dans
+# son propre thread — elles s'accumuleraient jusqu'à saturer `max_connections`.
+DATABASES = {"default": env.db("DATABASE_URL")}
 
 # ── HTTPS strict / HSTS / cookies sécurisés ─────────────────────────────────
 SECURE_SSL_REDIRECT = True
@@ -69,10 +54,8 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 
 # ── Stockage des médias — Firebase Storage ───────────────────────────────
-# Railway ne fournit aucun volume persistant (confirmé : aucun
-# `railway.json`/volume configuré) — chaque redéploiement recrée un
-# conteneur avec un système de fichiers vierge, ce qui efface tout média
-# uploadé (`FileSystemStorage`, le défaut hérité de `base.py`). Firebase
+# Le disque du conteneur est effacé à chaque déploiement : les médias vivent
+# donc hors du VPS (`FileSystemStorage`, le défaut de `base.py`, les perdrait). Firebase
 # Storage est un bucket Google Cloud Storage standard : `django-storages`
 # sait déjà s'y connecter nativement (backend `gcloud`), et le même compte
 # de service déjà utilisé pour FCM (`FIREBASE_CREDENTIALS_JSON`, voir

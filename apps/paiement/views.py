@@ -8,6 +8,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
 
@@ -231,8 +232,10 @@ class InitierPaiementCinetPayView(APIView):
         # ── Préparer les données pour CinetPay ──────────────────
         site_id = settings.CINETPAY_SITE_ID
         api_key = settings.CINETPAY_API_KEY
-        notify_url = "https://yeki.pythonanywhere.com/api/paiements/cinetpay/notify/"
-        return_url = "https://yeki.pythonanywhere.com/payment-result/"
+        # Dérivées de la requête (domaine réel, HTTPS via SECURE_PROXY_SSL_HEADER) :
+        # aucune URL en dur qui pointerait vers un serveur périmé.
+        notify_url = request.build_absolute_uri(reverse("cinetpay-webhook"))
+        return_url = request.build_absolute_uri("/payment-result/")
 
         # Construire le payload
         payment_data = {

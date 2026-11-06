@@ -1,4 +1,4 @@
-# Migration hébergement VPS+Coolify — exclut du build tout ce qui n'a pas sa
+# Exclut du build tout ce qui n'a pas sa
 # place dans l'image (secrets, venv local, artefacts déjà gitignorés mais
 # encore présents sur le disque, données montées séparément en volume).
 .git/
@@ -14,3 +14,5 @@ media/
 htmlcov/
 .pytest_cache/
 .ruff_cache/
+backups/
+deploy/

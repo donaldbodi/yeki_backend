@@ -37,6 +37,35 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pytest --cov=apps --cov-report=term-missing
 
+  # Déploiement sur le VPS OVH : uniquement sur `main`, et seulement si les
+  # tests passent. Sans le secret VPS_HOST, le job est ignoré. Secrets de dépôt
+  # à créer : VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_KNOWN_HOSTS (voir
+  # docs/MIGRATION_OVH.md).
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency: deploy-vps
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.VPS_HOST != ''
+      - name: Configurer SSH
+        if: env.VPS_HOST != ''
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Déployer
+        if: env.VPS_HOST != ''
+        run: sh deploy/deployer.sh "$VPS_USER@$VPS_HOST"
+
   secrets:
     runs-on: ubuntu-latest
     steps:

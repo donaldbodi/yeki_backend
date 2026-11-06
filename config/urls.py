@@ -27,22 +27,8 @@ urlpatterns = [
     path("api/", include("apps.ia.urls")),
     path("api/", include("apps.notifications.urls")),
     path("api/", include("apps.repetiteurs.urls")),
-    # Bug corrigé (CORS sur les médias forum/leçons en production) :
-    # `django.conf.urls.static.static()` ne génère AUCUNE route dès que
-    # `DEBUG=False` (comportement documenté de Django, par sécurité/perf —
-    # voir sa source : `if not settings.DEBUG: return []`). En production,
-    # `/media/...` est donc actuellement servi entièrement par le mapping
-    # de fichiers statiques de PythonAnywhere (hors de Django), qui ne
-    # transmet JAMAIS les en-têtes CORS (confirmé en prod : la console
-    # navigateur montre « No 'Access-Control-Allow-Origin' header is
-    # present » précisément sur ces requêtes média, alors que les mêmes
-    # requêtes vers `/api/...` reçoivent bien leurs en-têtes CORS via
-    # `CorsMiddleware`). Route explicite, systématique (pas conditionnée
-    # par `DEBUG`), pour que ces requêtes passent enfin par Django/
-    # `CorsMiddleware` — nécessite EN PLUS de retirer/ajuster le mapping
-    # `/media/` du tableau de bord PythonAnywhere (onglet Web → Static
-    # files), sans quoi PythonAnywhere continue d'intercepter ces requêtes
-    # avant qu'elles n'atteignent Django (hors de portée d'un simple
-    # correctif de code, action pour l'utilisateur — voir docs/MIGRATIONS_APPS.md).
+    # Route explicite, non conditionnée par `DEBUG` : `static()` n'en génère aucune
+    # dès que `DEBUG=False`, et ces requêtes doivent passer par `CorsMiddleware`
+    # pour recevoir leurs en-têtes CORS.
     re_path(r"^media/(?P<path>.*)$", serve_static, {"document_root": settings.MEDIA_ROOT}),
 ]

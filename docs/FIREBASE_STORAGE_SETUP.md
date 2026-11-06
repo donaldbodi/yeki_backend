@@ -4,11 +4,10 @@ Ce document décrit les actions à effectuer dans la console Firebase/Google
 Cloud (aucune ne peut être faite depuis ce dépôt ni par un agent sans accès
 à ces consoles) pour que la migration du stockage média
 (`django-storages[google]`, `config/settings/production.py`) fonctionne
-réellement en production sur Railway.
+réellement en production sur le VPS OVH.
 
-**Pourquoi cette migration existe** : Railway ne fournit aucun volume
-persistant — chaque redéploiement recrée le conteneur avec un système de
-fichiers vierge. Tout média uploadé (avatars, images de département, PDF de
+**Pourquoi cette migration existe** : le disque d'un conteneur est effacé à
+chaque déploiement. Tout média uploadé (avatars, images de département, PDF de
 leçon, etc.) sur `FileSystemStorage` (le défaut) est donc perdu au
 redéploiement suivant. Le code bascule désormais sur Firebase Storage (un
 bucket Google Cloud Storage standard) via `django-storages`, en réutilisant
@@ -48,8 +47,8 @@ Hosting — confirmé dans `docs/FIREBASE_SETUP.md` côté frontend).
 Seulement si le nom relevé à l'étape 2 est différent de
 `yeki-84b1a.appspot.com` :
 
-1. Dashboard Railway → service backend → onglet **Variables**.
-2. Ajouter une nouvelle variable : `FIREBASE_STORAGE_BUCKET` = le nom
+1. Sur le VPS, ouvrir `/opt/yeki/.env`.
+2. Renseigner `FIREBASE_STORAGE_BUCKET` avec le nom
    exact relevé (ex. `yeki-84b1a.firebasestorage.app`), **sans**
    `gs://` devant.
 3. Si le nom correspond déjà à la valeur par défaut : rien à faire,
@@ -88,7 +87,7 @@ signale une erreur de permission à l'**écriture** :
 2. Repérer le compte de service dont l'adresse ressemble à
    `firebase-adminsdk-xxxxx@yeki-84b1a.iam.gserviceaccount.com` — c'est
    le même compte que celui dont la clé JSON est déjà utilisée dans la
-   variable d'environnement `FIREBASE_CREDENTIALS_JSON` de Railway
+   variable d'environnement `FIREBASE_CREDENTIALS_JSON` du VPS
    (utilisée aussi pour les notifications push).
 3. Si son rôle actuel ne couvre pas l'écriture sur Storage : cliquer sur
    le crayon d'édition → **Ajouter un autre rôle** → **Storage Object
@@ -96,25 +95,17 @@ signale une erreur de permission à l'**écriture** :
 
 ## Étape 6 — Redéployer puis vérifier
 
-1. Un changement de variable d'environnement sur Railway déclenche
-   normalement un redéploiement automatique du service. Sinon : bouton
-   **Redeploy** du service depuis le dashboard Railway.
+1. Après un changement de `/opt/yeki/.env`, appliquer sur le VPS :
+   `cd /opt/yeki && docker compose -f docker-compose.prod.yml up -d`.
 2. Une fois le déploiement terminé, exécuter la commande de vérification
    dédiée (voir ci-dessous) — elle confirme en un seul passage l'écriture,
    la lecture publique ET nettoie après elle, sans dépendre d'un upload
    manuel dans l'app :
 
    ```bash
-   python manage.py verifier_stockage_medias
+   docker compose -f docker-compose.prod.yml exec web python manage.py verifier_stockage_medias
    ```
 
-   - Depuis le dashboard Railway, si l'option d'exécuter une commande
-     ponctuelle est disponible pour votre plan.
-   - Sinon, en local, temporairement, avec les vraies variables
-     d'environnement de production (`DJANGO_SETTINGS_MODULE=config.
-     settings.production`, et les mêmes `FIREBASE_CREDENTIALS_JSON`/
-     `FIREBASE_STORAGE_BUCKET` que Railway) — ne jamais committer ces
-     valeurs, les retirer de l'environnement local une fois le test fait.
 
    La commande indique clairement, à chaque échec, à quelle étape de ce
    guide revenir (403 à l'écriture → étape 5 ; 403 à la lecture de
@@ -124,6 +115,6 @@ signale une erreur de permission à l'**écriture** :
    vraie image (photo de profil ou image de département), noter l'URL
    renvoyée (doit commencer par `https://storage.googleapis.com/...`,
    plus par le domaine de l'API), puis déclencher un nouveau
-   déploiement Railway (n'importe quel prochain push suffit) et
+   déploiement (n'importe quel prochain push suffit) et
    recharger cette même image : elle doit toujours s'afficher — la
    preuve concrète que les médias ne sont plus perdus au déploiement.

@@ -1,13 +1,10 @@
-# Migration hébergement VPS+Coolify (voir plan de migration, ticket
-# "Migration hébergement backend : PythonAnywhere → VPS Hetzner + Coolify").
 # Image de production : sert HTTP + WebSocket dans le même process via
-# Daphne (serveur ASGI officiel de Channels) — PythonAnywhere ne servait que
-# du WSGI, ce qui empêchait tout WebSocket (voir docs/FORUM_TEMPS_REEL.md).
-
+# Daphne (serveur ASGI officiel de Channels), derrière Caddy (voir
+# docker-compose.prod.yml).
 FROM python:3.13-slim
 
 # Pas de .pyc/.pyo persistés dans l'image (inutiles, alourdissent) ; sortie
-# non bufferisée pour que les logs apparaissent immédiatement dans Coolify.
+# non bufferisée pour que les logs apparaissent immédiatement dans `docker compose logs`.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.production
@@ -27,6 +24,5 @@ RUN chmod +x entrypoint.sh
 
 # `migrate`/`collectstatic` tournent à chaque démarrage de conteneur (pas au
 # build) — nécessitent les variables d'environnement réelles (SECRET_KEY,
-# DB_*...), qui n'existent qu'à l'exécution côté Coolify, pas au moment du
-# build de l'image.
+# DATABASE_URL...), qui n'existent qu'à l'exécution, pas au build de l'image.
 ENTRYPOINT ["./entrypoint.sh"]

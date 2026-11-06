@@ -1,10 +1,10 @@
-"""Stockage de fichiers statiques — migration hébergement (Railway/WhiteNoise).
+"""Stockage de fichiers statiques (WhiteNoise).
 
 `CompressedManifestStaticFilesStorage` (le stockage WhiteNoise par défaut,
 utilisé via `STORAGES["staticfiles"]`) est STRICT par construction : il
 lève une `ValueError` à l'exécution dès qu'un template référence, via
 `{% static %}`, un fichier absent du manifeste — donc absent du disque au
-moment de `collectstatic`. Révélé en migrant vers Railway (1er hébergement
+moment de `collectstatic`. Révélé par le premier déploiement réel (1er contexte
 où `DEBUG=False` ET ce stockage strict cohabitent réellement) : la page
 d'accueil (`yeki/templates/landing-page.html`) référence une image
 décorative (`images/about-illustration.svg`) qui n'a jamais existé dans le
@@ -31,8 +31,8 @@ class LenientManifestStaticFilesStorage(CompressedManifestStaticFilesStorage):
         # est absent du disque LUI-MÊME (jamais livré) — `hashed_name()`
         # (calculé le hash à partir du contenu réel) lève sa propre
         # `ValueError` de façon INCONDITIONNELLE dans ce cas, sans jamais
-        # consulter `manifest_strict`. Confirmé en production (Railway,
-        # 1er hébergement où ce chemin de code est réellement exercé).
+        # consulter `manifest_strict`. Confirmé en production,
+        # où ce chemin de code est réellement exercé.
         try:
             return super().hashed_name(name, content, filename)
         except ValueError:

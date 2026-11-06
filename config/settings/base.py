@@ -21,9 +21,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # depuis l'environnement, jamais codées en dur.
 # En local : copier .env.example vers .env à la racine du projet (à côté de
 # manage.py) et renseigner les valeurs réelles (jamais commité, voir .gitignore).
-# En production (PythonAnywhere) : définir les variables directement dans la
-# configuration de l'environnement du serveur ; le fichier .env n'est alors
-# pas nécessaire (read_env() ignore silencieusement son absence).
+# En production : les variables viennent de l'environnement du conteneur
+# (docker-compose.prod.yml) ; read_env() ignore silencieusement l'absence de .env.
 env = environ.Env()
 environ.Env.read_env(str(BASE_DIR / ".env"))
 
@@ -39,7 +38,6 @@ SECRET_KEY = env("SECRET_KEY")
 # doivent réellement différer par environnement.
 
 CORS_ALLOWED_ORIGINS = [
-    "https://yeki.pythonanywhere.com",
     "http://localhost:64940",
     "https://yeki-84b1a.web.app",
 ]
@@ -78,13 +76,16 @@ INSTALLED_APPS = [
 # tierces ci-dessus pour garder cette contrainte d'ordre visible et isolée.
 INSTALLED_APPS = ["daphne", "channels"] + INSTALLED_APPS
 
+# Couche mémoire : suffit en développement et en test (un seul process).
+# `production.py` la remplace par Redis.
+ASGI_APPLICATION = "config.asgi.application"
+CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # WhiteNoise juste après SecurityMiddleware (position exigée par sa propre
     # documentation) — sert les fichiers statiques directement depuis Daphne,
-    # sans dépendre d'un Nginx séparé ni du mapping de fichiers statiques du
-    # tableau de bord PythonAnywhere (qui n'existe plus sur ce nouvel
-    # hébergement VPS+Coolify).
+    # sans dépendre d'un serveur de fichiers séparé.
     "whitenoise.middleware.WhiteNoiseMiddleware",
     # CorsMiddleware doit être le plus haut possible et impérativement avant
     # CommonMiddleware (exigence django-cors-headers) : sinon les réponses
@@ -233,8 +234,8 @@ MEDIA_ROOT = BASE_DIR / "media"
 # (compression + hash de cache-busting dans le nom de fichier). `default`
 # (médias uploadés) reste le stockage disque classique ICI (dev/tests) —
 # `config/settings/production.py` le surcharge vers Firebase Storage
-# (Railway ne fournit aucun volume persistant : ce `FileSystemStorage`
-# écrirait sur un disque de conteneur effacé au prochain déploiement).
+# (le `FileSystemStorage` écrirait sur le disque du conteneur, effacé à chaque
+# déploiement).
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",

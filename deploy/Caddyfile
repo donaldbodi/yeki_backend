@@ -1,0 +1,9 @@
+# Certificat HTTPS automatique et renouvelé par Caddy. `reverse_proxy` gère
+# nativement l'upgrade WebSocket et transmet X-Forwarded-Proto/For à Daphne.
+# Pas de directive `log` : les journaux d'accès de Caddy contiennent les en-têtes
+# de requête, dont Sec-WebSocket-Protocol, qui porte le jeton du forum.
+
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy web:8000
+}

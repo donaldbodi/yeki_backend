@@ -38,9 +38,19 @@ from apps.forum.serializers import (
         summary="Détail d'une question du forum",
         description=(
             "Retourne une question du forum avec toutes ses réponses (triées de "
-            "la plus récente à la plus ancienne) et incrémente son compteur de vues."
+            "la plus récente à la plus ancienne) et incrémente son compteur de vues, "
+            "sauf avec `sans_vue=1` (rechargement déclenché par le temps réel)."
         ),
         tags=["forum"],
+        parameters=[
+            OpenApiParameter(
+                "sans_vue",
+                OpenApiTypes.STR,
+                OpenApiParameter.QUERY,
+                required=False,
+                description="'1' pour ne pas compter ce chargement comme une vue.",
+            ),
+        ],
         responses={200: QuestionForumDetailSerializer},
         examples=[*ERREURS_COURANTES],
     ),
@@ -74,11 +84,12 @@ class DetailQuestionView(APIView):
             return Response({"detail": "Question introuvable."}, status=404)
         self.check_object_permissions(request, question)
 
-        # Incrémenter les vues de manière atomique
-        QuestionForum.objects.filter(pk=pk).update(nb_vues=F("nb_vues") + 1)
+        if request.query_params.get("sans_vue") != "1":
+            # Incrémenter les vues de manière atomique
+            QuestionForum.objects.filter(pk=pk).update(nb_vues=F("nb_vues") + 1)
 
-        # Forcer le rafraîchissement pour obtenir le nouveau nb_vues
-        question.refresh_from_db()
+            # Forcer le rafraîchissement pour obtenir le nouveau nb_vues
+            question.refresh_from_db()
 
         # Sérialiser
         serializer = QuestionForumDetailSerializer(question, context={"request": request})
@@ -261,17 +272,15 @@ class ListeQuestionsView(PaginatedListMixin, APIView):
         )
 
 
-# Sondage incrémental (repli WebSocket) suite à l'abandon du temps réel :
-# PythonAnywhere ne supporte pas les WebSockets (voir docs/FORUM_TEMPS_REEL.md).
-# `room` est soit un cours_id numérique, soit le littéral "global" (même
-# convention que l'ancien yeki/consumers.py, jamais branché).
+# Sondage incrémental : repli du client quand le WebSocket du forum est
+# indisponible (voir docs/FORUM_TEMPS_REEL.md). `room` est soit un cours_id
+# numérique, soit le littéral "global".
 @extend_schema_view(
     get=extend_schema(
         summary="Sondage incrémental des nouveaux messages du forum",
         description=(
-            "Mécanisme de repli au sondage (polling) remplaçant le temps réel "
-            "WebSocket, non supporté par l'hébergeur PythonAnywhere (voir "
-            "docs/FORUM_TEMPS_REEL.md). Le client interroge périodiquement cet "
+            "Mécanisme de repli au sondage (polling) quand le WebSocket du forum "
+            "est indisponible (voir docs/FORUM_TEMPS_REEL.md). Le client interroge périodiquement cet "
             "endpoint en passant le paramètre `since` (date/heure ISO 8601 de la "
             "dernière synchronisation) pour récupérer uniquement les nouvelles "
             "questions et les identifiants des questions ayant reçu de nouvelles "

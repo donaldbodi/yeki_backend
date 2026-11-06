@@ -1,0 +1,81 @@
+# Production sur le VPS OVH (voir docs/MIGRATION_OVH.md).
+# Seul Caddy publie des ports : Postgres, Redis et Daphne restent sur le réseau
+# interne Docker, jamais exposés à Internet.
+
+name: yeki
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN manquant dans .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ALLOWED_HOSTS: ${DOMAIN}
+      DOMAIN: ${DOMAIN}
+      DATABASE_URL: postgres://yeki:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}@db:5432/yeki
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # En-têtes requis : sans eux, Django répond 301 (SECURE_SSL_REDIRECT) ou 400
+    # (ALLOWED_HOSTS), et le conteneur serait faussement marqué en échec.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os, urllib.request as u
+          u.urlopen(u.Request("http://127.0.0.1:8000/", headers={"Host": os.environ["DOMAIN"], "X-Forwarded-Proto": "https"}), timeout=5)
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yeki
+      POSTGRES_USER: yeki
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yeki -d yeki"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Uniquement la couche de messages du WebSocket : rien à persister.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:

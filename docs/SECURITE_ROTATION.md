@@ -35,7 +35,7 @@ production. Voir `.env.example` pour la liste des clés attendues.
    python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
    ```
 2. Mettre à jour `SECRET_KEY` dans le `.env` local ET dans la configuration
-   d'environnement du serveur de production (PythonAnywhere).
+   d'environnement du serveur de production (`/opt/yeki/.env` sur le VPS).
 3. Redéployer / redémarrer l'application.
 
 **Conséquence directe :** `SECRET_KEY` signe les sessions Django et les

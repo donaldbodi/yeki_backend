@@ -4,3 +4,9 @@
 # démarrage du conteneur, erreur trompeuse qui masque la vraie cause).
 entrypoint.sh text eol=lf
 Dockerfile text eol=lf
+
+# Même risque pour tout ce qui part sur le VPS (`git archive` depuis Windows
+# applique aussi la conversion CRLF).
+*.sh text eol=lf
+docker-compose*.yml text eol=lf
+deploy/* text eol=lf

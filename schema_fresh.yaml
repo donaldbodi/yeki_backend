@@ -3521,7 +3521,7 @@ paths:
     get:
       operationId: api_forum_messages_retrieve
       description: Mécanisme de repli au sondage (polling) remplaçant le temps réel
-        WebSocket, non supporté par l'hébergeur PythonAnywhere (voir docs/FORUM_TEMPS_REEL.md).
+        WebSocket, quand il est indisponible (voir docs/FORUM_TEMPS_REEL.md).
         Le client interroge périodiquement cet endpoint en passant le paramètre `since`
         (date/heure ISO 8601 de la dernière synchronisation) pour récupérer uniquement
         les nouvelles questions et les identifiants des questions ayant reçu de nouvelles

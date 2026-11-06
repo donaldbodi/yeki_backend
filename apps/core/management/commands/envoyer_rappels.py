@@ -3,9 +3,7 @@ P10.3 — commande de gestion des rappels (CDC_BACKEND §9.1.1) :
 - `--horaire` : devoir dans 1 h · olympiade démarre dans 1 h.
 - `--quotidien` : devoir dans 24 h · abonnement expire dans 3 jours.
 
-À planifier côté hébergeur (PythonAnywhere : onglet "Tasks") — cette
-commande ne s'auto-planifie pas elle-même, aucun scheduler n'existe dans
-le code (action manuelle, documentée, hors de portée du code applicatif).
+Planifiée sur le VPS par `deploy/taches.cron`.
 
 Idempotence : réutilise le modèle `Notification` existant comme registre
 "déjà notifié" (titre + objet_id + objet_type + utilisateur) plutôt que

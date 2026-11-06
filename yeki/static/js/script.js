@@ -109,10 +109,8 @@ function detectPlatform() {
   }
 }
 
-// Backend réel (Railway) — l'ancienne URL PythonAnywhere pointait vers un
-// hébergeur décommissionné cette session, l'appel échouait silencieusement
-// (catch ci-dessous) et le badge de version restait figé sur son repli.
-const API_BASE_URL = 'https://yekibackend-production.up.railway.app/api';
+// Même origine que le backend qui sert cette page : indépendant de l'hébergeur.
+const API_BASE_URL = '/api';
 
 // Get latest version from API
 async function getLatestVersion() {

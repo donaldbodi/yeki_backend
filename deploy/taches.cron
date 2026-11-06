@@ -1,0 +1,8 @@
+# Tâches planifiées de l'application, à copier dans /etc/cron.d/yeki-taches
+# (voir docs/MIGRATION_OVH.md). Heures en UTC.
+SHELL=/bin/sh
+COMPOSE=docker compose -f /opt/yeki/docker-compose.prod.yml
+
+5 * * * * ubuntu $COMPOSE exec -T web python manage.py envoyer_rappels --horaire >>/opt/yeki/backups/taches.log 2>&1
+15 6 * * * ubuntu $COMPOSE exec -T web python manage.py envoyer_rappels --quotidien >>/opt/yeki/backups/taches.log 2>&1
+30 2 * * * ubuntu $COMPOSE exec -T web python manage.py reinitialiser_periodes_echues >>/opt/yeki/backups/taches.log 2>&1

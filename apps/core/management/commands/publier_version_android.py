@@ -32,10 +32,9 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.core.models import AppVersion
 
-# Domaine de production réel (même valeur déjà utilisée par le frontend,
-# `lib/core/constants/api_constants.dart`) — aucun `SITE_URL`/
-# `BACKEND_BASE_URL` dédié n'existe dans les settings à ce jour.
-BASE_URL_PRODUCTION = "https://yekibackend-production.up.railway.app"
+# Domaine de production : `DOMAIN` est fournie au conteneur par
+# docker-compose.prod.yml, où cette commande s'exécute.
+BASE_URL_PRODUCTION = f"https://{os.environ.get('DOMAIN', 'localhost')}"
 
 APK_RELATIVE_PATH = "app/yeki-v.1.0.3.apk"
 VERSION_NAME = "1.0.3"

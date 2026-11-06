@@ -73,15 +73,6 @@ Réduits à des stubs documentés (pas supprimés — règle « ne rien perdre �
   de `yeki.urls`, afin de continuer à détecter tout chemin/nom dupliqué à
   l'échelle du projet.
 
-⚠️ **`yeki_backend/urls.py` et `yeki_backend/settings.py`** (l'ancien
-urlconf/settings racine, antérieur à la restructuration en `config/`)
-existent toujours en parallèle de `config/`. `manage.py` pointe par défaut
-sur `config.settings.development` — c'est donc `config/urls.py` qui est
-actif localement. Si la production utilise encore `yeki_backend.wsgi`
-(configuration WSGI PythonAnywhere non vérifiable depuis cet
-environnement), le bascule vers `config.*` doit être confirmée séparément
-avant toute suppression de `yeki_backend/{settings,urls}.py` — hors
-périmètre de cette tâche, signalé ici pour visibilité.
 
 ## Doublon supprimé (autorisé explicitement, P1.1)
 
