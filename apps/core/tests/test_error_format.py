@@ -75,7 +75,7 @@ def test_not_authenticated_bout_en_bout_sur_vue_reelle():
     from rest_framework.test import APIClient
 
     client = APIClient()
-    response = client.get(reverse("liste-parcours"))
+    response = client.get(reverse("parcours-list-create"))
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert response.data["error"]["code"] == "NOT_AUTHENTICATED"
