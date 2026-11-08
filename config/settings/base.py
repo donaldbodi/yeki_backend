@@ -40,6 +40,7 @@ SECRET_KEY = env("SECRET_KEY")
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:64940",
     "https://yeki-84b1a.web.app",
+    "https://yeki-84b1a.firebaseapp.com",
 ]
 
 # Application definition
