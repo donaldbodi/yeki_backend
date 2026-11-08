@@ -1,7 +1,8 @@
 # Migration hébergement backend : Railway → VPS OVH
 
-**Ce qui ne change pas** : l'image Docker (Daphne, HTTP + WebSocket), les
-médias (Firebase Storage), le frontend web (Firebase Hosting, CORS inchangé).
+**Ce qui ne change pas** : l'image Docker (Daphne, HTTP + WebSocket) et
+le frontend web (Firebase Hosting, CORS inchangé). Les médias vont dans le volume
+Docker `media_data`, ou sur Firebase Storage si `FIREBASE_CREDENTIALS_JSON` est rempli.
 
 ## Architecture
 
@@ -111,7 +112,7 @@ Si `pg_dump` refuse à cause d'une version de serveur plus récente, passer l'im
 `db` à cette version dans `docker-compose.prod.yml` avant de relancer.
 
 Vérifier ensuite : connexion à `/admin/` avec un compte existant, `/api/docs/`,
-un upload (Firebase Storage), un paiement test CinetPay, et le forum sur deux
+un upload (image visible après un redéploiement), un paiement test CinetPay, et le forum sur deux
 appareils (une question postée sur l'un apparaît sur l'autre en 1 à 2 secondes).
 
 Activer ensuite les tâches planifiées (rappels, réinitialisation des classements) :

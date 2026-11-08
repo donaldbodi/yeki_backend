@@ -29,6 +29,10 @@ services:
       DOMAIN: ${DOMAIN}
       DATABASE_URL: postgres://yeki:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}@db:5432/yeki
       REDIS_URL: redis://redis:6379/0
+    # Médias uploadés, quand FIREBASE_CREDENTIALS_JSON est vide : sans volume, ils
+    # disparaîtraient avec le conteneur à chaque déploiement.
+    volumes:
+      - media_data:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -79,3 +83,4 @@ volumes:
   caddy_data:
   caddy_config:
   postgres_data:
+  media_data:
