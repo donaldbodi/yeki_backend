@@ -87,7 +87,7 @@ Les quatre services doivent être `running`, `web` et `db` en `healthy`.
 curl -I https://IP-EN-TIRETS.sslip.io/          # 200, certificat valide
 curl -i -N --http1.1 --max-time 5 \
   -H "Connection: Upgrade" -H "Upgrade: websocket" \
-  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
   -H "Sec-WebSocket-Protocol: yeki" \
   https://IP-EN-TIRETS.sslip.io/ws/forum/       # 101 Switching Protocols
 ```
