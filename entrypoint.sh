@@ -1,5 +1,5 @@
 #!/bin/sh
-# Point d'entrée du conteneur backend (voir docs/MIGRATION_OVH.md).
+# Point d'entrée du conteneur backend (voir docs/DEPLOIEMENT_OVH.md).
 # `set -e` : tout échec (migration ratée, collectstatic cassé) arrête le
 # démarrage plutôt que de laisser Daphne servir une app à moitié en état —
 # mieux vaut un conteneur qui ne démarre pas qu'un serveur qui répond avec un

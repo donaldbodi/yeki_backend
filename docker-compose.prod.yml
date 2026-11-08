@@ -1,4 +1,4 @@
-# Production sur le VPS OVH (voir docs/MIGRATION_OVH.md).
+# Production sur le VPS OVH (voir docs/DEPLOIEMENT_OVH.md).
 # Seul Caddy publie des ports : Postgres, Redis et Daphne restent sur le réseau
 # interne Docker, jamais exposés à Internet.
 

@@ -1,6 +1,6 @@
 # Forum en temps réel
 
-Daphne sert le WebSocket derrière Caddy (voir `MIGRATION_OVH.md`). Quatre défauts
+Daphne sert le WebSocket derrière Caddy (voir `DEPLOIEMENT_OVH.md`). Quatre défauts
 indépendants de l'hébergement l'empêchaient de fonctionner avant 2026-11.
 
 - **Aucun client** : le code WebSocket Flutter avait été supprimé,

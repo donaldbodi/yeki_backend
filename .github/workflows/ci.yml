@@ -40,7 +40,7 @@ jobs:
   # Déploiement sur le VPS OVH : uniquement sur `main`, et seulement si les
   # tests passent. Sans le secret VPS_HOST, le job est ignoré. Secrets de dépôt
   # à créer : VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_KNOWN_HOSTS (voir
-  # docs/MIGRATION_OVH.md).
+  # docs/DEPLOIEMENT_OVH.md).
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: test

@@ -1,8 +1,8 @@
-# Migration hébergement backend : Railway → VPS OVH
+# Déploiement du backend sur le VPS OVH
 
-**Ce qui ne change pas** : l'image Docker (Daphne, HTTP + WebSocket) et
-le frontend web (Firebase Hosting, CORS inchangé). Les médias vont dans le volume
-Docker `media_data`, ou sur Firebase Storage si `FIREBASE_CREDENTIALS_JSON` est rempli.
+Le backend tourne sur un VPS OVH ; le frontend web reste sur Firebase Hosting.
+Les médias vont dans le volume Docker `media_data`, ou sur Firebase Storage si
+`FIREBASE_CREDENTIALS_JSON` est rempli.
 
 ## Architecture
 
@@ -26,7 +26,7 @@ Dans les commandes ci-dessous, remplacer `IP` par l'IP du VPS (e-mail de
 livraison OVH). Les commandes « sur le PC » se lancent dans Git Bash, depuis
 `yeki_backend/yeki_backend/`.
 
-## Procédure de bascule
+## Mise en place
 
 ### 1. Clé SSH (sur le PC)
 
@@ -63,11 +63,8 @@ printf "FIREBASE_CREDENTIALS_JSON='%s'\n" "$(jq -c . ~/firebase.json)" >> /opt/y
 rm ~/firebase.json
 chmod 600 /opt/yeki/.env
 openssl rand -hex 32   # valeur de POSTGRES_PASSWORD
-nano /opt/yeki/.env    # renseigner DOMAIN, POSTGRES_PASSWORD et les valeurs Railway
+nano /opt/yeki/.env    # renseigner DOMAIN, POSTGRES_PASSWORD et les secrets
 ```
-
-Garder le même `SECRET_KEY` que sur Railway. Les jetons de connexion, eux, sont
-en base et survivent à l'import : les utilisateurs restent connectés.
 
 ### 4. Premier déploiement
 
@@ -81,7 +78,7 @@ ssh ubuntu@IP "cd /opt/yeki && docker compose -f docker-compose.prod.yml ps"
 
 Les quatre services doivent être `running`, `web` et `db` en `healthy`.
 
-### 5. Vérifier avant de toucher aux données
+### 5. Vérifier
 
 ```bash
 curl -I https://IP-EN-TIRETS.sslip.io/          # 200, certificat valide
@@ -95,38 +92,29 @@ curl -i -N --http1.1 --max-time 5 \
 Le `101` prouve que le WebSocket traverse Caddy jusqu'à Daphne. Le serveur ferme
 ensuite aussitôt la connexion (code 4401) : aucun jeton n'a été fourni.
 
-### 6. Importer les données (fenêtre de maintenance)
+### 6. Premier administrateur et tâches planifiées
 
-Préparer d'abord l'APK et le build web de l'étape 7 : la coupure sera plus courte.
-
-1. Railway : mettre en pause le service **backend** (pas la base), pour figer les
-   écritures. Tout ce qui serait écrit après l'export serait perdu.
-2. Copier l'URL publique : service Postgres → Variables → `DATABASE_PUBLIC_URL`.
-3. Sur le VPS :
+La base démarre vide. Créer le compte administrateur (le mot de passe se tape au
+clavier) :
 
 ```bash
-sh /opt/yeki/deploy/importer-base.sh
+ssh -t ubuntu@IP "cd /opt/yeki && docker compose -f docker-compose.prod.yml exec web python manage.py createsuperuser"
 ```
 
-Si `pg_dump` refuse à cause d'une version de serveur plus récente, passer l'image
-`db` à cette version dans `docker-compose.prod.yml` avant de relancer.
+Puis, depuis `https://IP-EN-TIRETS.sslip.io/admin/`, créer les parcours et les
+départements : le formulaire d'inscription de l'app en a besoin.
 
-Vérifier ensuite : connexion à `/admin/` avec un compte existant, `/api/docs/`,
-un upload (image visible après un redéploiement), un paiement test CinetPay, et le forum sur deux
-appareils (une question postée sur l'un apparaît sur l'autre en 1 à 2 secondes).
-
-Activer ensuite les tâches planifiées (rappels, réinitialisation des classements) :
+Activer les tâches planifiées (rappels, réinitialisation des classements) :
 
 ```bash
 sudo install -m 644 /opt/yeki/deploy/taches.cron /etc/cron.d/yeki-taches
 ```
 
-Attention : la première exécution de `reinitialiser_periodes_echues` archive et
-remet à zéro le classement de tous les départements dont la période est échue.
-Pour voir la liste avant, utiliser son option de simulation
-(`docker compose -f docker-compose.prod.yml exec web python manage.py reinitialiser_periodes_echues --dry-run`).
+Vérifier ensuite : un upload (image toujours visible après un redéploiement), un
+paiement test CinetPay, et le forum sur deux appareils (une question postée sur
+l'un apparaît sur l'autre en 1 à 2 secondes).
 
-### 7. Basculer les clients
+### 7. Publier l'app
 
 Dans le dépôt frontend :
 
@@ -136,11 +124,9 @@ flutter build web && firebase deploy --only hosting
 flutter build apk --release
 ```
 
-Les APK déjà installés gardent l'URL Railway et n'interrogent que Railway pour
-connaître la dernière version. Publier donc la mise à jour **sur Railway aussi**
-(réactiver le service le temps de le faire), sinon ces utilisateurs ne verront
-jamais l'appel à mettre à jour. CinetPay : rien à faire, `notify_url` est envoyée
-par le backend à chaque paiement.
+Les APK installés avant ce changement visent l'ancien serveur et ne peuvent pas
+être prévenus : leurs utilisateurs doivent installer le nouvel APK eux-mêmes.
+CinetPay : rien à faire, `notify_url` est envoyée par le backend à chaque paiement.
 
 ### 8. Déploiement continu
 
@@ -156,14 +142,7 @@ GitHub → Settings → Secrets and variables → Actions, créer : `VPS_HOST` (
 `VPS_USER` (`ubuntu`), `VPS_SSH_KEY` (contenu de `yeki_deploy`),
 `VPS_KNOWN_HOSTS` (sortie de `ssh-keyscan`). Supprimer ensuite les deux fichiers
 `yeki_deploy*` du PC. Chaque push sur `main` qui passe les tests est alors
-déployé. Désactiver l'auto-déploiement Railway.
-
-### 9. Décommissionner Railway
-
-Après quelques jours sans trafic (vérifier les logs Railway), et une fois les
-utilisateurs passés sur le nouvel APK : supprimer le backend, la base et le Redis
-Railway. Le dump d'import reste dans `/opt/yeki/backups/`. Fermer aussi le compte
-Fly.io s'il y reste quelque chose.
+déployé.
 
 ## Sauvegardes : à ne pas négliger
 

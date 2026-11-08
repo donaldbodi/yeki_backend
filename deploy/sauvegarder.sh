@@ -1,7 +1,8 @@
 #!/bin/sh
 # Sauvegarde quotidienne de la base et des médias (cron posé par
-# preparer-vps.sh), 14 jours conservés. Ces fichiers restent sur le VPS : les copier ailleurs régulièrement
-# (voir docs/MIGRATION_OVH.md), sinon une perte du disque emporte tout.
+# preparer-vps.sh), 14 jours conservés. Ces fichiers restent sur le VPS : les
+# copier ailleurs régulièrement (voir docs/DEPLOIEMENT_OVH.md), sinon une perte
+# du disque emporte tout.
 set -eu
 
 cd /opt/yeki
