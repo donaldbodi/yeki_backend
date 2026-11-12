@@ -167,10 +167,19 @@ def finaliser_paiement(
         # WalletRechargerView._google_play (apps/paiement/views.py),
         # désormais scopé par département (unique_together utilisateur+
         # departement).
-        jours = 30 if type_abonnement == "mensuel" else 365
+        # Mensuel : 30 jours. Sur le cycle (type historique `annuel`) :
+        # jusqu'à la fin du cycle en cours, prix plein même en milieu de
+        # cycle (décision produit, voir apps/formation/cycles.py).
+        if type_abonnement == "mensuel":
+            fin = timezone.now() + timedelta(days=30)
+        elif departement.cycle_date_debut is None:
+            # Département créé avant les cycles : ancien abonnement annuel.
+            fin = timezone.now() + timedelta(days=365)
+        else:
+            fin = departement.cycle_en_cours().fin_dt
         try:
             abo = AbonnementPremium.objects.get(utilisateur=user_apprenant, departement=departement)
-            abo.renouveler(type_abonnement)
+            abo.renouveler(type_abonnement, fin=fin)
             abo.paiement = paiement
             abo.save()
         except AbonnementPremium.DoesNotExist:
@@ -179,7 +188,7 @@ def finaliser_paiement(
                 departement=departement,
                 type_abonnement=type_abonnement,
                 actif=True,
-                fin=timezone.now() + timedelta(days=jours),
+                fin=fin,
                 paiement=paiement,
             )
 

@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from apps.accounts.models import Profile
+from apps.formation.cycles import PLACEMENT_SUITE, PLACEMENTS as PLACEMENTS_CYCLES
 
 
 # --- NIVEAU 1 ---
@@ -96,9 +97,30 @@ class Departement(models.Model):
     prix = models.PositiveIntegerField(default=0, help_text="Prix d'accès en FCFA (0 = gratuit)")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # ── Cycles : abonnement et classement (voir apps/formation/cycles.py) ──
+    cycle_date_debut = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Début du premier cycle. Vide pour un département créé avant les cycles.",
+    )
+    cycle_duree_mois = models.PositiveSmallIntegerField(
+        default=12, help_text="Durée d'un cycle, en mois (1 à 12)"
+    )
+    cycle_nombre = models.PositiveSmallIntegerField(
+        default=1, help_text="Nombre de cycles par an (au plus 12 // durée du cycle)"
+    )
+    cycle_placement = models.CharField(
+        max_length=10,
+        choices=PLACEMENTS_CYCLES,
+        default=PLACEMENT_SUITE,
+        help_text="Cycles à la suite, ou répartis régulièrement sur l'année",
+    )
+
     # ── Période de classement (Partie 9.2) ─────────────────────────
+    # Suit désormais les cycles : `periode` = durée du cycle, et la période
+    # en cours se termine à la fin du cycle en cours.
     periode = models.PositiveIntegerField(
-        default=6, help_text="Durée d'une période de classement en mois (1, 3, 6, 12)"
+        default=6, help_text="Durée d'une période de classement en mois (= durée du cycle)"
     )
     date_debut_periode = models.DateTimeField(
         auto_now_add=True, help_text="Début de la période de classement en cours"
@@ -150,8 +172,41 @@ class Departement(models.Model):
                 )
 
             self.date_debut_periode = maintenant
-            self.date_fin_periode = maintenant + relativedelta(months=self.periode)
+            self.date_fin_periode = self._fin_periode_classement(maintenant)
             self.save(update_fields=["date_debut_periode", "date_fin_periode"])
+
+    def _fin_periode_classement(self, maintenant):
+        """Fin du cycle en cours (ou du suivant, entre deux cycles)."""
+        from dateutil.relativedelta import relativedelta
+
+        from apps.formation.cycles import cycle_pour
+
+        if self.cycle_date_debut is None:
+            # Département créé avant les cycles : ancien rythme.
+            return maintenant + relativedelta(months=self.periode)
+        return cycle_pour(self, maintenant).fin_dt
+
+    def appliquer_cycles(self):
+        """
+        Après création ou changement des cycles : la période de classement
+        prend la durée du cycle et se termine à la fin du cycle en cours.
+        """
+        maintenant = timezone.now()
+        self.periode = self.cycle_duree_mois
+        if self.date_debut_periode is None:
+            self.date_debut_periode = maintenant
+        self.date_fin_periode = self._fin_periode_classement(maintenant)
+        self.save(update_fields=["periode", "date_debut_periode", "date_fin_periode"])
+
+    def cycle_en_cours(self):
+        from apps.formation.cycles import cycle_pour
+
+        return cycle_pour(self)
+
+    def libelle_abonnement_cycle(self) -> str:
+        from apps.formation.cycles import libelle_abonnement_cycle
+
+        return libelle_abonnement_cycle(self)
 
     # ── CHAMPS PRÉPA CONCOURS ──────────────────────────────────────
     # Activés quand parcours.type_parcours == 'prepa'
@@ -246,8 +301,12 @@ class Departement(models.Model):
     prix_mensuel = models.PositiveIntegerField(
         default=0, help_text="Prix abonnement mensuel en ligne (FCFA)"
     )
+    # Prix de l'abonnement « sur le cycle » (nom historique conservé : le
+    # type d'abonnement correspondant reste `annuel` en base). Affiché sous
+    # `libelle_abonnement_cycle()` : « Abonnement annuel » s'il n'y a qu'un
+    # cycle, sinon « Abonnement à <département> pour le compte de N mois ».
     prix_annuel = models.PositiveIntegerField(
-        default=0, help_text="Prix abonnement annuel en ligne (FCFA)"
+        default=0, help_text="Prix de l'abonnement sur le cycle, en ligne (FCFA)"
     )
     prix_presentiel_mensuel = models.PositiveIntegerField(
         default=0, blank=True, help_text="Supplément présentiel mensuel, facultatif (FCFA)"

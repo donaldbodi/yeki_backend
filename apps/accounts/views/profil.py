@@ -5,7 +5,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from apps.accounts.models import Profile
-from apps.accounts.serializers import ProfilDetailSerializer
+from django.contrib.auth.models import User
+
+from apps.accounts.serializers import ProfilDetailSerializer, normaliser_telephone
 from apps.formation.models import Cours, Lecon, Departement
 from apps.evaluation.models import SoumissionDevoir, EvaluationExercice
 
@@ -67,8 +69,19 @@ class ProfilUpdateView(APIView):
 
         data = request.data
 
-        # Champs User Django
+        # E-mail et téléphone servent aussi d'identifiants de connexion :
+        # ils doivent rester propres à un seul compte (téléphone normalisé).
         user = request.user
+        if "phone" in data:
+            numero = normaliser_telephone(data["phone"])
+            if numero and Profile.objects.filter(phone=numero).exclude(pk=profile.pk).exists():
+                return Response({"detail": "Ce numéro de téléphone est déjà utilisé."}, status=400)
+            profile.phone = numero
+        if "email" in data and data["email"]:
+            if User.objects.filter(email__iexact=data["email"]).exclude(pk=user.pk).exists():
+                return Response({"detail": "Cette adresse e-mail est déjà utilisée."}, status=400)
+
+        # Champs User Django
         if "first_name" in data:
             user.first_name = data["first_name"]
         if "last_name" in data:
@@ -81,7 +94,7 @@ class ProfilUpdateView(APIView):
         # (lecture seule, demande explicite) : même en contournant le
         # formulaire Flutter (appel API direct), un utilisateur ne peut
         # plus modifier ses informations de scolarité.
-        for field in ["phone", "date_naissance", "bio", "sub_cursus", "filiere", "licence"]:
+        for field in ["date_naissance", "bio", "sub_cursus", "filiere", "licence"]:
             if field in data:
                 setattr(profile, field, data[field])
 

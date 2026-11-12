@@ -553,10 +553,15 @@ class StatutAbonnementView(APIView):
         cours = get_object_or_404(Cours, pk=cours_id)
         departement = cours.departement
 
+        cycle = departement.cycle_en_cours()
         reponse = {
             "departement_id": departement.id,
             "prix_mensuel": departement.prix_mensuel,
             "prix_annuel": departement.prix_annuel,
+            # `prix_annuel` est le prix de l'abonnement sur le cycle :
+            # libellé et dates à afficher pour cette offre.
+            "libelle_abonnement_cycle": departement.libelle_abonnement_cycle(),
+            "cycle_en_cours": cycle.en_json(),
             "disponible": bool(departement.prix_mensuel or departement.prix_annuel),
         }
 

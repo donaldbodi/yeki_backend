@@ -13,7 +13,33 @@ from apps.formation.models import (
     ProgressionLecon,
     SupplementCours,
 )
+from apps.formation.cycles import (
+    PLACEMENT_SUITE,
+    configuration as configuration_cycles,
+    cycles_de_l_annee,
+    erreurs_configuration,
+)
 from apps.formation.services import codes_niveaux_formation_disponibles
+
+CHAMPS_CYCLES = ["cycle_date_debut", "cycle_duree_mois", "cycle_nombre", "cycle_placement"]
+
+
+class CyclesDepartementMixin(serializers.Serializer):
+    """Cycles d'abonnement et de classement, en lecture (voir apps/formation/cycles.py)."""
+
+    libelle_abonnement_cycle = serializers.SerializerMethodField()
+    cycle_en_cours = serializers.SerializerMethodField()
+    cycles = serializers.SerializerMethodField()
+
+    def get_libelle_abonnement_cycle(self, obj):
+        return obj.libelle_abonnement_cycle()
+
+    def get_cycle_en_cours(self, obj):
+        return obj.cycle_en_cours().en_json()
+
+    def get_cycles(self, obj):
+        annee = obj.cycle_en_cours().annee
+        return [c.en_json() for c in cycles_de_l_annee(obj, annee)]
 
 
 class LeconSerializer(serializers.ModelSerializer):
@@ -226,7 +252,7 @@ class ModuleListSerializer(serializers.ModelSerializer):
         fields = ["id", "titre", "ordre", "description"]
 
 
-class DepartementSerializer(serializers.ModelSerializer):
+class DepartementSerializer(CyclesDepartementMixin, serializers.ModelSerializer):
     cadre = EnseignantCadreLightSerializer(read_only=True)
     cours = CoursSerializer(many=True, read_only=True)
     niveaux_accessibles = serializers.SerializerMethodField()
@@ -264,6 +290,11 @@ class DepartementSerializer(serializers.ModelSerializer):
             "prix_presentiel_mensuel",
             "prix_presentiel_annuel",
             "label_catalogue",
+            *CHAMPS_CYCLES,
+            "periode",
+            "libelle_abonnement_cycle",
+            "cycle_en_cours",
+            "cycles",
             "created_at",
             "est_prepa_concours",
             "nom_concours",
@@ -399,8 +430,13 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             "niveaux_accessibles",
             "niveau_formation",
             "periode",
+            *CHAMPS_CYCLES,
         ]
         extra_kwargs = {
+            "cycle_date_debut": {"required": False},
+            "cycle_duree_mois": {"required": False},
+            "cycle_nombre": {"required": False},
+            "cycle_placement": {"required": False},
             "nom": {"required": False, "allow_blank": False},
             "description": {"required": False, "allow_blank": True},
             "prix": {"required": False, "min_value": 0},
@@ -449,9 +485,30 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         f"Niveau de formation invalide. Choisissez : {', '.join(codes_valides)}"
                     )
+        if instance and any(champ in data for champ in CHAMPS_CYCLES):
+            # Validation de la combinaison complète (valeurs envoyées +
+            # valeurs déjà en base) : le nombre maximal dépend de la durée.
+            debut, duree, nombre, placement = configuration_cycles(instance)
+            erreurs = erreurs_configuration(
+                data.get("cycle_date_debut", instance.cycle_date_debut or debut),
+                data.get("cycle_duree_mois", duree),
+                data.get("cycle_nombre", nombre),
+                data.get("cycle_placement", placement or PLACEMENT_SUITE),
+            )
+            if erreurs:
+                raise serializers.ValidationError(" ".join(erreurs))
         return data
 
     def update(self, instance, validated_data):
+        cycles_modifies = any(champ in validated_data for champ in CHAMPS_CYCLES)
+        if cycles_modifies and instance.cycle_date_debut is None:
+            # Département d'avant les cycles : on fige sa configuration
+            # actuelle avant d'appliquer les champs modifiés.
+            debut, duree, nombre, placement = configuration_cycles(instance)
+            instance.cycle_date_debut = debut
+            instance.cycle_duree_mois = duree
+            instance.cycle_nombre = nombre
+            instance.cycle_placement = placement
         niveaux_accessibles = validated_data.pop("niveaux_accessibles", None)
         for key, value in validated_data.items():
             setattr(instance, key, value)
@@ -461,6 +518,8 @@ class DepartementUpdateSerializer(serializers.ModelSerializer):
             else:
                 instance.niveaux_accessibles = niveaux_accessibles
         instance.save()
+        if cycles_modifies:
+            instance.appliquer_cycles()
         return instance
 
 

@@ -27,6 +27,7 @@ from apps.core.schema_examples import (
     EXEMPLE_PAGINATION,
     PARAMS_PAGINATION,
 )
+from apps.formation.cycles import lire_configuration_cycles
 from apps.formation.models import Parcours, Departement, Cours, DemandeAccesFormation
 from apps.formation.serializers import DepartementSerializer, DepartementUpdateSerializer
 from apps.formation.services import _progression_cours, _serialise_departement_detail
@@ -75,26 +76,14 @@ class CreerDepartementView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # P2.3 (CDC §6.4/§7.4) : « periode obligatoire lors de la création »
-        # — le default=6 du modèle est conservé pour ne pas casser les
-        # lignes existantes, mais cette vue (le vrai chemin de création,
-        # DepartementCreateSerializer n'étant câblé nulle part) l'exige
-        # désormais explicitement.
-        periode_brute = request.data.get("periode")
-        if periode_brute in (None, ""):
-            return Response(
-                {"detail": "La période de classement (periode) est obligatoire."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            periode = int(periode_brute)
-            if periode <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            return Response(
-                {"detail": "La période de classement (periode) doit être un entier positif."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # Cycles (abonnement et classement, voir apps/formation/cycles.py) :
+        # obligatoires à la création. Une ancienne version de l'app n'envoie
+        # que `periode` (P2.3) : on en déduit des cycles à la suite démarrant
+        # aujourd'hui, au même rythme.
+        cycles_saisis, erreurs = lire_configuration_cycles(request.data)
+        if erreurs:
+            return Response({"detail": " ".join(erreurs)}, status=status.HTTP_400_BAD_REQUEST)
+        periode = cycles_saisis["cycle_duree_mois"]
 
         parcours_id = request.data.get("parcours_id")
         if parcours_id:
@@ -172,6 +161,7 @@ class CreerDepartementView(APIView):
             "nom": nom,
             "parcours": parcours,
             "periode": periode,
+            **cycles_saisis,
             "description": _s("description"),
             "couleur": "#2884A0",  # Couleur par défaut, retirée du formulaire
             "prix": prix,
@@ -230,6 +220,7 @@ class CreerDepartementView(APIView):
 
         # === CRÉATION DU DÉPARTEMENT ===
         departement = Departement.objects.create(**kwargs)
+        departement.appliquer_cycles()
 
         enregistrer_activite(
             user=request.user,

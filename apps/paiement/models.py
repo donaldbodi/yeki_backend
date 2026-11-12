@@ -213,10 +213,13 @@ class AbonnementPremium(models.Model):
     def est_actif(self):
         return self.actif and timezone.now() < self.fin
 
-    def renouveler(self, type_abonnement: str):
+    def renouveler(self, type_abonnement: str, fin=None):
+        """`fin` explicite pour un abonnement sur le cycle (fin du cycle en cours)."""
         self.type_abonnement = type_abonnement
-        jours = 30 if type_abonnement == "mensuel" else 365
-        self.fin = timezone.now() + timedelta(days=jours)
+        if fin is None:
+            jours = 30 if type_abonnement == "mensuel" else 365
+            fin = timezone.now() + timedelta(days=jours)
+        self.fin = fin
         self.actif = True
         self.save()
 

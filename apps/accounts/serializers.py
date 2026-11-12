@@ -109,6 +109,16 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError("Cette adresse email est déjà utilisée.")
         return value
 
+    def validate_phone(self, value):
+        # Le numéro sert aussi d'identifiant de connexion : enregistré
+        # normalisé, et unique.
+        numero = normaliser_telephone(value)
+        if len(numero) < 8:
+            raise serializers.ValidationError("Numéro de téléphone invalide.")
+        if _username_par_telephone(numero) or Profile.objects.filter(phone=numero).exists():
+            raise serializers.ValidationError("Ce numéro de téléphone est déjà utilisé.")
+        return numero
+
     def validate_password(self, value):
         if len(value) < 6:
             raise serializers.ValidationError(
@@ -181,22 +191,50 @@ class RegisterSerializer(serializers.Serializer):
         return profile
 
 
+def normaliser_telephone(numero: str) -> str:
+    """Chiffres seuls, sans indicatif camerounais (+237 / 00237)."""
+    chiffres = "".join(c for c in (numero or "") if c.isdigit())
+    for prefixe in ("00237", "237"):
+        if chiffres.startswith(prefixe) and len(chiffres) > 9:
+            return chiffres[len(prefixe) :]
+    return chiffres
+
+
+def _username_par_email(identifiant: str):
+    if "@" not in identifiant:
+        return None
+    noms = list(User.objects.filter(email__iexact=identifiant).values_list("username", flat=True)[:2])
+    return noms[0] if len(noms) == 1 else None
+
+
+def _username_par_telephone(identifiant: str):
+    numero = normaliser_telephone(identifiant)
+    if len(numero) < 8:
+        return None
+    # Les numéros sont enregistrés normalisés (inscription, modification
+    # du profil) ; les variantes couvrent les saisies plus anciennes.
+    variantes = [numero, f"237{numero}", f"+237{numero}", f"00237{numero}"]
+    candidats = Profile.objects.filter(phone__in=variantes).select_related("user")
+    noms = {p.user.username for p in candidats}
+    return noms.pop() if len(noms) == 1 else None
+
+
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        identifier = data.get("identifier")
+        identifier = (data.get("identifier") or "").strip()
         password = data.get("password")
 
+        # Identifiant accepté : nom d'utilisateur, e-mail ou numéro de
+        # téléphone. E-mail et téléphone ne sont retenus que s'ils désignent
+        # un seul compte (aucune unicité n'est imposée en base).
         user = authenticate(username=identifier, password=password)
-
         if user is None:
-            try:
-                user_obj = User.objects.get(email=identifier)
-                user = authenticate(username=user_obj.username, password=password)
-            except User.DoesNotExist:
-                raise serializers.ValidationError("Identifiants incorrects.")
+            username = _username_par_email(identifier) or _username_par_telephone(identifier)
+            if username:
+                user = authenticate(username=username, password=password)
 
         if user is None:
             raise serializers.ValidationError("Identifiants incorrects.")
