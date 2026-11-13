@@ -54,6 +54,10 @@ class Profile(models.Model):
     # la configuration AdMob (tagForChildDirectedTreatment/
     # tagForUnderAgeOfConsent).
     date_naissance = models.DateField(null=True, blank=True)
+    # Identifiant de connexion (avec le nom d'utilisateur et l'e-mail) :
+    # enregistré normalisé (chiffres seuls, sans +237, voir
+    # `serializers.normaliser_telephone`) et unique — vide autorisé pour
+    # les comptes sans numéro (contrainte `yeki_profile_phone_unique`).
     phone = models.CharField(max_length=20, blank=True)
     whatsapp = models.CharField(
         max_length=20, blank=True, help_text="Numéro WhatsApp pour les répétiteurs"
@@ -72,6 +76,14 @@ class Profile(models.Model):
 
     class Meta:
         db_table = "yeki_profile"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["phone"],
+                condition=~models.Q(phone=""),
+                name="yeki_profile_phone_unique",
+                violation_error_message="Ce numéro de téléphone est déjà utilisé.",
+            )
+        ]
 
     def __str__(self):
         return f"{self.user.username} ({self.user_type})"

@@ -47,3 +47,20 @@ def test_numero_deja_utilise_refuse_a_l_inscription(api_client, user_apprenant):
     serializer = RegisterSerializer()
     with pytest.raises(Exception, match="déjà utilisé"):
         serializer.validate_phone("+237 699 12 34 56")
+
+
+@pytest.mark.django_db
+def test_numero_unique_en_base(user_apprenant, user_enseignant):
+    from django.db import IntegrityError, transaction
+
+    user_apprenant.profile.phone = "699123456"
+    user_apprenant.profile.save(update_fields=["phone"])
+    user_enseignant.profile.phone = "699123456"
+    with pytest.raises(IntegrityError), transaction.atomic():
+        user_enseignant.profile.save(update_fields=["phone"])
+
+
+@pytest.mark.django_db
+def test_plusieurs_comptes_sans_numero(user_apprenant, user_enseignant):
+    # Un numéro vide n'est pas soumis à l'unicité.
+    assert user_apprenant.profile.phone == "" and user_enseignant.profile.phone == ""
