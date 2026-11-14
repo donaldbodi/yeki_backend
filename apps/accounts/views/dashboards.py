@@ -342,6 +342,27 @@ class EnseignantAdminDashboardView(APIView):
                 "niveau_formation": (
                     dept.niveau_formation if hasattr(dept, "niveau_formation") else None
                 ),
+                # Bug corrigé (« les prix ne s'enregistrent pas ») : le
+                # formulaire de modification (`departement_form_sheet.dart`)
+                # est pré-rempli avec CE dictionnaire, puis renvoie tous ses
+                # champs. Sans eux, il affichait 0 et réécrivait 0 en base à
+                # chaque modification (prix, niveaux, cycles, champs prépa).
+                "prix_mensuel": dept.prix_mensuel,
+                "prix_annuel": dept.prix_annuel,
+                "prix_presentiel_mensuel": dept.prix_presentiel_mensuel,
+                "prix_presentiel_annuel": dept.prix_presentiel_annuel,
+                "niveaux_accessibles": dept.get_niveaux_accessibles_list(),
+                "periode": dept.periode,
+                "cycle_date_debut": dept.cycle_date_debut,
+                "cycle_duree_mois": dept.cycle_duree_mois,
+                "cycle_nombre": dept.cycle_nombre,
+                "cycle_placement": dept.cycle_placement,
+                "libelle_abonnement_cycle": dept.libelle_abonnement_cycle(),
+                "arrete_ministeriel": dept.arrete_ministeriel,
+                "places_disponibles": dept.places_disponibles,
+                "debouches": dept.debouches,
+                "prerequis": dept.prerequis,
+                "objectifs": dept.objectifs,
             }
             departements_data.append(dept_info)
 

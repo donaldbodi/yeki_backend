@@ -302,9 +302,8 @@ class Departement(models.Model):
         default=0, help_text="Prix abonnement mensuel en ligne (FCFA)"
     )
     # Prix de l'abonnement « sur le cycle » (nom historique conservé : le
-    # type d'abonnement correspondant reste `annuel` en base). Affiché sous
-    # `libelle_abonnement_cycle()` : « Abonnement annuel » s'il n'y a qu'un
-    # cycle, sinon « Abonnement à <département> pour le compte de N mois ».
+    # type d'abonnement correspondant reste `annuel` en base), affiché
+    # « Abonnement annuel ».
     prix_annuel = models.PositiveIntegerField(
         default=0, help_text="Prix de l'abonnement sur le cycle, en ligne (FCFA)"
     )

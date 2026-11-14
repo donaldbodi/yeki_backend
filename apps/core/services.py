@@ -59,6 +59,22 @@ class AccesService:
             qs = qs.filter(departement=departement)
         return qs.exists()
 
+    @classmethod
+    def forum_accessible(cls, user, departement=None) -> bool:
+        """
+        Forum : abonné Premium (mensuel ou annuel) ET pendant un cycle du
+        département — fermé entre deux cycles et hors des dates des cycles
+        (décision produit). Sans département connu, ou pour un département
+        créé avant les cycles, seul l'abonnement compte.
+        """
+        if not cls.est_premium(user, departement):
+            return False
+        if departement is None or departement.cycle_date_debut is None:
+            return True
+        from apps.formation.cycles import est_dans_un_cycle
+
+        return est_dans_un_cycle(departement)
+
     @staticmethod
     def _resoudre_departement(objet):
         """Département de `objet` si résolvable depuis son propre graphe
@@ -106,6 +122,8 @@ class AccesService:
 
         if not cls._est_apprenant(user):
             return True
+        if cls._est_ou_est_classe(objet, QuestionForum):
+            return cls.forum_accessible(user, departement)
         if cls.est_premium(user, departement or cls._resoudre_departement(objet)):
             return True
 
@@ -158,6 +176,8 @@ class AccesService:
             return cls._olympiade_est_payee(user, objet)
         if objet is Olympiade:
             return True
+        if cls._est_ou_est_classe(objet, QuestionForum):
+            return cls.forum_accessible(user, departement)
 
         if cls.est_premium(user, departement or cls._resoudre_departement(objet)):
             return True

@@ -93,11 +93,9 @@ def test_erreurs_configuration():
 
 
 def test_libelle_abonnement():
+    # Décision produit : toujours « Abonnement annuel », quel que soit le cycle.
     assert libelle_abonnement_cycle(_dept(date(2027, 1, 1), 12, 1)) == "Abonnement annuel"
-    assert (
-        libelle_abonnement_cycle(_dept(date(2027, 1, 1), 4, 3, nom="Terminale C"))
-        == "Abonnement à Terminale C pour le compte de 4 mois"
-    )
+    assert libelle_abonnement_cycle(_dept(date(2027, 1, 1), 4, 3)) == "Abonnement annuel"
 
 
 # ── Création par l'enseignant admin ─────────────────────────────────────────
@@ -127,7 +125,7 @@ def test_creer_departement_avec_cycles(client_enseignant_admin, admin_avec_parco
         format="json",
     )
     assert response.status_code == status.HTTP_201_CREATED, response.data
-    assert response.data["libelle_abonnement_cycle"] == "Abonnement à Terminale D pour le compte de 4 mois"
+    assert response.data["libelle_abonnement_cycle"] == "Abonnement annuel"
     assert len(response.data["cycles"]) == 3
     departement = Departement.objects.get(pk=response.data["id"])
     assert departement.periode == 4
@@ -151,11 +149,11 @@ def test_creer_departement_trop_de_cycles_400(client_enseignant_admin, admin_ave
     assert "entre 1 et 2" in response.data["detail"]
 
 
-# ── Abonnement sur le cycle ────────────────────────────────────────────────
+# ── Abonnement annuel et forum ──────────────────────────────────────────────
 
 
 @pytest.mark.django_db
-def test_abonnement_cycle_court_jusqu_a_la_fin_du_cycle(departement, user_apprenant):
+def test_abonnement_annuel_dure_365_jours(departement, user_apprenant):
     from apps.paiement.models import AbonnementPremium
     from apps.paiement.services import finaliser_paiement
 
@@ -164,6 +162,7 @@ def test_abonnement_cycle_court_jusqu_a_la_fin_du_cycle(departement, user_appren
     departement.cycle_nombre = 4
     departement.save()
 
+    avant = timezone.now()
     finaliser_paiement(
         user_apprenant=user_apprenant,
         categorie="abonnement",
@@ -173,5 +172,57 @@ def test_abonnement_cycle_court_jusqu_a_la_fin_du_cycle(departement, user_appren
         type_abonnement="annuel",
     )
     abo = AbonnementPremium.objects.get(utilisateur=user_apprenant, departement=departement)
-    assert abo.fin == cycle_pour(departement).fin_dt
+    assert abo.fin - avant >= timedelta(days=365)
+    assert abo.fin - avant < timedelta(days=366)
     assert abo.est_actif
+
+
+def _abonner(user, departement):
+    from apps.paiement.models import AbonnementPremium
+
+    AbonnementPremium.objects.create(
+        utilisateur=user,
+        departement=departement,
+        type_abonnement="annuel",
+        actif=True,
+        fin=timezone.now() + timedelta(days=365),
+    )
+
+
+@pytest.mark.django_db
+def test_forum_ouvert_pendant_un_cycle(departement, user_apprenant):
+    from apps.core.services import AccesService
+    from apps.forum.models import QuestionForum
+
+    _abonner(user_apprenant, departement)
+    departement.cycle_date_debut = timezone.localdate() - timedelta(days=10)
+    departement.cycle_duree_mois = 3
+    departement.cycle_nombre = 1
+    departement.save()
+    assert AccesService.peut_voir(user_apprenant, QuestionForum, departement=departement)
+    assert AccesService.peut_soumettre(user_apprenant, QuestionForum, departement=departement)
+
+
+@pytest.mark.django_db
+def test_forum_ferme_hors_cycle_meme_abonne(departement, user_apprenant):
+    from apps.core.services import AccesService
+    from apps.forum.models import QuestionForum
+
+    _abonner(user_apprenant, departement)
+    # Un seul cycle de 3 mois, terminé il y a ~5 mois : on est entre deux cycles.
+    departement.cycle_date_debut = timezone.localdate() - timedelta(days=240)
+    departement.cycle_duree_mois = 3
+    departement.cycle_nombre = 1
+    departement.save()
+    assert not AccesService.peut_voir(user_apprenant, QuestionForum, departement=departement)
+    assert not AccesService.peut_soumettre(user_apprenant, QuestionForum, departement=departement)
+
+
+@pytest.mark.django_db
+def test_forum_ferme_sans_abonnement(departement, user_apprenant):
+    from apps.core.services import AccesService
+    from apps.forum.models import QuestionForum
+
+    departement.cycle_date_debut = timezone.localdate() - timedelta(days=10)
+    departement.save()
+    assert not AccesService.peut_voir(user_apprenant, QuestionForum, departement=departement)

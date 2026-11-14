@@ -12,10 +12,11 @@ Les dates de chaque cycle s'en déduisent ; aucune n'est stockée. Une fois
 l'année écoulée, les mêmes cycles recommencent automatiquement, décalés de
 12 mois (décision produit : reprise automatique).
 
-Un abonnement « sur le cycle » (type interne historique `annuel`, prix
-`Departement.prix_annuel`) court jusqu'à la fin du cycle en cours, au prix
-plein, même acheté en milieu de cycle. Acheté entre deux cycles (placement
-« répartis »), il court jusqu'à la fin du cycle suivant.
+Abonnements (décision produit) : l'« Abonnement annuel » (type `annuel`,
+prix `Departement.prix_annuel`, le prix d'un cycle) donne le Premium du
+département pendant 365 jours à partir du paiement ; le mensuel, 30 jours.
+Le forum n'est en plus ouvert que pendant un cycle (`est_dans_un_cycle`,
+voir `AccesService.forum_accessible`).
 
 Le classement est remis à zéro à la fin de chaque cycle : la période de
 classement suit les cycles.
@@ -156,6 +157,14 @@ def cycle_pour(departement, quand=None) -> Cycle:
     return cycles_de_l_annee(departement, annee + 2)[0]  # filet de sécurité
 
 
+def est_dans_un_cycle(departement, quand=None) -> bool:
+    """Vrai si `quand` (maintenant par défaut) tombe pendant un cycle, pas entre deux."""
+    if quand is None:
+        quand = timezone.now()
+    jour = timezone.localtime(quand).date() if isinstance(quand, datetime) else quand
+    return cycle_pour(departement, jour).debut <= jour
+
+
 def _entier(valeur):
     try:
         return int(valeur)
@@ -210,8 +219,5 @@ def lire_configuration_cycles(donnees) -> tuple[dict, list[str]]:
 
 
 def libelle_abonnement_cycle(departement) -> str:
-    """« Abonnement annuel » s'il n'y a qu'un cycle, sinon le nom du département et la période."""
-    _date_debut, duree, nombre, _placement = configuration(departement)
-    if nombre == 1:
-        return "Abonnement annuel"
-    return f"Abonnement à {departement.nom} pour le compte de {duree} mois"
+    """Nom de l'offre payée au prix du cycle : toujours « Abonnement annuel » (décision produit)."""
+    return "Abonnement annuel"
