@@ -460,6 +460,13 @@ class DemandePaiementManuelle(models.Model):
     type_abonnement = models.CharField(
         max_length=10, choices=AbonnementPremium.TYPE_CHOICES, blank=True, default=""
     )
+    # Formation hybride, trois formules d'abonnement : en ligne
+    # (categorie=abonnement, montant_presentiel=0), présentiel seul
+    # (categorie=presentiel, ne débloque rien en ligne) ou les deux
+    # (categorie=abonnement, part présentielle ici). Sert à la facture.
+    montant_presentiel = models.PositiveIntegerField(
+        default=0, help_text="Part du montant correspondant aux cours en présentiel"
+    )
     statut = models.CharField(max_length=15, choices=STATUTS, default="en_attente", db_index=True)
     motif_refus = models.TextField(blank=True)
     traite_par = models.ForeignKey(

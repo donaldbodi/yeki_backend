@@ -562,6 +562,10 @@ class StatutAbonnementView(APIView):
             # libellé et dates à afficher pour cette offre.
             "libelle_abonnement_cycle": departement.libelle_abonnement_cycle(),
             "cycle_en_cours": cycle.en_json(),
+            # Formation hybride : abonnement aux cours en présentiel (seul,
+            # ou avec les cours en ligne). Ne débloque rien en ligne.
+            "prix_presentiel_mensuel": departement.prix_presentiel_mensuel,
+            "prix_presentiel_annuel": departement.prix_presentiel_annuel,
             "disponible": bool(departement.prix_mensuel or departement.prix_annuel),
         }
 
@@ -1080,13 +1084,24 @@ class SoumettrePaiementManuelView(APIView):
         departement_id = request.data.get("departement_id")
         if departement_id:
             departement = get_object_or_404(Departement, pk=departement_id)
-        elif categorie == "abonnement":
+        elif categorie in ("abonnement", "presentiel"):
             # Rectification : l'abonnement est désormais PAR DÉPARTEMENT —
             # ce champ, optionnel pour les autres catégories, devient
-            # obligatoire ici (aucun département à défaut à deviner).
+            # obligatoire ici (aucun département à défaut à deviner). Même
+            # chose pour l'abonnement aux cours en présentiel.
             return Response(
-                {"detail": "departement_id est obligatoire pour un abonnement premium."}, status=400
+                {"detail": "departement_id est obligatoire pour un abonnement."}, status=400
             )
+
+        # Part présentielle (formule « les deux » ou présentiel seul), pour la facture.
+        try:
+            montant_presentiel = int(request.data.get("montant_presentiel") or 0)
+        except (TypeError, ValueError):
+            montant_presentiel = -1
+        if categorie == "presentiel":
+            montant_presentiel = montant
+        if not 0 <= montant_presentiel <= montant:
+            return Response({"detail": "montant_presentiel invalide."}, status=400)
 
         # P9.2 : optionnel, uniquement pertinent pour categorie="abonnement"
         # (évite de devoir déduire mensuel/annuel du montant à la
@@ -1116,6 +1131,7 @@ class SoumettrePaiementManuelView(APIView):
                     id_transaction=id_transaction,
                     numero_emetteur=(request.data.get("numero_emetteur") or "").strip(),
                     type_abonnement=type_abonnement,
+                    montant_presentiel=montant_presentiel,
                 )
         except IntegrityError:
             # Contrainte unique (operateur, id_transaction) — cet ID de
@@ -1155,6 +1171,11 @@ def _demande_manuelle_dict(d):
         "motif_refus": d.motif_refus,
         "date_creation": d.date_creation,
         "date_traitement": d.date_traitement,
+        # Pour la facture de l'apprenant (cours en ligne / en présentiel).
+        "departement_id": d.departement_id,
+        "departement_nom": d.departement.nom if d.departement else "",
+        "type_abonnement": d.type_abonnement,
+        "montant_presentiel": d.montant_presentiel,
     }
 
 

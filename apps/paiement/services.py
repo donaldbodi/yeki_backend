@@ -158,7 +158,7 @@ def finaliser_paiement(
         reference=reference,
         commission_yeki=commission_yeki,
         demande_manuelle=demande_manuelle,
-        departement=departement if categorie in ("formation", "abonnement") else None,
+        departement=departement if categorie in ("formation", "abonnement", "presentiel") else None,
         olympiade_liee=olympiade if categorie == "olympiade" else None,
     )
 

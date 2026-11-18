@@ -1,0 +1,17 @@
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ("paiement", "0005_abonnementpremium_departement_and_more"),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name="demandepaiementmanuelle",
+            name="montant_presentiel",
+            field=models.PositiveIntegerField(
+                default=0, help_text="Part du montant correspondant aux cours en présentiel"
+            ),
+        ),
+    ]
