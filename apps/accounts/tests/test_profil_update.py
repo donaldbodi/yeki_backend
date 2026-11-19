@@ -54,3 +54,23 @@ def test_patch_champs_autorises_toujours_modifiables(user_apprenant):
     assert profile.phone == "699000000"
     assert profile.sub_cursus == "Série C"
     assert profile.filiere == "Sciences"
+
+
+@pytest.mark.django_db
+def test_ecole_modifiable_par_un_apprenant(user_apprenant):
+    client = APIClient()
+    client.force_authenticate(user=user_apprenant)
+    response = client.patch(reverse("profil-update"), {"ecole": "Lycée de Biyem-Assi"}, format="json")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["ecole"] == "Lycée de Biyem-Assi"
+
+
+@pytest.mark.django_db
+def test_ecole_ignoree_pour_un_enseignant(user_enseignant):
+    client = APIClient()
+    client.force_authenticate(user=user_enseignant)
+    client.patch(reverse("profil-update"), {"ecole": "Lycée"}, format="json")
+
+    user_enseignant.profile.refresh_from_db()
+    assert user_enseignant.profile.ecole == ""

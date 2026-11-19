@@ -45,6 +45,10 @@ class Profile(models.Model):
         related_name="profils",
     )
     ville = models.CharField(max_length=100, blank=True, null=True, help_text="Ville de résidence")
+    # Apprenants seulement (affiché et modifiable uniquement pour eux).
+    ecole = models.CharField(
+        max_length=150, blank=True, default="", help_text="École de l'apprenant"
+    )
 
     is_active = models.BooleanField(default=False)
 

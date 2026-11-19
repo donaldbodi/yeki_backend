@@ -97,6 +97,9 @@ class ProfilUpdateView(APIView):
         for field in ["date_naissance", "bio", "sub_cursus", "filiere", "licence"]:
             if field in data:
                 setattr(profile, field, data[field])
+        # École : champ réservé aux apprenants.
+        if "ecole" in data and profile.user_type == "apprenant":
+            profile.ecole = (data["ecole"] or "").strip()[:150]
 
         # Avatar (fichier image)
         if "avatar" in request.FILES:

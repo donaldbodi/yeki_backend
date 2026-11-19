@@ -296,6 +296,7 @@ class ProfilDetailSerializer(serializers.ModelSerializer):
             "date_naissance",
             "bio",
             "ville",
+            "ecole",
             "cursus",
             "sub_cursus",
             "niveau",
