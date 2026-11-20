@@ -1,6 +1,6 @@
 
 from apps.core.models import ParametreSysteme
-from apps.formation.models import Lecon, Cours, ProgressionLecon
+from apps.formation.models import Lecon, Cours, Niveau, ProgressionLecon
 
 # Valeur par défaut si `ParametreSysteme` ne contient pas encore la clé —
 # mêmes 3 niveaux que l'ancien `choices=` figé sur `Departement.
@@ -32,18 +32,34 @@ def codes_niveaux_formation_disponibles():
     return [n["code"] for n in niveaux_formation_disponibles()]
 
 
+def _trier_niveaux(noms):
+    """Ordre de la table Niveau (6ème → Master 2) ; les autres à la fin, alphabétiques."""
+    ordre = dict(Niveau.objects.values_list("nom", "ordre"))
+    return sorted(set(noms), key=lambda n: (ordre.get(n, 10_000), n.lower()))
+
+
 def niveaux_distincts(departement_id=None):
     """
-    Liste triée des valeurs de niveau distinctes utilisées par au moins un
-    cours — globale, ou filtrée sur un département si `departement_id` est
-    fourni. Source commune à `ListeNiveauxView` (global) et
-    `DepartementNiveauxAPIView` (par département), qui dupliquaient
-    auparavant la même requête (P5.4).
+    Niveaux distincts utilisés par au moins un cours — globaux, ou d'un
+    département si `departement_id` est fourni (niveaux accessibles d'un
+    département, choix du niveau à l'inscription), dans l'ordre de la table
+    Niveau. Source commune à `DepartementNiveauxAPIView` (P5.4).
     """
     qs = Cours.objects.all()
     if departement_id is not None:
         qs = qs.filter(departement_id=departement_id)
-    return sorted(qs.values_list("niveau", flat=True).distinct())
+    return _trier_niveaux(n for n in qs.values_list("niveau", flat=True).distinct() if n)
+
+
+def niveaux_reference():
+    """
+    Liste de référence des niveaux (table Niveau, actifs), complétée des
+    niveaux d'anciens cours qui n'y figurent pas — pour ne jamais faire
+    disparaître un niveau déjà utilisé des filtres et formulaires.
+    """
+    actifs = list(Niveau.objects.filter(actif=True).values_list("nom", flat=True))
+    anciens = Cours.objects.exclude(niveau__in=actifs).values_list("niveau", flat=True).distinct()
+    return _trier_niveaux([*actifs, *(n for n in anciens if n)])
 
 
 def _progression_cours(user, cours_qs):
@@ -113,6 +129,8 @@ def _serialise_departement_detail(dept, prog_map=None, include_cours=False, user
         "image_url": image_url,
         "couleur": dept.couleur,
         "prix": dept.prix,
+        "prix_mensuel": dept.prix_mensuel,
+        "prix_annuel": dept.prix_annuel,
         "prix_presentiel": dept.prix_presentiel,  # ✅ Ajout
         "type": dept.type_departement,
         "parcours_id": dept.parcours_id,

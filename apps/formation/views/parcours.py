@@ -431,6 +431,8 @@ class ApprenantConcoursFormationsView(PaginatedListMixin, APIView):
             "image_url": image_url,
             "couleur": dept.couleur or "#135F74",
             "prix": dept.prix,
+            "prix_mensuel": dept.prix_mensuel,
+            "prix_annuel": dept.prix_annuel,
             "prix_presentiel": dept.prix_presentiel,
             "type": dept.type_departement,
             "statut": statut,

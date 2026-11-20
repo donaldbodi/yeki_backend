@@ -635,6 +635,8 @@ class EnseignantCadreDepartementDetailView(APIView):
                 "parcours": departement.parcours.nom if departement.parcours else "",
                 "couleur": departement.couleur,
                 "prix": departement.prix,
+                "prix_mensuel": departement.prix_mensuel,
+                "prix_annuel": departement.prix_annuel,
                 "type_departement": departement.type_departement,
                 "cours": cours_data,
                 "nb_cours": cours_qs.count(),

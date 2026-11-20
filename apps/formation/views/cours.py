@@ -43,15 +43,21 @@ from apps.formation.serializers import (
     LeconUpdateSerializer,
     LeconSerializer,
 )
-from apps.formation.services import _progression_cours, niveaux_distincts, niveaux_formation_disponibles
+from apps.formation.services import (
+    _progression_cours,
+    niveaux_distincts,
+    niveaux_formation_disponibles,
+    niveaux_reference,
+)
 
 
 @extend_schema_view(
     get=extend_schema(
-        summary="Lister les niveaux scolaires existants",
+        summary="Lister les niveaux scolaires (table Niveau)",
         description=(
-            "Retourne la liste triée des valeurs de niveau (ex : '6e', 'Tle C') "
-            "déjà utilisées par au moins un cours en base, sans doublon. "
+            "Retourne les niveaux du Cameroun de la table Niveau (6ème → Master 2, "
+            "francophone et anglophone, général et technique), dans l'ordre, "
+            "complétés des niveaux d'anciens cours absents de la table. "
             "Réponse : liste JSON de chaînes de caractères."
         ),
         tags=["formation"],
@@ -62,13 +68,13 @@ from apps.formation.services import _progression_cours, niveaux_distincts, nivea
 class ListeNiveauxView(APIView):
     """
     GET /api/niveaux/
-    Retourne la liste des niveaux uniques déjà enregistrés en base.
+    Liste de référence des niveaux (table Niveau), pour le niveau d'un cours.
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(niveaux_distincts())
+        return Response(niveaux_reference())
 
 
 @extend_schema_view(

@@ -7,6 +7,36 @@ from apps.accounts.models import Profile
 from apps.formation.cycles import PLACEMENT_SUITE, PLACEMENTS as PLACEMENTS_CYCLES
 
 
+class Niveau(models.Model):
+    """
+    Niveaux scolaires et universitaires du Cameroun, de la 6ème au Master 2
+    (sections francophone et anglophone, enseignement général et technique).
+    Table de référence : liste du niveau d'un cours (formulaire de création)
+    et, filtrée sur les cours d'un département, de ses niveaux accessibles.
+    Pré-remplie par la migration 0007 ; modifiable dans l'administration.
+    """
+
+    SECTIONS = [
+        ("francophone_general", "Francophone — enseignement général"),
+        ("francophone_technique", "Francophone — enseignement technique"),
+        ("anglophone_general", "Anglophone — general education"),
+        ("anglophone_technique", "Anglophone — technical education"),
+        ("superieur", "Enseignement supérieur"),
+    ]
+
+    nom = models.CharField(max_length=60, unique=True)
+    section = models.CharField(max_length=30, choices=SECTIONS)
+    ordre = models.PositiveSmallIntegerField(help_text="Position dans les listes (croissant)")
+    actif = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "yeki_niveau"
+        ordering = ["ordre", "nom"]
+
+    def __str__(self):
+        return self.nom
+
+
 # --- NIVEAU 1 ---
 
 
